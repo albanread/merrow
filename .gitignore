@@ -1,0 +1,12 @@
+.zig-cache/
+zig-out/
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+/tmp/
+/main
+test-diagrams/*.png
+test-diagrams/*.svg

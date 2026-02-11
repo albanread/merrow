@@ -1,0 +1,37 @@
+stateDiagram-v2
+    [*] --> Idle
+
+    Idle : Waiting for input
+    Idle --> Processing : Submit request
+
+    state Processing {
+        [*] --> Validating
+        Validating --> Parsing : Input valid
+        Validating --> [*] : Input invalid
+        Parsing --> Executing
+        Executing --> [*]
+    }
+
+    Processing --> Success : Completed
+    Processing --> Error : Failed
+
+    state Error {
+        [*] --> Analyzing
+        Analyzing --> Retryable : Can retry
+        Analyzing --> Fatal : Cannot recover
+        Retryable --> [*]
+        Fatal --> [*]
+    }
+
+    Error --> Idle : Retry
+    Error --> [*] : Abort
+
+    Success --> Idle : Reset
+    Success --> [*] : Done
+
+    Success : Operation completed
+    Error : Something went wrong
+
+    note right of Idle : System waits here\nuntil user acts
+    note left of Processing : All validation and\nexecution happens here
+    note right of Error : Errors are classified\nas retryable or fatal

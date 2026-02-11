@@ -1,0 +1,69 @@
+erDiagram
+    CUSTOMER {
+        int id PK
+        string first_name
+        string last_name
+        string email
+        date created_at
+    }
+    ORDER {
+        int id PK
+        int customer_id FK
+        date order_date
+        string status
+        float total_amount
+    }
+    LINE-ITEM {
+        int id PK
+        int order_id FK
+        int product_id FK
+        int quantity
+        float unit_price
+    }
+    PRODUCT {
+        int id PK
+        string name
+        string description
+        float price
+        int category_id FK
+    }
+    CATEGORY {
+        int id PK
+        string name
+        string slug
+    }
+    ADDRESS {
+        int id PK
+        int customer_id FK
+        string street
+        string city
+        string state
+        string zip_code
+        string country
+    }
+    PAYMENT {
+        int id PK
+        int order_id FK
+        string method
+        float amount
+        date paid_at
+        string transaction_id
+    }
+    REVIEW {
+        int id PK
+        int product_id FK
+        int customer_id FK
+        int rating
+        string comment
+        date reviewed_at
+    }
+
+    CUSTOMER ||--o{ ORDER : places
+    CUSTOMER ||--o{ ADDRESS : "has"
+    CUSTOMER ||--o{ REVIEW : writes
+    ORDER ||--|{ LINE-ITEM : contains
+    ORDER ||--o| PAYMENT : "paid via"
+    PRODUCT ||--o{ LINE-ITEM : "appears in"
+    PRODUCT ||--o{ REVIEW : "reviewed in"
+    CATEGORY ||--o{ PRODUCT : categorizes
+    CATEGORY ||--o| CATEGORY : "parent of"

@@ -1,0 +1,41 @@
+gantt
+    title Product Launch Roadmap Q1 2024
+    dateFormat YYYY-MM-DD
+    excludes weekends
+
+    section Planning
+    Market research           : done, plan1, 2024-01-08, 2024-01-12
+    Define requirements       : done, plan2, 2024-01-08, 2024-01-15
+    Technical feasibility     : done, plan3, 2024-01-15, 3d
+    Planning complete         : milestone, done, m1, 2024-01-18, 0d
+
+    section Design
+    UI wireframes             : done, des1, 2024-01-18, 5d
+    Architecture design       : done, des2, 2024-01-18, 2024-01-26
+    API specification         : active, des3, 2024-01-22, 5d
+    Design review             : milestone, active, m2, 2024-01-29, 0d
+
+    section Backend Development
+    Database schema           : crit, active, be1, 2024-01-29, 4d
+    Auth service              : crit, be2, 2024-02-02, 5d
+    Core API endpoints        : crit, be3, 2024-02-05, 10d
+    Payment integration       : be4, 2024-02-12, 7d
+    Backend feature freeze    : milestone, crit, m3, 2024-02-19, 0d
+
+    section Frontend Development
+    Component library         : fe1, 2024-01-29, 8d
+    Dashboard views           : fe2, 2024-02-08, 7d
+    User settings pages       : fe3, 2024-02-08, 5d
+    Checkout flow             : fe4, 2024-02-15, 6d
+
+    section Testing & QA
+    Unit test coverage        : qa1, 2024-02-19, 5d
+    Integration testing       : crit, qa2, 2024-02-22, 5d
+    Performance testing       : qa3, 2024-02-26, 3d
+    UAT sign-off              : milestone, crit, m4, 2024-03-01, 0d
+
+    section Deployment
+    Staging deployment        : dep1, 2024-03-01, 2d
+    Production deployment     : crit, dep2, 2024-03-04, 1d
+    Post-launch monitoring    : dep3, 2024-03-05, 5d
+    Launch complete           : milestone, crit, m5, 2024-03-08, 0d

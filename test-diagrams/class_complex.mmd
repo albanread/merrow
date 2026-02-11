@@ -1,0 +1,58 @@
+classDiagram
+    class Vehicle {
+        <<abstract>>
+        +String make
+        +String model
+        +int year
+        -double price
+        +start()
+        +stop()
+        +accelerate(int speed)*
+    }
+    class Car {
+        +int numDoors
+        +String fuelType
+        +openTrunk()
+        +drive()
+    }
+    class Truck {
+        +double payloadCapacity
+        +bool hasTowHitch
+        +loadCargo(double weight)
+        +tow(Vehicle v)
+    }
+    class Electric {
+        <<interface>>
+        +charge()
+        +getBatteryLevel() int
+    }
+    class Engine {
+        -int horsepower
+        -String type
+        +start()
+        +getSpecs() String
+    }
+    class Wheel {
+        -int diameter
+        -String brand
+        +rotate()
+    }
+    class Fleet {
+        -String companyName
+        +addVehicle(Vehicle v)
+        +removeVehicle(int id)
+        +getCount() int
+    }
+    class Driver {
+        +String name
+        +String license
+        +drive(Vehicle v)
+    }
+    Vehicle <|-- Car
+    Vehicle <|-- Truck
+    Car ..|> Electric : implements
+    Vehicle *-- Engine : has
+    Vehicle "1" o-- "4" Wheel : has
+    Fleet "1" --> "*" Vehicle : manages
+    Driver "1" --> "0..*" Vehicle : drives
+    Driver ..> Fleet : works for

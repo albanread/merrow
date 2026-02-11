@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : Start
+    Processing --> Done : Complete
+    Processing --> Error : Fail
+    Error --> Idle : Reset
+    Done --> [*]
+
+    Idle : Waiting for input
+    Processing : Working on task
+    Done : Task finished
+    Error : Something went wrong
