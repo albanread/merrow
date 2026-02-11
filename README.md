@@ -107,6 +107,16 @@ test-diagrams/            # Sample .mmd files and rendered outputs
 fonts/                    # TrueType fonts for rasterisation
 ```
 
+## Acknowledgements
+
+Merrow is a Zig port inspired by [**Selkie**](https://github.com/btucker/selkie), a fast, native Mermaid diagram renderer written in Rust. Selkie's architecture, layout engine, and rendering approach served as the primary reference for this project. Huge thanks to the Selkie team for their excellent work.
+
+Both projects stand on the shoulders of these foundational efforts:
+
+- **[Mermaid](https://github.com/mermaid-js/mermaid)** — The original JavaScript diagramming library that defines the syntax and rendering we aim to match
+- **[Dagre](https://github.com/dagrejs/dagre)** — Graph layout algorithms that inspire our layout engine
+- **[ELK](https://github.com/kieler/elkjs)** — Eclipse Layout Kernel, providing additional layout strategies
+
 ## License
 
 MIT
