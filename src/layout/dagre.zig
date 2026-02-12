@@ -658,6 +658,8 @@ fn routeInterContainerEdges(
 ) !void {
     // Margin around obstacle boxes for routed paths.
     const margin: f64 = 15.0;
+    // Spacing between parallel routed edges on the same bypass side.
+    const lane_spacing: f64 = 12.0;
 
     // Collect ALL container (subgraph) rectangles from the graph.
     var all_rects = std.ArrayListUnmanaged(ObstacleRect){};
@@ -679,6 +681,12 @@ fn routeInterContainerEdges(
         });
     }
 
+    // Track how many edges have been routed to each side so we can
+    // spread parallel routes apart.  We use simple counters for
+    // right-side and left-side bypasses.
+    var right_lane: usize = 0;
+    var left_lane: usize = 0;
+
     for (inter_edges_list) |ie| {
         const ed_ptr = graph.getEdgePtr(ie.src_node, ie.tgt_node, ie.edge_name) orelse continue;
 
@@ -687,23 +695,15 @@ fn routeInterContainerEdges(
 
         ed_ptr.points.clearRetainingCapacity();
 
-        // Determine which containers OWN source and target (by ancestry).
-        // These are not obstacles — the edge is allowed to pass through
-        // the containers that actually contain its endpoints.
-
         // Collect obstacle rectangles: containers that do NOT own either
-        // endpoint.  A container "owns" a node if the node is a descendant
-        // of that container.
+        // endpoint.
         var obstacles = std.ArrayListUnmanaged(ObstacleRect){};
         defer obstacles.deinit(allocator);
 
         for (all_rects.items) |r| {
-            // Skip if this container is an ancestor of src or tgt.
             if (isAncestor(graph, r.id, ie.src_node) or
                 isAncestor(graph, r.id, ie.tgt_node))
                 continue;
-            // Also skip if this container is a descendant of src/tgt's container
-            // (nested children of an endpoint's container are not blocking).
             if (ie.src_container) |sc| {
                 if (std.mem.eql(u8, r.id, sc) or isAncestor(graph, sc, r.id))
                     continue;
@@ -733,17 +733,14 @@ fn routeInterContainerEdges(
         }
 
         if (blocking.items.len == 0) {
-            // Straight line is clear.
             try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
             try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
             continue;
         }
 
-        // Route around blocking obstacles.
-        // Strategy: compute waypoints that go around each blocking obstacle.
-        // For simplicity and visual clarity, route around the combined
-        // bounding box of all blocking obstacles, choosing the shorter side.
-        try routeAroundObstacles(
+        // Route around blocking obstacles, passing lane counters for
+        // parallel edge spreading.
+        const chosen_side = try routeAroundObstacles(
             allocator,
             graph,
             ed_ptr,
@@ -754,7 +751,17 @@ fn routeInterContainerEdges(
             blocking.items,
             obstacles.items,
             margin,
+            right_lane,
+            left_lane,
+            lane_spacing,
         );
+
+        // Increment the appropriate lane counter.
+        switch (chosen_side) {
+            .right => right_lane += 1,
+            .left => left_lane += 1,
+            .fallback => {},
+        }
     }
 }
 
@@ -837,6 +844,9 @@ fn lineIntersectsRect(
     return false;
 }
 
+/// Which bypass side was chosen for a routed edge.
+const BypassSide = enum { right, left, fallback };
+
 /// Route an edge around one or more blocking obstacles.
 ///
 /// Uses a **4-point** route: src → corner_near → corner_far → tgt.
@@ -848,9 +858,11 @@ fn lineIntersectsRect(
 ///
 /// The bypass x (or y) is offset from the obstacle edge by enough margin
 /// to account for the Catmull-Rom spline's inward sag (~12% of the
-/// segment length).
+/// segment length).  An additional per-lane offset spreads parallel
+/// routed edges apart so they don't overlap.
 ///
 /// We try both sides and pick the shorter clear route.
+/// Returns which side was chosen so the caller can increment lane counts.
 fn routeAroundObstacles(
     allocator: std.mem.Allocator,
     graph: *Graph,
@@ -862,7 +874,10 @@ fn routeAroundObstacles(
     blockers: []const ObstacleRect,
     all_obstacles: []const ObstacleRect,
     margin: f64,
-) !void {
+    right_lane: usize,
+    left_lane: usize,
+    lane_spacing: f64,
+) !BypassSide {
     _ = allocator;
     _ = all_obstacles;
 
@@ -924,7 +939,7 @@ fn routeAroundObstacles(
 
         // RIGHT bypass
         {
-            const bx = bb_right + offset;
+            const bx = bb_right + offset + @as(f64, @floatFromInt(right_lane)) * lane_spacing;
             const pts = [4]Point{
                 .{ .x = sx, .y = sy },
                 .{ .x = bx, .y = y_near },
@@ -940,7 +955,7 @@ fn routeAroundObstacles(
 
         // LEFT bypass
         {
-            const bx = bb_left - offset;
+            const bx = bb_left - offset - @as(f64, @floatFromInt(left_lane)) * lane_spacing;
             const pts = [4]Point{
                 .{ .x = sx, .y = sy },
                 .{ .x = bx, .y = y_near },
@@ -966,7 +981,7 @@ fn routeAroundObstacles(
 
         // TOP bypass
         {
-            const by = bb_top - offset;
+            const by = bb_top - offset - @as(f64, @floatFromInt(right_lane)) * lane_spacing;
             const pts = [4]Point{
                 .{ .x = sx, .y = sy },
                 .{ .x = x_near, .y = by },
@@ -982,7 +997,7 @@ fn routeAroundObstacles(
 
         // BOTTOM bypass
         {
-            const by = bb_bottom + offset;
+            const by = bb_bottom + offset + @as(f64, @floatFromInt(left_lane)) * lane_spacing;
             const pts = [4]Point{
                 .{ .x = sx, .y = sy },
                 .{ .x = x_near, .y = by },
@@ -1035,7 +1050,7 @@ fn routeAroundObstacles(
             try ed_ptr.points.append(graph.allocator, .{ .x = tx, .y = mid_y });
         }
         try ed_ptr.points.append(graph.allocator, .{ .x = tx, .y = ty });
-        return;
+        return .fallback;
     }
 
     const best = candidates[best_idx];
@@ -1043,6 +1058,11 @@ fn routeAroundObstacles(
     for (best.points[0..4]) |pt| {
         try ed_ptr.points.append(graph.allocator, pt);
     }
+
+    // Return which side was chosen.
+    // For vertical edges: idx 0 = right, idx 1 = left.
+    // For horizontal edges: idx 0 = top (uses right_lane), idx 1 = bottom (uses left_lane).
+    return if (best_idx == 0) .right else .left;
 }
 
 /// Compute the total Euclidean length of a polyline.
