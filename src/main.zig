@@ -165,38 +165,50 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        std.debug.print("Usage: {s} <input.mmd> [output.png|output.svg] [--svg]\n", .{args[0]});
-        std.debug.print("\nRenders a Mermaid diagram to a PNG or SVG image.\n", .{});
-        std.debug.print("Supports: flowchart/graph, sequenceDiagram, pie, classDiagram, stateDiagram, journey, erDiagram, gantt\n\n", .{});
-        std.debug.print("Output format is auto-detected from the file extension.\n", .{});
-        std.debug.print("Use --svg to force SVG output when no extension is given.\n\n", .{});
-        std.debug.print("Examples:\n", .{});
-        std.debug.print("  {s} diagram.mmd diagram.png    (PNG output)\n", .{args[0]});
-        std.debug.print("  {s} diagram.mmd diagram.svg    (SVG output)\n", .{args[0]});
-        std.debug.print("  {s} diagram.mmd --svg          (SVG output to diagram.svg)\n", .{args[0]});
-        std.debug.print("  {s} diagram.mmd                (PNG output to diagram.png)\n", .{args[0]});
+        printUsage(args[0]);
         return error.InvalidArguments;
     }
 
-    const input_file = args[1];
-
-    // Check for --svg flag anywhere in args
+    // ---------------------------------------------------------------
+    // Scan all arguments for flags and positionals
+    // ---------------------------------------------------------------
+    var bulk_mode = false;
     var force_svg = false;
+    var positional_buf: [8][]const u8 = undefined;
+    var positional_count: usize = 0;
+
     for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "--svg")) {
+        if (std.mem.eql(u8, arg, "--bulk")) {
+            bulk_mode = true;
+        } else if (std.mem.eql(u8, arg, "--svg")) {
             force_svg = true;
+        } else if (!std.mem.startsWith(u8, arg, "--")) {
+            if (positional_count < positional_buf.len) {
+                positional_buf[positional_count] = arg;
+                positional_count += 1;
+            }
         }
     }
 
-    // Find the output file argument (first arg after input that isn't a flag)
+    // ---------------------------------------------------------------
+    // Check for --bulk mode (position-independent)
+    // ---------------------------------------------------------------
+    if (bulk_mode) {
+        try runBulk(allocator, args);
+        return;
+    }
+
+    if (positional_count == 0) {
+        printUsage(args[0]);
+        return error.InvalidArguments;
+    }
+
+    const input_file = positional_buf[0];
+
+    // Find the output file argument (second positional, if any)
     var explicit_output: ?[]const u8 = null;
-    if (args.len >= 3) {
-        for (args[2..]) |arg| {
-            if (!std.mem.startsWith(u8, arg, "--")) {
-                explicit_output = arg;
-                break;
-            }
-        }
+    if (positional_count >= 2) {
+        explicit_output = positional_buf[1];
     }
 
     const output_file = if (explicit_output) |out| out else blk: {
@@ -469,6 +481,527 @@ pub fn main() !void {
     }
 
     std.debug.print("\nOpen '{s}' to view your diagram!\n", .{output_file});
+}
+
+// ===================================================================
+// Usage / help
+// ===================================================================
+
+fn printUsage(prog: []const u8) void {
+    std.debug.print("Usage:\n", .{});
+    std.debug.print("  {s} <input.mmd> [output.png|output.svg] [--svg]\n", .{prog});
+    std.debug.print("  {s} --bulk <infolder> <outfolder> [--force] [--svg]\n\n", .{prog});
+    std.debug.print("Renders Mermaid diagrams to PNG or SVG images.\n", .{});
+    std.debug.print("Supports: flowchart/graph, sequenceDiagram, pie, classDiagram,\n", .{});
+    std.debug.print("          stateDiagram, journey, erDiagram, gantt\n\n", .{});
+    std.debug.print("Single file mode:\n", .{});
+    std.debug.print("  Output format is auto-detected from the file extension.\n", .{});
+    std.debug.print("  Use --svg to force SVG output when no extension is given.\n\n", .{});
+    std.debug.print("  Examples:\n", .{});
+    std.debug.print("    {s} diagram.mmd diagram.png    (PNG output)\n", .{prog});
+    std.debug.print("    {s} diagram.mmd diagram.svg    (SVG output)\n", .{prog});
+    std.debug.print("    {s} diagram.mmd --svg          (SVG to diagram.svg)\n", .{prog});
+    std.debug.print("    {s} diagram.mmd                (PNG to diagram.png)\n\n", .{prog});
+    std.debug.print("Bulk mode:\n", .{});
+    std.debug.print("  Renders all .mmd files in <infolder> to <outfolder>.\n", .{});
+    std.debug.print("  --force   Re-render all files regardless of timestamps.\n", .{});
+    std.debug.print("  (default) Only render when .mmd is newer than existing output.\n", .{});
+    std.debug.print("  --svg     Output SVG instead of PNG.\n\n", .{});
+    std.debug.print("  Examples:\n", .{});
+    std.debug.print("    {s} --bulk docs/diagrams out/images\n", .{prog});
+    std.debug.print("    {s} --bulk docs/diagrams out/images --force\n", .{prog});
+    std.debug.print("    {s} --bulk src out --svg --force\n", .{prog});
+}
+
+// ===================================================================
+// Bulk workflow mode
+// ===================================================================
+
+/// Run bulk rendering: scan infolder for .mmd files, render each to
+/// outfolder as PNG or SVG.  With --force, re-render everything;
+/// otherwise only render when the .mmd is newer than the output
+/// (or the output doesn't exist).
+fn runBulk(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    // ---- Parse bulk arguments ----
+    // Expected: --bulk <infolder> <outfolder> [--force] [--svg]
+    var infolder: ?[]const u8 = null;
+    var outfolder: ?[]const u8 = null;
+    var force = false;
+    var svg_output = false;
+
+    // Skip args[0] (program name); --bulk may appear anywhere
+    var positional_count: usize = 0;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--bulk")) {
+            continue;
+        } else if (std.mem.eql(u8, arg, "--force")) {
+            force = true;
+        } else if (std.mem.eql(u8, arg, "--svg")) {
+            svg_output = true;
+        } else if (!std.mem.startsWith(u8, arg, "--")) {
+            if (positional_count == 0) {
+                infolder = arg;
+            } else if (positional_count == 1) {
+                outfolder = arg;
+            }
+            positional_count += 1;
+        }
+    }
+
+    const in_path = infolder orelse {
+        std.debug.print("Error: --bulk requires <infolder> <outfolder>\n\n", .{});
+        printUsage(args[0]);
+        return error.InvalidArguments;
+    };
+    const out_path = outfolder orelse {
+        std.debug.print("Error: --bulk requires <infolder> <outfolder>\n\n", .{});
+        printUsage(args[0]);
+        return error.InvalidArguments;
+    };
+
+    const out_ext: []const u8 = if (svg_output) ".svg" else ".png";
+    const format_name: []const u8 = if (svg_output) "SVG" else "PNG";
+    const mode_name: []const u8 = if (force) "force" else "update";
+
+    // ---- Print header ----
+    std.debug.print("\n=== Merrow Bulk Render ===\n\n", .{});
+    std.debug.print("  Input folder:  {s}\n", .{in_path});
+    std.debug.print("  Output folder: {s}\n", .{out_path});
+    std.debug.print("  Format:        {s}\n", .{format_name});
+    std.debug.print("  Mode:          {s}\n\n", .{mode_name});
+
+    // ---- Start overall timer ----
+    var overall_timer = try std.time.Timer.start();
+
+    // ---- Ensure output directory exists ----
+    std.fs.cwd().makePath(out_path) catch |err| {
+        std.debug.print("Error: cannot create output folder '{s}': {}\n", .{ out_path, err });
+        return err;
+    };
+
+    // ---- Load font once for all renders ----
+    var font_data: ?[]u8 = null;
+    var exe_font_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_dir = std.fs.selfExeDirPath(&exe_font_buf) catch null;
+    if (exe_dir) |dir| {
+        const suffixes = [_][]const u8{ "/fonts/Lato-Regular.ttf", "/../fonts/Lato-Regular.ttf", "/../../fonts/Lato-Regular.ttf" };
+        for (suffixes) |suffix| {
+            if (dir.len + suffix.len < exe_font_buf.len) {
+                @memcpy(exe_font_buf[dir.len .. dir.len + suffix.len], suffix);
+                font_data = std.fs.cwd().readFileAlloc(allocator, exe_font_buf[0 .. dir.len + suffix.len], 1024 * 1024) catch continue;
+                break;
+            }
+        }
+    }
+    if (font_data == null) {
+        const paths = [_][]const u8{ "fonts/Lato-Regular.ttf", "../fonts/Lato-Regular.ttf", "../../fonts/Lato-Regular.ttf" };
+        for (paths) |p| {
+            font_data = std.fs.cwd().readFileAlloc(allocator, p, 1024 * 1024) catch continue;
+            break;
+        }
+    }
+    defer if (font_data) |d| allocator.free(d);
+
+    // ---- Scan input folder for .mmd files ----
+    var dir = std.fs.cwd().openDir(in_path, .{ .iterate = true }) catch |err| {
+        std.debug.print("Error: cannot open input folder '{s}': {}\n", .{ in_path, err });
+        return err;
+    };
+    defer dir.close();
+
+    // Collect .mmd filenames (sorted for deterministic output)
+    var mmd_files = std.ArrayList([]const u8){};
+    defer {
+        for (mmd_files.items) |name| allocator.free(name);
+        mmd_files.deinit(allocator);
+    }
+
+    var dir_iter = dir.iterate();
+    while (try dir_iter.next()) |entry| {
+        if (entry.kind != .file) continue;
+        const ext = std.fs.path.extension(entry.name);
+        if (!std.ascii.eqlIgnoreCase(ext, ".mmd")) continue;
+        const owned_name = try allocator.dupe(u8, entry.name);
+        try mmd_files.append(allocator, owned_name);
+    }
+
+    // Sort alphabetically for deterministic order
+    std.mem.sort([]const u8, mmd_files.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+
+    if (mmd_files.items.len == 0) {
+        std.debug.print("  No .mmd files found in '{s}'.\n\n", .{in_path});
+        return;
+    }
+
+    std.debug.print("  Found {d} .mmd file(s)\n\n", .{mmd_files.items.len});
+
+    // ---- Process each file ----
+    var rendered_count: usize = 0;
+    var skipped_count: usize = 0;
+    var error_count: usize = 0;
+    var total_render_ns: u64 = 0;
+
+    for (mmd_files.items) |mmd_name| {
+        // Build input and output paths
+        const input_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ in_path, mmd_name });
+        defer allocator.free(input_path);
+
+        // Replace .mmd extension with output extension
+        const dot_idx = std.mem.lastIndexOf(u8, mmd_name, ".") orelse mmd_name.len;
+        const stem = mmd_name[0..dot_idx];
+        const output_name = try std.fmt.allocPrint(allocator, "{s}{s}", .{ stem, out_ext });
+        defer allocator.free(output_name);
+        const output_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_path, output_name });
+        defer allocator.free(output_path);
+
+        // ---- Timestamp check (unless --force) ----
+        if (!force) {
+            const should_skip = blk: {
+                // Get mtime of the .mmd source
+                const in_stat = std.fs.cwd().statFile(input_path) catch break :blk false;
+                // Get mtime of the output file
+                const out_stat = std.fs.cwd().statFile(output_path) catch break :blk false;
+                // Skip if output is newer than or equal to source
+                break :blk out_stat.mtime >= in_stat.mtime;
+            };
+
+            if (should_skip) {
+                skipped_count += 1;
+                std.debug.print("  skip  {s}  (up to date)\n", .{mmd_name});
+                continue;
+            }
+        }
+
+        // ---- Read source ----
+        const source = std.fs.cwd().readFileAlloc(allocator, input_path, 10 * 1024 * 1024) catch |err| {
+            error_count += 1;
+            std.debug.print("  ERROR {s}  read failed: {}\n", .{ mmd_name, err });
+            continue;
+        };
+        defer allocator.free(source);
+
+        // ---- Render ----
+        var file_timer = try std.time.Timer.start();
+
+        renderSourceToFile(allocator, source, output_path, svg_output, font_data) catch |err| {
+            error_count += 1;
+            std.debug.print("  ERROR {s}  render failed: {}\n", .{ mmd_name, err });
+            continue;
+        };
+
+        const file_ns = file_timer.read();
+        total_render_ns += file_ns;
+        rendered_count += 1;
+        const file_ms = @as(f64, @floatFromInt(file_ns)) / 1_000_000.0;
+        std.debug.print("  ok    {s} -> {s}  ({d:.0}ms)\n", .{ mmd_name, output_name, file_ms });
+    }
+
+    // ---- Summary ----
+    const overall_ns = overall_timer.read();
+    const overall_ms = @as(f64, @floatFromInt(overall_ns)) / 1_000_000.0;
+    const render_ms = @as(f64, @floatFromInt(total_render_ns)) / 1_000_000.0;
+
+    std.debug.print("\n--- Summary ---\n", .{});
+    std.debug.print("  Rendered: {d} file(s)\n", .{rendered_count});
+    if (skipped_count > 0) {
+        std.debug.print("  Skipped:  {d} file(s)  (up to date)\n", .{skipped_count});
+    }
+    if (error_count > 0) {
+        std.debug.print("  Errors:   {d} file(s)\n", .{error_count});
+    }
+    std.debug.print("  Render time:  {d:.0}ms\n", .{render_ms});
+    std.debug.print("  Total time:   {d:.0}ms\n\n", .{overall_ms});
+}
+
+// ===================================================================
+// Quiet single-source rendering (used by bulk mode)
+// ===================================================================
+
+/// Render a source buffer to an output file without printing verbose
+/// progress messages.  Detects the diagram type, parses, lays out,
+/// and renders.  `maybe_font_data` is optional pre-loaded font data
+/// that avoids re-reading the font file from disk for each render.
+fn renderSourceToFile(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    // ---- Detect diagram type and delegate ----
+    if (detectSequenceDiagram(source)) {
+        return renderSequenceDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (PieParser.isPieDiagram(source)) {
+        return renderPieDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (ClassParser.isClassDiagram(source)) {
+        return renderClassDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (StateParser.isStateDiagram(source)) {
+        return renderStateDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (JourneyParser.isJourneyDiagram(source)) {
+        return renderJourneyDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (ErParser.isErDiagram(source)) {
+        return renderErDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+    if (GanttParser.isGanttDiagram(source)) {
+        return renderGanttDiagramQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+    }
+
+    // Default: flowchart/graph
+    return renderFlowchartQuiet(allocator, source, output_file, is_svg_output, maybe_font_data);
+}
+
+/// Initialise a Font from pre-loaded data or by searching standard paths.
+/// Returns null if no font could be loaded.
+fn initFont(allocator: std.mem.Allocator, maybe_font_data: ?[]const u8) ?Font {
+    if (maybe_font_data) |data| {
+        return Font.initFromMemory(allocator, data) catch null;
+    }
+    return null;
+}
+
+// ---- Quiet renderers for each diagram type ----
+
+fn renderFlowchartQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var parser = try Parser.init(allocator, source);
+    defer parser.deinit();
+    var graph = try parser.parse();
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+    defer if (maybe_font) |*f| f.deinit();
+
+    // Size nodes
+    const node_ids = try graph.allNodes(allocator);
+    defer {
+        for (node_ids) |id| allocator.free(id);
+        allocator.free(node_ids);
+    }
+    for (node_ids) |id| {
+        if (graph.getNodePtr(id)) |node| {
+            if (node.width > 0) continue;
+            if (node.is_subgraph) continue;
+            const display_text = node.label orelse id;
+            const size = if (maybe_font) |*font|
+                measureNodeSize(font, display_text, node.shape)
+            else
+                estimateNodeSize(display_text, node.shape);
+            node.width = size.w;
+            node.height = size.h;
+        }
+    }
+
+    // Layout
+    const graph_label = graph.getGraphLabel();
+    const rankdir: dagre.RankDir = blk: {
+        if (std.mem.eql(u8, graph_label.rankdir, "LR")) break :blk .LR;
+        if (std.mem.eql(u8, graph_label.rankdir, "RL")) break :blk .RL;
+        if (std.mem.eql(u8, graph_label.rankdir, "BT")) break :blk .BT;
+        break :blk .TB;
+    };
+    const config = dagre.DagreConfig{
+        .rankdir = rankdir,
+        .ranker = .network_simplex,
+        .nodesep = 50,
+        .ranksep = 50,
+    };
+    try dagre.layout(allocator, &graph, config);
+
+    // Render
+    const render_config = RenderConfig{
+        .padding = 40.0,
+        .scale_factor = 2.0,
+        .node_fill_color = .{ 240, 240, 250, 255 },
+        .node_stroke_color = .{ 100, 100, 150, 255 },
+        .node_stroke_width = 2,
+        .edge_color = .{ 80, 80, 80, 255 },
+        .edge_width = 2,
+        .text_color = .{ 40, 40, 40, 255 },
+        .text_size = font_size,
+    };
+
+    if (is_svg_output) {
+        if (maybe_font) |*font| {
+            try renderGraphToSVGWithFont(allocator, &graph, output_file, render_config, font);
+        } else {
+            try renderGraphToSVG(allocator, &graph, output_file, render_config);
+        }
+    } else {
+        if (maybe_font) |*font| {
+            try renderGraphToPNGWithFont(allocator, &graph, output_file, render_config, font);
+        } else {
+            try renderGraphToPNG(allocator, &graph, output_file, render_config);
+        }
+    }
+}
+
+fn renderSequenceDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var seq_parser = SeqParser.init(allocator, source);
+    var diag = try seq_parser.parse();
+    defer diag.deinit();
+
+    const layout_config = SeqLayout.LayoutConfig{};
+    const layout_result = SeqLayout.layout(&diag, layout_config);
+
+    if (is_svg_output) {
+        const render_config = SeqSvgRender.SeqRenderConfig{};
+        try SeqSvgRender.renderToSVGFile(allocator, &diag, layout_result, output_file, layout_config, render_config);
+    } else {
+        const SeqFont = merrow.render.text.Font;
+        var maybe_font: ?SeqFont = if (maybe_font_data) |data|
+            SeqFont.initFromMemory(allocator, data) catch null
+        else
+            null;
+        defer if (maybe_font) |*f| f.deinit();
+        const font_ptr: ?*SeqFont = if (maybe_font) |*f| f else null;
+        const png_config = SeqPngRender.SeqPngRenderConfig{};
+        try SeqPngRender.renderToPNGFile(allocator, &diag, layout_result, output_file, layout_config, png_config, font_ptr);
+    }
+}
+
+fn renderPieDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var pie = try PieParser.parse(allocator, source);
+    defer pie.deinit();
+
+    if (is_svg_output) {
+        try PieSvgRender.renderPieToSVG(allocator, &pie, output_file);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        var font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        _ = &font_ptr;
+        try PiePngRender.renderPieToPNG(allocator, &pie, output_file, font_ptr);
+    }
+}
+
+fn renderClassDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var diagram = try ClassParser.parse(allocator, source);
+    defer diagram.deinit();
+
+    if (is_svg_output) {
+        try ClassSvgRender.renderClassToSVG(allocator, &diagram, output_file, null);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        var font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        _ = &font_ptr;
+        try ClassPngRender.renderClassToPNG(allocator, &diagram, output_file, font_ptr);
+    }
+}
+
+fn renderStateDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var diagram = try StateParser.parse(allocator, source);
+    defer diagram.deinit();
+
+    if (is_svg_output) {
+        try StateSvgRender.renderStateToSVG(allocator, &diagram, output_file);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        const font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        try StatePngRender.renderStateToPNG(allocator, &diagram, output_file, font_ptr);
+    }
+}
+
+fn renderJourneyDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var diagram = try JourneyParser.parse(allocator, source);
+    defer diagram.deinit();
+
+    if (is_svg_output) {
+        try JourneySvgRender.renderJourneyToSVG(allocator, &diagram, output_file);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        const font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        try JourneyPngRender.renderJourneyToPNG(allocator, &diagram, output_file, font_ptr);
+    }
+}
+
+fn renderErDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var diagram = try ErParser.parse(allocator, source);
+    defer diagram.deinit();
+
+    if (is_svg_output) {
+        try ErSvgRender.renderErToSVG(allocator, &diagram, output_file);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        const font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        try ErPngRender.renderErToPNG(allocator, &diagram, output_file, font_ptr);
+    }
+}
+
+fn renderGanttDiagramQuiet(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_file: []const u8,
+    is_svg_output: bool,
+    maybe_font_data: ?[]const u8,
+) !void {
+    var diagram = try GanttParser.parse(allocator, source);
+    defer diagram.deinit();
+
+    if (is_svg_output) {
+        try GanttSvgRender.renderGanttToSVG(allocator, &diagram, output_file);
+    } else {
+        var maybe_font: ?Font = initFont(allocator, maybe_font_data);
+        defer if (maybe_font) |*f| f.deinit();
+        const font_ptr: ?*Font = if (maybe_font) |*f| f else null;
+        try GanttPngRender.renderGanttToPNG(allocator, &diagram, output_file, font_ptr);
+    }
 }
 
 // ===================================================================
