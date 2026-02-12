@@ -13,7 +13,6 @@ The main use case for merrow is the generation of Flowchart and Sequence diagram
 | Flowchart | ✅ | ✅ | ✅ |
 | Sequence | ✅ | ✅ | ✅ |
 | Class | ✅ | ✅ | ✅ |
-| State | ✅ | ✅ | ✅ |
 | Entity-Relationship | ✅ | ✅ | ✅ |
 | Gantt | ✅ | ✅ | ✅ |
 | Pie | ✅ | ✅ | ✅ |
@@ -131,13 +130,12 @@ merrow --svg --bulk src/diagrams build/images --force
 Given `diagram.mmd`:
 
 ```text
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> Processing : Start
-    Processing --> Done : Complete
-    Processing --> Error : Fail
-    Error --> Idle : Reset
-    Done --> [*]
+graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Process]
+    B -->|No| D[Skip]
+    C --> E[Done]
+    D --> E
 ```
 
 ```sh
