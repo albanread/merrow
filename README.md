@@ -1,8 +1,10 @@
 # merrow
 
-A fast, self-contained Mermaid diagram renderer written in Zig.
+A fast, self-contained Mermaid diagram renderer.
 
-Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). No browser, no JavaScript runtime, no external dependencies beyond a font file.
+Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). 
+
+The main use case for merrow is the generation of Flowchart and Sequence diagrams for document - hence the focus on PNG rendering.
 
 ## Supported Diagram Types
 
@@ -68,7 +70,7 @@ Place a `.ttf` file (e.g. DejaVu Sans) in one of those locations for text render
 
 ## Layout Engine
 
-Merrow includes a full **Dagre**-style layout engine (ported from Rust/JS reference implementations):
+Merrow includes a full **Dagre**-style layout engine.
 
 - **Network simplex** rank assignment
 - **Barycenter** crossing minimisation (Barth et al. accumulator-tree cross counting)
@@ -87,14 +89,16 @@ To understand Dagre, you must look at **[Graphviz](https://graphviz.org/)** (Gra
 
 As web applications grew more complex in the early 2010s, there was a need to render these graphs directly in the browser without server-side tools. **Chris Pettitt** created `dagre` (and its renderer `dagre-d3`) as a way to bring strict, Graphviz-style layout algorithms to JavaScript — essentially a port of the techniques described in the same academic papers that powered Graphviz, adapted for a JS environment.
 
-**[Selkie](https://github.com/btucker/selkie)** contains a Rust port of Dagre, and **Merrow** (this project) brings the same algorithms to Zig, aiming for high performance and embedded use cases.
+**[Selkie](https://github.com/btucker/selkie)** contains an extremely thorough Rust port of Dagre.
+
+**Merrow** (this project) ports the same algorithms to Zig, aiming for high performance and embedded use cases.
 
 Dagre is not just code — it is an implementation of specific academic research. The two pillars of its logic are:
 
 - **Rank Assignment** — *Gansner, E. R., Koutsofios, E., North, S. C., & Vo, K. P. (1993). "A Technique for Drawing Directed Graphs."* This paper describes the **Network Simplex** algorithm used to assign layers (ranks) to nodes while minimizing the total length of edges.
 - **Coordinate Assignment** — *Brandes, U., & Köpf, B. (2001). "Fast and Simple Horizontal Coordinate Assignment."* Once nodes are in layers, this algorithm determines their horizontal position, producing symmetric, balanced layouts that avoid the "spaghetti" look.
 
-In summary: **Dagre is the bridge that brought 1990s academic graph theory from C++ (Graphviz) to the Web (JavaScript), and now Selkie has brought it to Rust and Merrow to Zig.**
+In summary: **Dagre is the bridge that brought 1990s academic graph theory from C++ (Graphviz) to the Web (JavaScript)
 
 ## Running Tests
 
@@ -126,12 +130,18 @@ fonts/                    # TrueType fonts for rasterisation
 
 ## Acknowledgements
 
-Merrow is a Zig port inspired by [**Selkie**](https://github.com/btucker/selkie), a fast, native Mermaid diagram renderer written in Rust. Selkie's architecture, layout engine, and rendering approach served as the primary reference for this project. Huge thanks to the Selkie team for their excellent work.
+Merrow is a Zig port inspired by [**Selkie**](https://github.com/btucker/selkie), a fast, native Mermaid diagram renderer written in Rust. 
+
+Selkie's architecture, layout engine, and rendering approach served as the primary reference for this project. 
+
+Huge thanks to the Selkie team for sharing their excellent work.
+
+Selkie has a wider and more comprehensive scope than merrow, Merrow is mainly interested in creating small diagrams for documents.
 
 Both projects stand on the shoulders of these foundational efforts:
 
-- **[Mermaid](https://github.com/mermaid-js/mermaid)** — The original JavaScript diagramming library that defines the syntax and rendering we aim to match
-- **[Dagre](https://github.com/dagrejs/dagre)** — Graph layout algorithms that inspire our layout engine
+- **[Mermaid](https://github.com/mermaid-js/mermaid)** — The original JavaScript diagramming library that defines the syntax and rendering.
+- **[Dagre](https://github.com/dagrejs/dagre)** — Graph layout algorithms.
 - **[ELK](https://github.com/kieler/elkjs)** — Eclipse Layout Kernel, providing additional layout strategies
 
 ## License
