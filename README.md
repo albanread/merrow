@@ -1,6 +1,6 @@
 # merrow
 
-A fast, self-contained Mermaid diagram renderer.
+Under development: A fast, self-contained Mermaid diagram renderer.
 
 Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). 
 
