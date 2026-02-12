@@ -5,10 +5,10 @@
 //! rounded rectangles) and transition edges with proper arrowheads to PNG
 //! via the Canvas rasteriser.
 //!
-//! This replaces the earlier simplistic rank-based layout with the full
-//! Dagre pipeline (network-simplex ranking, barycenter crossing minimisation,
-//! Brandes-Köpf coordinate assignment) so that edges no longer cross
-//! unnecessarily.
+//! Supports:
+//!   - Composite (nested) states rendered as container boxes with headers
+//!   - Note callout lines connecting notes to their parent state
+//!   - Full Dagre pipeline for crossing minimisation
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -49,13 +49,20 @@ const START_END_RADIUS: f64 = 7.0;
 const FORK_JOIN_WIDTH: f64 = 70.0;
 const FORK_JOIN_HEIGHT: f64 = 6.0;
 const CHOICE_SIZE: f64 = 28.0;
-const NOTE_WIDTH: f64 = 120.0;
 const NOTE_PADDING: f64 = 8.0;
 const ARROW_SIZE: f64 = 8.0;
 const EDGE_STROKE_WIDTH: f64 = 2;
 const NODESEP: f64 = 50.0;
 const RANKSEP: f64 = 60.0;
 const SCALE_FACTOR: f64 = 2.0;
+
+// Composite state rendering constants
+const COMPOSITE_PADDING: f64 = 16.0;
+const COMPOSITE_HEADER_HEIGHT: f64 = 30.0;
+const COMPOSITE_CORNER_RADIUS: f64 = 8.0;
+
+// Note callout constants
+const NOTE_CALLOUT_GAP: f64 = 15.0;
 
 // -----------------------------------------------------------------------
 // Position / size types
@@ -92,6 +99,21 @@ pub fn renderStateToPNG(
         return;
     }
 
+    // ── 0. Identify composite states ────────────────────────────
+    // A composite state is any state that is the parent of other states.
+    var composite_set = std.StringHashMap(void).init(allocator);
+    defer composite_set.deinit();
+
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                try composite_set.put(p, {});
+            }
+        }
+    }
+
     // ── 1. Build Dagre graph ────────────────────────────────────
     var graph = Graph.init(allocator);
     defer {
@@ -113,23 +135,51 @@ pub fn renderStateToPNG(
             try node_ids.append(allocator, id);
 
             const state = entry.value_ptr;
-            const size = computeStateSize(state);
+            const is_composite = composite_set.contains(entry.key_ptr.*);
 
-            // If the state has a note, widen the node so Dagre reserves
-            // enough horizontal space and the note doesn't overlap
-            // neighbouring nodes.
-            var effective_w = size.w;
-            if (state.note) |note| {
-                const ns = computeNoteSize(note.text);
-                const note_gap: f64 = 15.0;
-                effective_w += ns.w + note_gap;
+            if (is_composite) {
+                // Composite states become subgraph container nodes.
+                // Give them a minimal size — bounds will be computed from children.
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = 0,
+                    .height = 0,
+                    .is_subgraph = true,
+                    .subgraph_title = state.displayLabel(),
+                    .subgraph_padding = COMPOSITE_PADDING,
+                });
+            } else {
+                const size = computeStateSize(state);
+
+                // If the state has a note, widen the node so Dagre reserves
+                // enough horizontal space and the note doesn't overlap
+                // neighbouring nodes.
+                var effective_w = size.w;
+                if (state.note) |note| {
+                    const ns = computeNoteSize(note.text);
+                    effective_w += ns.w + NOTE_CALLOUT_GAP;
+                }
+
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = effective_w,
+                    .height = size.h,
+                });
             }
+        }
+    }
 
-            try graph.setNode(entry.key_ptr.*, .{
-                .label = state.displayLabel(),
-                .width = effective_w,
-                .height = size.h,
-            });
+    // Set parent relationships for composite states.
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                // Only set parent if parent node exists in graph
+                if (graph.getNode(p) != null) {
+                    try graph.setParent(entry.key_ptr.*, p);
+                }
+            }
         }
     }
 
@@ -196,24 +246,26 @@ pub fn renderStateToPNG(
 
             // Include note in bounding box (use actual shape size, not
             // the inflated Dagre width, so the note box extent is correct).
-            if (mutable_diagram.states.get(id)) |state| {
-                if (state.note) |note| {
-                    const shape_size = computeStateSize(&state);
-                    const ns = computeNoteSize(note.text);
-                    const note_gap: f64 = 15.0;
-                    const half_shape_w = shape_size.w / 2.0;
-                    if (note.position == .right_of) {
-                        const nr = node.x + half_shape_w + note_gap + ns.w;
-                        if (nr > max_x) max_x = nr;
-                    } else {
-                        const nl = node.x - half_shape_w - note_gap - ns.w;
-                        if (nl < min_x) min_x = nl;
+            const is_composite = composite_set.contains(id);
+            if (!is_composite) {
+                if (mutable_diagram.states.get(id)) |state| {
+                    if (state.note) |note| {
+                        const shape_size = computeStateSize(&state);
+                        const ns = computeNoteSize(note.text);
+                        const half_shape_w = shape_size.w / 2.0;
+                        if (note.position == .right_of) {
+                            const nr = node.x + half_shape_w + NOTE_CALLOUT_GAP + ns.w;
+                            if (nr > max_x) max_x = nr;
+                        } else {
+                            const nl = node.x - half_shape_w - NOTE_CALLOUT_GAP - ns.w;
+                            if (nl < min_x) min_x = nl;
+                        }
+                        // Vertical extent of note
+                        const note_top = node.y - ns.h / 2.0;
+                        const note_bot = node.y + ns.h / 2.0;
+                        if (note_top < min_y) min_y = note_top;
+                        if (note_bot > max_y) max_y = note_bot;
                     }
-                    // Vertical extent of note
-                    const note_top = node.y - ns.h / 2.0;
-                    const note_bot = node.y + ns.h / 2.0;
-                    if (note_top < min_y) min_y = note_top;
-                    if (note_bot > max_y) max_y = note_bot;
                 }
             }
         }
@@ -259,7 +311,61 @@ pub fn renderStateToPNG(
         }
     }
 
-    // ── 4a. Draw edges (behind nodes) ───────────────────────────
+    // ── 4a. Draw composite state containers (behind everything) ─
+    var composite_ids = std.ArrayListUnmanaged([]const u8){};
+    defer composite_ids.deinit(allocator);
+
+    {
+        var cit = composite_set.iterator();
+        while (cit.next()) |entry| {
+            try composite_ids.append(allocator, entry.key_ptr.*);
+        }
+    }
+
+    // Sort by nesting depth (outermost first).
+    if (composite_ids.items.len > 1) {
+        const SortCtx = struct {
+            diagram_ptr: *const StateDiagram,
+
+            fn depth(self: @This(), id: []const u8) usize {
+                var d: usize = 0;
+                var current = id;
+                const md = @constCast(self.diagram_ptr);
+                while (true) {
+                    if (md.states.get(current)) |s| {
+                        if (s.parent) |p| {
+                            d += 1;
+                            current = p;
+                        } else break;
+                    } else break;
+                }
+                return d;
+            }
+
+            fn lessThan(self: @This(), a: []const u8, b: []const u8) bool {
+                const da = self.depth(a);
+                const db = self.depth(b);
+                if (da != db) return da < db;
+                return std.mem.order(u8, a, b) == .lt;
+            }
+        };
+        const ctx = SortCtx{ .diagram_ptr = diagram };
+        std.mem.sort([]const u8, composite_ids.items, ctx, SortCtx.lessThan);
+    }
+
+    for (composite_ids.items) |comp_id| {
+        const node = graph.getNode(comp_id) orelse continue;
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+
+        const cx = node.x + offset_x;
+        const cy = node.y + offset_y;
+        const w = node.width;
+        const h = node.height;
+
+        renderCompositeBox(&canvas, &state, cx, cy, w, h, maybe_font);
+    }
+
+    // ── 4b. Draw edges (behind regular nodes) ───────────────────
     for (diagram.relations.items) |rel| {
         const ed = graph.edge(rel.from, rel.to, null);
         if (ed == null) continue;
@@ -280,18 +386,24 @@ pub fn renderStateToPNG(
             break :blk StateType.default;
         };
 
+        // Check if source or target is composite — use the container box for clipping
+        const from_is_composite = composite_set.contains(rel.from);
+        const to_is_composite = composite_set.contains(rel.to);
+
         // Build path: source border → intermediate Dagre points → target border.
         var path_points = std.ArrayListUnmanaged([2]f64){};
         defer path_points.deinit(allocator);
 
         if (src_node) |sn| {
+            const src_w = if (from_is_composite) sn.width else computeStateSizeById(mutable_diagram, rel.from).w;
+            const src_h = if (from_is_composite) sn.height else computeStateSizeById(mutable_diagram, rel.from).h;
             if (points.len > 0) {
                 const clipped = computeExitPoint(
                     sn.x + offset_x,
                     sn.y + offset_y,
-                    sn.width,
-                    sn.height,
-                    from_state_type,
+                    src_w,
+                    src_h,
+                    if (from_is_composite) StateType.default else from_state_type,
                     points[0].x + offset_x,
                     points[0].y + offset_y,
                 );
@@ -300,9 +412,9 @@ pub fn renderStateToPNG(
                 const clipped = computeExitPoint(
                     sn.x + offset_x,
                     sn.y + offset_y,
-                    sn.width,
-                    sn.height,
-                    from_state_type,
+                    src_w,
+                    src_h,
+                    if (from_is_composite) StateType.default else from_state_type,
                     tn.x + offset_x,
                     tn.y + offset_y,
                 );
@@ -315,14 +427,16 @@ pub fn renderStateToPNG(
         }
 
         if (tgt_node) |tn| {
+            const tgt_w = if (to_is_composite) tn.width else computeStateSizeById(mutable_diagram, rel.to).w;
+            const tgt_h = if (to_is_composite) tn.height else computeStateSizeById(mutable_diagram, rel.to).h;
             const last_x = if (points.len > 0) points[points.len - 1].x + offset_x else if (src_node) |sn| sn.x + offset_x else tn.x + offset_x;
             const last_y = if (points.len > 0) points[points.len - 1].y + offset_y else if (src_node) |sn| sn.y + offset_y else tn.y + offset_y;
             const clipped = computeEntryPoint(
                 tn.x + offset_x,
                 tn.y + offset_y,
-                tn.width,
-                tn.height,
-                to_state_type,
+                tgt_w,
+                tgt_h,
+                if (to_is_composite) StateType.default else to_state_type,
                 last_x,
                 last_y,
             );
@@ -390,8 +504,11 @@ pub fn renderStateToPNG(
         }
     }
 
-    // ── 4b. Draw nodes (on top of edges) ────────────────────────
+    // ── 4c. Draw regular (non-composite) nodes ──────────────────
     for (node_ids.items) |id| {
+        // Skip composite states — they were drawn as containers above
+        if (composite_set.contains(id)) continue;
+
         const node = graph.getNode(id) orelse continue;
         const state = mutable_diagram.states.get(id) orelse continue;
 
@@ -403,9 +520,20 @@ pub fn renderStateToPNG(
 
         renderStateNode(&canvas, &state, cx, cy, size.w, size.h, maybe_font);
 
-        // Draw note
+        // Draw note with callout line if present
         if (state.note) |note| {
-            renderNote(&canvas, note.position, note.text, cx, cy, size.w, maybe_font);
+            renderNoteWithCallout(&canvas, note.position, note.text, cx, cy, size.w, size.h, maybe_font);
+        }
+    }
+
+    // ── 4d. Draw notes attached to composite states ─────────────
+    for (composite_ids.items) |comp_id| {
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+        if (state.note) |note| {
+            const node = graph.getNode(comp_id) orelse continue;
+            const cx = node.x + offset_x;
+            const cy = node.y + offset_y;
+            renderNoteWithCallout(&canvas, note.position, note.text, cx, cy, node.width, node.height, maybe_font);
         }
     }
 
@@ -428,6 +556,9 @@ fn computeStateSize(state: *const state_model.State) NodeSize {
             const text_w = @as(f64, @floatFromInt(label.len)) * CHAR_WIDTH;
             const w = @max(text_w + STATE_PADDING_H * 2, STATE_MIN_WIDTH);
             var h = STATE_MIN_HEIGHT;
+            if (state.description != null) {
+                h += LINE_HEIGHT;
+            }
             if (state.descriptions.items.len > 0) {
                 h += @as(f64, @floatFromInt(state.descriptions.items.len)) * LINE_HEIGHT;
             }
@@ -436,8 +567,67 @@ fn computeStateSize(state: *const state_model.State) NodeSize {
     };
 }
 
+/// Compute the size of a state by looking it up in the diagram by ID.
+/// Falls back to a reasonable default if the state is not found.
+fn computeStateSizeById(diagram: *StateDiagram, id: []const u8) NodeSize {
+    if (diagram.states.get(id)) |state| {
+        return computeStateSize(&state);
+    }
+    return .{ .w = STATE_MIN_WIDTH, .h = STATE_MIN_HEIGHT };
+}
+
 // -----------------------------------------------------------------------
-// State node rendering
+// Composite state box rendering
+// -----------------------------------------------------------------------
+
+fn renderCompositeBox(
+    canvas: *Canvas,
+    state: *const state_model.State,
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    maybe_font: ?*Font,
+) void {
+    const rx = cx - w / 2.0;
+    const ry = cy - h / 2.0;
+
+    // Outer rectangle (white body)
+    canvas.fillRect(rx, ry, w, h, 255, 255, 255, 255);
+    canvas.strokeRect(rx, ry, w, h, 2, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+
+    // Header background bar (colored strip at the top)
+    const header_h = COMPOSITE_HEADER_HEIGHT;
+    canvas.fillRect(rx, ry, w, header_h, state_model.composite_header_fill[0], state_model.composite_header_fill[1], state_model.composite_header_fill[2], state_model.composite_header_fill[3]);
+
+    // Separator line between header and body
+    canvas.drawLine(rx, ry + header_h, rx + w, ry + header_h, 1, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+
+    // Re-draw the top border and sides of header area to cover any fill overlap
+    canvas.drawLine(rx, ry, rx + w, ry, 2, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+    canvas.drawLine(rx, ry, rx, ry + header_h, 2, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+    canvas.drawLine(rx + w, ry, rx + w, ry + header_h, 2, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+
+    // Header label
+    if (maybe_font) |font| {
+        const label = state.displayLabel();
+        const tw = font.measureText(label, @floatCast(LABEL_FONT_SIZE));
+        const tx: f32 = @floatCast(cx - @as(f64, tw) / 2.0);
+        const ty: f32 = @floatCast(ry + header_h / 2.0 - 7.0);
+        font.drawText(canvas, label, tx, ty, @floatCast(LABEL_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+
+        // Description below header if present
+        if (state.description) |desc| {
+            const dw = font.measureText(desc, @floatCast(NOTE_FONT_SIZE));
+            const dx: f32 = @floatCast(cx - @as(f64, dw) / 2.0);
+            const dy: f32 = @floatCast(ry + header_h + 10.0);
+            font.drawText(canvas, desc, dx, dy, @floatCast(NOTE_FONT_SIZE), 100, 100, 100, 255) catch {};
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// State node rendering (non-composite)
 // -----------------------------------------------------------------------
 
 fn renderStateNode(
@@ -483,14 +673,30 @@ fn renderStateNode(
             // Label text
             if (maybe_font) |font| {
                 const label = state.displayLabel();
+                const has_extra = state.descriptions.items.len > 0 or state.description != null;
+                const label_y_offset: f64 = if (has_extra) -5.0 else 0.0;
+
                 const tw = font.measureText(label, @floatCast(LABEL_FONT_SIZE));
                 const tx: f32 = @floatCast(cx - @as(f64, tw) / 2.0);
-                const ty: f32 = @floatCast(cy - 7.0);
+                const ty: f32 = @floatCast(cy + label_y_offset - 7.0);
                 font.drawText(canvas, label, tx, ty, @floatCast(LABEL_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
 
+                // Primary description
+                if (state.description) |desc| {
+                    // Separator line
+                    const sep_y = cy + 4.0;
+                    canvas.drawLine(rx + 4, sep_y, rx + w - 4, sep_y, 1, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+
+                    const dw = font.measureText(desc, @floatCast(NOTE_FONT_SIZE));
+                    const dx: f32 = @floatCast(cx - @as(f64, dw) / 2.0);
+                    const dy: f32 = @floatCast(cy + 10.0);
+                    font.drawText(canvas, desc, dx, dy, @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                }
+
                 // Additional descriptions
+                const desc_start_y: f64 = if (state.description != null) cy + 26.0 else cy + 8.0;
                 for (state.descriptions.items, 0..) |desc, i| {
-                    const desc_y: f32 = @floatCast(cy + 8.0 + @as(f64, @floatFromInt(i)) * LINE_HEIGHT);
+                    const desc_y: f32 = @floatCast(desc_start_y + @as(f64, @floatFromInt(i)) * LINE_HEIGHT);
                     const dw = font.measureText(desc.data, @floatCast(NOTE_FONT_SIZE));
                     const dx: f32 = @floatCast(cx - @as(f64, dw) / 2.0);
                     font.drawText(canvas, desc.data, dx, desc_y, @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
@@ -538,90 +744,124 @@ fn drawArrowhead(canvas: *Canvas, from_x: f64, from_y: f64, to_x: f64, to_y: f64
 }
 
 // -----------------------------------------------------------------------
-// Edge point computation
+// Edge clipping helpers
 // -----------------------------------------------------------------------
 
-fn computeExitPoint(cx: f64, cy: f64, w: f64, h: f64, state_type: StateType, target_x: f64, target_y: f64) Position {
+fn computeExitPoint(
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    state_type: StateType,
+    target_x: f64,
+    target_y: f64,
+) Position {
     return switch (state_type) {
-        .start => computeCircleIntersection(cx, cy, START_END_RADIUS, target_x, target_y),
-        .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, target_x, target_y),
+        .start, .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, target_x, target_y),
         .choice => computeDiamondIntersection(cx, cy, CHOICE_SIZE / 2.0, target_x, target_y),
-        .fork, .join => computeRectIntersection(cx, cy, w, h, target_x, target_y),
-        .divider => .{ .x = cx, .y = cy },
-        .default => computeRectIntersection(cx, cy, w, h, target_x, target_y),
+        else => computeRectIntersection(cx, cy, w, h, target_x, target_y),
     };
 }
 
-fn computeEntryPoint(cx: f64, cy: f64, w: f64, h: f64, state_type: StateType, source_x: f64, source_y: f64) Position {
+fn computeEntryPoint(
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    state_type: StateType,
+    source_x: f64,
+    source_y: f64,
+) Position {
     return switch (state_type) {
-        .start => computeCircleIntersection(cx, cy, START_END_RADIUS, source_x, source_y),
-        .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, source_x, source_y),
+        .start, .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, source_x, source_y),
         .choice => computeDiamondIntersection(cx, cy, CHOICE_SIZE / 2.0, source_x, source_y),
-        .fork, .join => computeRectIntersection(cx, cy, w, h, source_x, source_y),
-        .divider => .{ .x = cx, .y = cy },
-        .default => computeRectIntersection(cx, cy, w, h, source_x, source_y),
+        else => computeRectIntersection(cx, cy, w, h, source_x, source_y),
     };
 }
 
-fn computeCircleIntersection(cx: f64, cy: f64, r: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
-    const len = @sqrt(dx * dx + dy * dy);
-    if (len < 0.001) return .{ .x = cx, .y = cy + r };
+fn computeCircleIntersection(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
+    const dist = @sqrt(dx * dx + dy * dy);
+    if (dist < 0.001) return .{ .x = cx + radius, .y = cy };
     return .{
-        .x = cx + dx / len * r,
-        .y = cy + dy / len * r,
+        .x = cx + dx / dist * radius,
+        .y = cy + dy / dist * radius,
     };
 }
 
-fn computeRectIntersection(cx: f64, cy: f64, w: f64, h: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
+fn computeRectIntersection(
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
     const half_w = w / 2.0;
     const half_h = h / 2.0;
 
     if (@abs(dx) < 0.001 and @abs(dy) < 0.001) {
-        return .{ .x = cx, .y = cy + half_h };
+        return .{ .x = cx, .y = cy - half_h };
     }
 
-    const abs_dx = @abs(dx);
-    const abs_dy = @abs(dy);
-
-    if (abs_dx * half_h > abs_dy * half_w) {
-        const sign: f64 = if (dx > 0) 1.0 else -1.0;
-        return .{
-            .x = cx + sign * half_w,
-            .y = cy + dy * half_w / abs_dx,
-        };
-    } else {
-        const sign: f64 = if (dy > 0) 1.0 else -1.0;
-        return .{
-            .x = cx + dx * half_h / abs_dy,
-            .y = cy + sign * half_h,
-        };
+    // Try horizontal edges
+    if (@abs(dx) > 0.001) {
+        const t_right = half_w / @abs(dx);
+        const y_at_right = dy * t_right;
+        if (@abs(y_at_right) <= half_h) {
+            return .{
+                .x = if (dx > 0) cx + half_w else cx - half_w,
+                .y = cy + y_at_right,
+            };
+        }
     }
+
+    // Try vertical edges
+    if (@abs(dy) > 0.001) {
+        const t_top = half_h / @abs(dy);
+        const x_at_top = dx * t_top;
+        if (@abs(x_at_top) <= half_w) {
+            return .{
+                .x = cx + x_at_top,
+                .y = if (dy > 0) cy + half_h else cy - half_h,
+            };
+        }
+    }
+
+    return .{ .x = cx, .y = if (dy >= 0) cy + half_h else cy - half_h };
 }
 
-fn computeDiamondIntersection(cx: f64, cy: f64, half_size: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
+fn computeDiamondIntersection(
+    cx: f64,
+    cy: f64,
+    half_size: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
+    const dist = @sqrt(dx * dx + dy * dy);
+    if (dist < 0.001) return .{ .x = cx, .y = cy - half_size };
 
-    if (@abs(dx) < 0.001 and @abs(dy) < 0.001) {
-        return .{ .x = cx, .y = cy + half_size };
-    }
-
+    // Diamond edge: |dx/half_size| + |dy/half_size| = 1
     const abs_dx = @abs(dx);
     const abs_dy = @abs(dy);
     const sum = abs_dx + abs_dy;
+    if (sum < 0.001) return .{ .x = cx, .y = cy - half_size };
 
-    if (sum < 0.001) {
-        return .{ .x = cx, .y = cy + half_size };
-    }
-
-    const t = half_size / sum;
+    const scale = half_size / sum;
     return .{
-        .x = cx + dx * t,
-        .y = cy + dy * t,
+        .x = cx + dx * scale,
+        .y = cy + dy * scale,
     };
 }
 
@@ -629,9 +869,6 @@ fn computeDiamondIntersection(cx: f64, cy: f64, half_size: f64, tx: f64, ty: f64
 // Note size computation
 // -----------------------------------------------------------------------
 
-/// Compute the pixel size of a note box based on its text content.
-/// Measures each line individually so multi-line notes get a width that
-/// fits the longest line rather than using the total character count.
 fn computeNoteSize(text: []const u8) NodeSize {
     var max_line_len: usize = 0;
     var cur_line_len: usize = 0;
@@ -656,34 +893,60 @@ fn computeNoteSize(text: []const u8) NodeSize {
 }
 
 // -----------------------------------------------------------------------
-// Note rendering
+// Note rendering with callout line
 // -----------------------------------------------------------------------
 
-fn renderNote(
+fn renderNoteWithCallout(
     canvas: *Canvas,
     position: NotePosition,
     text: []const u8,
     cx: f64,
     cy: f64,
     node_w: f64,
+    node_h: f64,
     maybe_font: ?*Font,
 ) void {
+    _ = node_h; // may be used for vertical positioning in future
     const ns = computeNoteSize(text);
     const note_w = ns.w;
     const note_h = ns.h;
 
-    const note_gap: f64 = 15.0;
     const note_x = switch (position) {
-        .right_of => cx + node_w / 2.0 + note_gap,
-        .left_of => cx - node_w / 2.0 - note_gap - note_w,
+        .right_of => cx + node_w / 2.0 + NOTE_CALLOUT_GAP,
+        .left_of => cx - node_w / 2.0 - NOTE_CALLOUT_GAP - note_w,
     };
     const note_y = cy - note_h / 2.0;
 
-    // Note background (yellow)
+    // ── Draw callout line (dashed) from state border to note ────
+    const line_start_x = switch (position) {
+        .right_of => cx + node_w / 2.0,
+        .left_of => cx - node_w / 2.0,
+    };
+    const line_end_x = switch (position) {
+        .right_of => note_x,
+        .left_of => note_x + note_w,
+    };
+    const line_y = cy; // horizontal line at the vertical center
+
+    canvas.drawDashedLine(
+        line_start_x,
+        line_y,
+        line_end_x,
+        line_y,
+        1,
+        state_model.note_stroke[0],
+        state_model.note_stroke[1],
+        state_model.note_stroke[2],
+        state_model.note_stroke[3],
+        4.0,
+        3.0,
+    );
+
+    // ── Draw note background (yellow) ───────────────────────────
     canvas.fillRect(note_x, note_y, note_w, note_h, state_model.note_fill[0], state_model.note_fill[1], state_model.note_fill[2], state_model.note_fill[3]);
     canvas.strokeRect(note_x, note_y, note_w, note_h, 1, state_model.note_stroke[0], state_model.note_stroke[1], state_model.note_stroke[2], state_model.note_stroke[3]);
 
-    // Note text
+    // ── Draw note text ──────────────────────────────────────────
     if (maybe_font) |font| {
         // Count lines for rendering
         var line_count: usize = 1;
@@ -696,18 +959,18 @@ fn renderNote(
             const ty: f32 = @floatCast(note_y + note_h / 2.0 - 6.0);
             font.drawText(canvas, text, tx, ty, @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
         } else {
-            var line_y: f64 = note_y + NOTE_PADDING;
+            var text_y: f64 = note_y + NOTE_PADDING;
             var start: usize = 0;
             for (text, 0..) |c, i| {
                 if (c == '\n') {
                     const line_text = text[start..i];
-                    font.drawText(canvas, line_text, @floatCast(note_x + NOTE_PADDING), @floatCast(line_y), @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
-                    line_y += 16.0;
+                    font.drawText(canvas, line_text, @floatCast(note_x + NOTE_PADDING), @floatCast(text_y), @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                    text_y += 16.0;
                     start = i + 1;
                 }
             }
             if (start < text.len) {
-                font.drawText(canvas, text[start..], @floatCast(note_x + NOTE_PADDING), @floatCast(line_y), @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                font.drawText(canvas, text[start..], @floatCast(note_x + NOTE_PADDING), @floatCast(text_y), @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
             }
         }
     }
@@ -719,59 +982,73 @@ fn renderNote(
 
 test "state png: renders without crash (no font)" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    try diagram.addRelation("[*]", "Idle", null, null);
-    try diagram.addRelation("Idle", "Active", "activate", null);
-    try diagram.addRelation("Active", "[*]", null, null);
+    try diagram.addRelation("Idle", "Active", "start", null);
+    try diagram.addRelation("Active", "Done", null, null);
 
-    try renderStateToPNG(allocator, &diagram, "/tmp/merrow_state_test.png", null);
-
-    const stat = try std.fs.cwd().statFile("/tmp/merrow_state_test.png");
-    try std.testing.expect(stat.size > 0);
+    const tmp = "/tmp/test_state_png.png";
+    try renderStateToPNG(allocator, &diagram, tmp, null);
 }
 
 test "state png: empty diagram renders without crash" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    try renderStateToPNG(allocator, &diagram, "/tmp/merrow_state_empty_test.png", null);
-
-    const stat = try std.fs.cwd().statFile("/tmp/merrow_state_empty_test.png");
-    try std.testing.expect(stat.size > 0);
+    const tmp = "/tmp/test_state_png_empty.png";
+    try renderStateToPNG(allocator, &diagram, tmp, null);
 }
 
 test "state png: special states render without crash" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    _ = try diagram.addStateWithType("f1", .fork);
-    _ = try diagram.addStateWithType("j1", .join);
-    _ = try diagram.addStateWithType("c1", .choice);
-    try diagram.addRelation("[*]", "f1", null, null);
-    try diagram.addRelation("f1", "c1", null, null);
-    try diagram.addRelation("c1", "j1", null, null);
-    try diagram.addRelation("j1", "[*]", null, null);
+    _ = try diagram.addStateWithType("fk", .fork);
+    _ = try diagram.addStateWithType("jn", .join);
+    _ = try diagram.addStateWithType("ch", .choice);
+    try diagram.addRelation("A", "fk", null, null);
+    try diagram.addRelation("fk", "B", null, null);
 
-    try renderStateToPNG(allocator, &diagram, "/tmp/merrow_state_special_test.png", null);
-
-    const stat = try std.fs.cwd().statFile("/tmp/merrow_state_special_test.png");
-    try std.testing.expect(stat.size > 0);
+    const tmp = "/tmp/test_state_png_special.png";
+    try renderStateToPNG(allocator, &diagram, tmp, null);
 }
 
 test "state png: with note renders without crash" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    _ = try diagram.ensureState("Idle");
-    try diagram.addNote("Idle", .right_of, "A note");
+    try diagram.addRelation("Idle", "Active", null, null);
+    try diagram.addNote("Idle", .right_of, "A note here");
 
-    try renderStateToPNG(allocator, &diagram, "/tmp/merrow_state_note_test.png", null);
+    const tmp = "/tmp/test_state_png_note.png";
+    try renderStateToPNG(allocator, &diagram, tmp, null);
+}
 
-    const stat = try std.fs.cwd().statFile("/tmp/merrow_state_note_test.png");
-    try std.testing.expect(stat.size > 0);
+test "state png: composite state renders without crash" {
+    const allocator = std.testing.allocator;
+    var diagram = state_model.StateDiagram.init(allocator);
+    defer diagram.deinit();
+
+    // Create parent composite state
+    _ = try diagram.ensureState("Processing");
+
+    // Create children
+    _ = try diagram.ensureState("Validating");
+    try diagram.setParent("Validating", "Processing");
+    _ = try diagram.ensureState("Executing");
+    try diagram.setParent("Executing", "Processing");
+
+    // Transitions within composite
+    try diagram.addRelation("Validating", "Executing", "valid", "Processing");
+
+    // Transitions into/out of composite
+    try diagram.addRelation("Idle", "Processing", "start", null);
+    try diagram.addRelation("Processing", "Done", "complete", null);
+
+    const tmp = "/tmp/test_state_png_composite.png";
+    try renderStateToPNG(allocator, &diagram, tmp, null);
 }

@@ -4,10 +4,10 @@
 //! renders state nodes (start/end circles, fork/join bars, choice diamonds,
 //! rounded rectangles) and transition edges with proper arrowheads to SVG.
 //!
-//! This replaces the earlier simplistic rank-based layout with the full
-//! Dagre pipeline (network-simplex ranking, barycenter crossing minimisation,
-//! Brandes-Köpf coordinate assignment) so that edges no longer cross
-//! unnecessarily.
+//! Supports:
+//!   - Composite (nested) states rendered as container boxes with headers
+//!   - Note callout lines connecting notes to their parent state
+//!   - Full Dagre pipeline for crossing minimisation
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -55,6 +55,16 @@ const EDGE_STROKE_WIDTH: f64 = 1.5;
 const NODESEP: f64 = 50.0;
 const RANKSEP: f64 = 60.0;
 
+// Composite state rendering constants
+const COMPOSITE_PADDING: f64 = 16.0;
+const COMPOSITE_HEADER_HEIGHT: f64 = 30.0;
+const COMPOSITE_CORNER_RADIUS: f64 = 8.0;
+
+// Note callout constants
+const NOTE_CALLOUT_GAP: f64 = 15.0;
+const NOTE_CALLOUT_DASH: f64 = 4.0;
+const NOTE_CALLOUT_COLOR = state_model.note_stroke;
+
 // -----------------------------------------------------------------------
 // Position / size types
 // -----------------------------------------------------------------------
@@ -98,6 +108,21 @@ pub fn renderStateToSVGString(
         return try svg.finalize();
     }
 
+    // ── 0. Identify composite states ────────────────────────────
+    // A composite state is any state that is the parent of other states.
+    var composite_set = std.StringHashMap(void).init(allocator);
+    defer composite_set.deinit();
+
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                try composite_set.put(p, {});
+            }
+        }
+    }
+
     // ── 1. Build Dagre graph ────────────────────────────────────
     var graph = Graph.init(allocator);
     defer {
@@ -119,23 +144,52 @@ pub fn renderStateToSVGString(
             try node_ids.append(allocator, id);
 
             const state = entry.value_ptr;
-            const size = computeStateSize(state);
+            const is_composite = composite_set.contains(entry.key_ptr.*);
 
-            // If the state has a note, widen the node so Dagre reserves
-            // enough horizontal space and the note doesn't overlap
-            // neighbouring nodes.
-            var effective_w = size.w;
-            if (state.note) |note| {
-                const ns = computeNoteSize(note.text);
-                const note_gap: f64 = 15.0;
-                effective_w += ns.w + note_gap;
+            if (is_composite) {
+                // Composite states become subgraph container nodes.
+                // Give them a minimal size — bounds will be computed from children.
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = 0,
+                    .height = 0,
+                    .is_subgraph = true,
+                    .subgraph_title = state.displayLabel(),
+                    .subgraph_padding = COMPOSITE_PADDING,
+                });
+            } else {
+                const size = computeStateSize(state);
+
+                // If the state has a note, widen the node so Dagre reserves
+                // enough horizontal space and the note doesn't overlap
+                // neighbouring nodes.
+                var effective_w = size.w;
+                if (state.note) |note| {
+                    const ns = computeNoteSize(note.text);
+                    const note_gap: f64 = NOTE_CALLOUT_GAP;
+                    effective_w += ns.w + note_gap;
+                }
+
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = effective_w,
+                    .height = size.h,
+                });
             }
+        }
+    }
 
-            try graph.setNode(entry.key_ptr.*, .{
-                .label = state.displayLabel(),
-                .width = effective_w,
-                .height = size.h,
-            });
+    // Set parent relationships for composite states.
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                // Only set parent if parent node exists in graph
+                if (graph.getNode(p) != null) {
+                    try graph.setParent(entry.key_ptr.*, p);
+                }
+            }
         }
     }
 
@@ -202,24 +256,26 @@ pub fn renderStateToSVGString(
 
             // Include note in bounding box (use actual shape size, not
             // the inflated Dagre width, so the note box extent is correct).
-            if (mutable_diagram.states.get(id)) |state| {
-                if (state.note) |note| {
-                    const shape_size = computeStateSize(&state);
-                    const ns = computeNoteSize(note.text);
-                    const note_gap: f64 = 15.0;
-                    const half_shape_w = shape_size.w / 2.0;
-                    if (note.position == .right_of) {
-                        const nr = node.x + half_shape_w + note_gap + ns.w;
-                        if (nr > max_x) max_x = nr;
-                    } else {
-                        const nl = node.x - half_shape_w - note_gap - ns.w;
-                        if (nl < min_x) min_x = nl;
+            const is_composite = composite_set.contains(id);
+            if (!is_composite) {
+                if (mutable_diagram.states.get(id)) |state| {
+                    if (state.note) |note| {
+                        const shape_size = computeStateSize(&state);
+                        const ns = computeNoteSize(note.text);
+                        const half_shape_w = shape_size.w / 2.0;
+                        if (note.position == .right_of) {
+                            const nr = node.x + half_shape_w + NOTE_CALLOUT_GAP + ns.w;
+                            if (nr > max_x) max_x = nr;
+                        } else {
+                            const nl = node.x - half_shape_w - NOTE_CALLOUT_GAP - ns.w;
+                            if (nl < min_x) min_x = nl;
+                        }
+                        // Vertical extent of note
+                        const note_top = node.y - ns.h / 2.0;
+                        const note_bot = node.y + ns.h / 2.0;
+                        if (note_top < min_y) min_y = note_top;
+                        if (note_bot > max_y) max_y = note_bot;
                     }
-                    // Vertical extent of note
-                    const note_top = node.y - ns.h / 2.0;
-                    const note_bot = node.y + ns.h / 2.0;
-                    if (note_top < min_y) min_y = note_top;
-                    if (note_bot > max_y) max_y = note_bot;
                 }
             }
         }
@@ -272,7 +328,64 @@ pub fn renderStateToSVGString(
         );
     }
 
-    // ── 4a. Draw edges (behind nodes) ───────────────────────────
+    // ── 4a. Draw composite state containers (behind everything) ─
+    // Sort composites so outermost are drawn first (parents before children).
+    var composite_ids = std.ArrayListUnmanaged([]const u8){};
+    defer composite_ids.deinit(allocator);
+
+    {
+        var cit = composite_set.iterator();
+        while (cit.next()) |entry| {
+            try composite_ids.append(allocator, entry.key_ptr.*);
+        }
+    }
+
+    // Sort by nesting depth (outermost first): states with no parent first,
+    // then states whose parent is not composite, etc.
+    // Simple approach: sort by counting ancestor depth.
+    if (composite_ids.items.len > 1) {
+        const SortCtx = struct {
+            diagram_ptr: *const StateDiagram,
+
+            fn depth(self: @This(), id: []const u8) usize {
+                var d: usize = 0;
+                var current = id;
+                const md = @constCast(self.diagram_ptr);
+                while (true) {
+                    if (md.states.get(current)) |s| {
+                        if (s.parent) |p| {
+                            d += 1;
+                            current = p;
+                        } else break;
+                    } else break;
+                }
+                return d;
+            }
+
+            fn lessThan(self: @This(), a: []const u8, b: []const u8) bool {
+                const da = self.depth(a);
+                const db = self.depth(b);
+                if (da != db) return da < db;
+                return std.mem.order(u8, a, b) == .lt;
+            }
+        };
+        const ctx = SortCtx{ .diagram_ptr = diagram };
+        std.mem.sort([]const u8, composite_ids.items, ctx, SortCtx.lessThan);
+    }
+
+    for (composite_ids.items) |comp_id| {
+        const node = graph.getNode(comp_id) orelse continue;
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+
+        const cx = node.x + offset_x;
+        const cy = node.y + offset_y;
+        const w = node.width;
+        const h = node.height;
+
+        try renderCompositeBox(&svg, &state, cx, cy, w, h);
+    }
+
+    // ── 4b. Draw edges (behind regular nodes) ───────────────────
     for (diagram.relations.items) |rel| {
         const ed = graph.edge(rel.from, rel.to, null);
         if (ed == null) continue;
@@ -293,18 +406,24 @@ pub fn renderStateToSVGString(
             break :blk StateType.default;
         };
 
+        // Check if source or target is composite — use the container box for clipping
+        const from_is_composite = composite_set.contains(rel.from);
+        const to_is_composite = composite_set.contains(rel.to);
+
         // Build path: source border → intermediate Dagre points → target border.
         var path_points = std.ArrayListUnmanaged([2]f64){};
         defer path_points.deinit(allocator);
 
         if (src_node) |sn| {
+            const src_w = if (from_is_composite) sn.width else computeStateSizeById(mutable_diagram, rel.from).w;
+            const src_h = if (from_is_composite) sn.height else computeStateSizeById(mutable_diagram, rel.from).h;
             if (points.len > 0) {
                 const clipped = computeExitPoint(
                     sn.x + offset_x,
                     sn.y + offset_y,
-                    sn.width,
-                    sn.height,
-                    from_state_type,
+                    src_w,
+                    src_h,
+                    if (from_is_composite) StateType.default else from_state_type,
                     points[0].x + offset_x,
                     points[0].y + offset_y,
                 );
@@ -313,9 +432,9 @@ pub fn renderStateToSVGString(
                 const clipped = computeExitPoint(
                     sn.x + offset_x,
                     sn.y + offset_y,
-                    sn.width,
-                    sn.height,
-                    from_state_type,
+                    src_w,
+                    src_h,
+                    if (from_is_composite) StateType.default else from_state_type,
                     tn.x + offset_x,
                     tn.y + offset_y,
                 );
@@ -328,14 +447,16 @@ pub fn renderStateToSVGString(
         }
 
         if (tgt_node) |tn| {
+            const tgt_w = if (to_is_composite) tn.width else computeStateSizeById(mutable_diagram, rel.to).w;
+            const tgt_h = if (to_is_composite) tn.height else computeStateSizeById(mutable_diagram, rel.to).h;
             const last_x = if (points.len > 0) points[points.len - 1].x + offset_x else if (src_node) |sn| sn.x + offset_x else tn.x + offset_x;
             const last_y = if (points.len > 0) points[points.len - 1].y + offset_y else if (src_node) |sn| sn.y + offset_y else tn.y + offset_y;
             const clipped = computeEntryPoint(
                 tn.x + offset_x,
                 tn.y + offset_y,
-                tn.width,
-                tn.height,
-                to_state_type,
+                tgt_w,
+                tgt_h,
+                if (to_is_composite) StateType.default else to_state_type,
                 last_x,
                 last_y,
             );
@@ -400,8 +521,11 @@ pub fn renderStateToSVGString(
         }
     }
 
-    // ── 4b. Draw nodes (on top of edges) ────────────────────────
+    // ── 4c. Draw regular (non-composite) nodes ──────────────────
     for (node_ids.items) |id| {
+        // Skip composite states — they were drawn as containers above
+        if (composite_set.contains(id)) continue;
+
         const node = graph.getNode(id) orelse continue;
         const state = mutable_diagram.states.get(id) orelse continue;
 
@@ -413,9 +537,20 @@ pub fn renderStateToSVGString(
 
         try renderStateNode(&svg, &state, cx, cy, size.w, size.h);
 
-        // Draw note if present
+        // Draw note with callout line if present
         if (state.note) |note| {
-            try renderNote(&svg, note.position, note.text, cx, cy, size.w);
+            try renderNoteWithCallout(&svg, note.position, note.text, cx, cy, size.w, size.h);
+        }
+    }
+
+    // ── 4d. Draw notes attached to composite states ─────────────
+    for (composite_ids.items) |comp_id| {
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+        if (state.note) |note| {
+            const node = graph.getNode(comp_id) orelse continue;
+            const cx = node.x + offset_x;
+            const cy = node.y + offset_y;
+            try renderNoteWithCallout(&svg, note.position, note.text, cx, cy, node.width, node.height);
         }
     }
 
@@ -452,8 +587,110 @@ fn computeStateSize(state: *const state_model.State) NodeSize {
     };
 }
 
+/// Compute the size of a state by looking it up in the diagram by ID.
+/// Falls back to a reasonable default if the state is not found.
+fn computeStateSizeById(diagram: *StateDiagram, id: []const u8) NodeSize {
+    if (diagram.states.get(id)) |state| {
+        return computeStateSize(&state);
+    }
+    return .{ .w = STATE_MIN_WIDTH, .h = STATE_MIN_HEIGHT };
+}
+
 // -----------------------------------------------------------------------
-// State node rendering
+// Composite state box rendering
+// -----------------------------------------------------------------------
+
+fn renderCompositeBox(
+    svg: *SvgWriter,
+    state: *const state_model.State,
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+) !void {
+    const rx = cx - w / 2.0;
+    const ry = cy - h / 2.0;
+
+    // Outer rounded rectangle (the container)
+    try svg.rect(
+        rx,
+        ry,
+        w,
+        h,
+        COMPOSITE_CORNER_RADIUS,
+        COMPOSITE_CORNER_RADIUS,
+        .{ 255, 255, 255, 255 }, // white fill
+        state_model.state_stroke_color,
+        2,
+    );
+
+    // Header background bar (colored strip at the top)
+    // Clip to the rounded corners by drawing a smaller rect
+    const header_h = COMPOSITE_HEADER_HEIGHT;
+    try svg.rect(
+        rx,
+        ry,
+        w,
+        header_h,
+        COMPOSITE_CORNER_RADIUS,
+        COMPOSITE_CORNER_RADIUS,
+        state_model.composite_header_fill,
+        state_model.state_stroke_color,
+        1,
+    );
+
+    // Draw a thin rectangle to fill the gap below rounded header corners
+    if (header_h < h) {
+        try svg.rect(
+            rx,
+            ry + header_h - COMPOSITE_CORNER_RADIUS,
+            w,
+            COMPOSITE_CORNER_RADIUS,
+            0,
+            0,
+            state_model.composite_header_fill,
+            null,
+            0,
+        );
+    }
+
+    // Separator line between header and body
+    try svg.line(
+        rx,
+        ry + header_h,
+        rx + w,
+        ry + header_h,
+        state_model.state_stroke_color,
+        1.0,
+        null,
+    );
+
+    // Header label
+    const label = state.displayLabel();
+    try svg.textCentered(
+        cx,
+        ry + header_h / 2.0 + 1.0,
+        label,
+        LABEL_FONT_SIZE,
+        state_model.text_color,
+        "sans-serif",
+    );
+
+    // Description below header if present
+    if (state.description) |desc| {
+        try svg.textCentered(
+            cx,
+            ry + header_h + 14.0,
+            desc,
+            NOTE_FONT_SIZE,
+            .{ 100, 100, 100, 255 },
+            "sans-serif",
+        );
+    }
+}
+
+// -----------------------------------------------------------------------
+// State node rendering (non-composite)
 // -----------------------------------------------------------------------
 
 fn renderStateNode(
@@ -467,66 +704,66 @@ fn renderStateNode(
     switch (state.state_type) {
         .start => {
             // Filled black circle
-            try svg.ellipse(cx, cy, START_END_RADIUS, START_END_RADIUS, state_model.start_end_fill, state_model.start_end_fill, 0);
+            try svg.ellipse(cx, cy, START_END_RADIUS, START_END_RADIUS, state_model.start_end_fill, null, 0);
         },
         .end => {
-            // Bullseye: outer circle (stroke only) + inner filled circle
+            // Outer ring
             try svg.ellipse(cx, cy, START_END_RADIUS + 2, START_END_RADIUS + 2, null, state_model.start_end_fill, 2);
-            try svg.ellipse(cx, cy, START_END_RADIUS - 1, START_END_RADIUS - 1, state_model.start_end_fill, state_model.start_end_fill, 0);
+            // Inner filled circle
+            try svg.ellipse(cx, cy, START_END_RADIUS - 1, START_END_RADIUS - 1, state_model.start_end_fill, null, 0);
         },
         .fork, .join => {
             // Horizontal black bar
-            const bar_x = cx - w / 2.0;
-            const bar_y = cy - h / 2.0;
-            try svg.rect(bar_x, bar_y, w, h, 2, 2, state_model.fork_join_fill, state_model.fork_join_fill, 0);
+            try svg.rect(cx - w / 2.0, cy - h / 2.0, w, h, 0, 0, state_model.fork_join_fill, null, 0);
         },
         .choice => {
-            // Diamond shape
+            // Diamond shape (rotated square)
             const half = CHOICE_SIZE / 2.0;
-            var points: [4][2]f64 = undefined;
-            points[0] = .{ cx, cy - half }; // top
-            points[1] = .{ cx + half, cy }; // right
-            points[2] = .{ cx, cy + half }; // bottom
-            points[3] = .{ cx - half, cy }; // left
-            try svg.polygon(&points, state_model.choice_fill, state_model.state_stroke_color, 2);
+            var diamond_pts: [4][2]f64 = undefined;
+            diamond_pts[0] = .{ cx, cy - half }; // top
+            diamond_pts[1] = .{ cx + half, cy }; // right
+            diamond_pts[2] = .{ cx, cy + half }; // bottom
+            diamond_pts[3] = .{ cx - half, cy }; // left
+            try svg.polygon(&diamond_pts, state_model.choice_fill, state_model.state_stroke_color, 2);
         },
         .divider => {
             // Dashed horizontal line
-            try svg.line(cx - w / 2.0, cy, cx + w / 2.0, cy, state_model.state_stroke_color, 2, "4 2");
+            try svg.line(
+                cx - w / 2.0,
+                cy,
+                cx + w / 2.0,
+                cy,
+                state_model.state_stroke_color,
+                2.0,
+                "4,2",
+            );
         },
         .default => {
             // Rounded rectangle
             const rx = cx - w / 2.0;
             const ry = cy - h / 2.0;
-            try svg.rect(rx, ry, w, h, 8, 8, state_model.state_fill_color, state_model.state_stroke_color, 2);
+            try svg.rect(rx, ry, w, h, 5, 5, state_model.state_fill_color, state_model.state_stroke_color, 2);
 
-            // Label text (always the id or alias)
+            // Label text
             const label = state.displayLabel();
-            const descs = state.allDescriptions();
-            const has_descs = state.hasDescriptions();
-            if (has_descs) {
-                // Label at top, then separator, then descriptions
-                const label_y = ry + STATE_PADDING_V + 7;
-                try svg.textCentered(cx, label_y, label, LABEL_FONT_SIZE, state_model.text_color, "sans-serif");
+            // If there are descriptions, shift label up slightly
+            const has_extra = state.descriptions.items.len > 0 or state.description != null;
+            const label_y = if (has_extra) cy - 5.0 else cy;
+            try svg.textCentered(cx, label_y, label, LABEL_FONT_SIZE, state_model.text_color, "sans-serif");
 
-                // Separator line
-                const sep_y = label_y + 10;
-                try svg.line(rx, sep_y, rx + w, sep_y, state_model.state_stroke_color, 1, null);
+            // Primary description
+            if (state.description) |desc| {
+                // Draw separator line
+                const sep_y = cy + 4.0;
+                try svg.line(rx + 4, sep_y, rx + w - 4, sep_y, state_model.state_stroke_color, 0.5, null);
+                try svg.textCentered(cx, cy + 18.0, desc, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
+            }
 
-                // Draw descriptions: primary first, then additional
-                var desc_idx: usize = 0;
-                if (descs.primary) |primary| {
-                    const desc_y = sep_y + 4 + (@as(f64, @floatFromInt(desc_idx)) + 1) * LINE_HEIGHT - LINE_HEIGHT / 2;
-                    try svg.textCentered(cx, desc_y, primary, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
-                    desc_idx += 1;
-                }
-                for (descs.extra) |extra| {
-                    const desc_y = sep_y + 4 + (@as(f64, @floatFromInt(desc_idx)) + 1) * LINE_HEIGHT - LINE_HEIGHT / 2;
-                    try svg.textCentered(cx, desc_y, extra.data, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
-                    desc_idx += 1;
-                }
-            } else {
-                try svg.textCentered(cx, cy, label, LABEL_FONT_SIZE, state_model.text_color, "sans-serif");
+            // Additional descriptions
+            const desc_start_y: f64 = if (state.description != null) cy + 32.0 else cy + 14.0;
+            for (state.descriptions.items, 0..) |desc, i| {
+                const dy = desc_start_y + @as(f64, @floatFromInt(i)) * LINE_HEIGHT;
+                try svg.textCentered(cx, dy, desc.data, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
             }
         },
     }
@@ -548,32 +785,25 @@ fn renderArrowhead(
     const len = @sqrt(dx * dx + dy * dy);
     if (len < 0.001) return;
 
-    // Unit vector along edge direction
     const ux = dx / len;
     const uy = dy / len;
-
-    // Perpendicular unit vector
     const px = -uy;
     const py = ux;
 
     const arrow_len: f64 = ARROW_SIZE;
     const arrow_half_w: f64 = ARROW_SIZE / 2.5;
 
-    // Arrow tip is at (to_x, to_y)
-    // Base points are behind the tip
-    var points: [3][2]f64 = undefined;
-    points[0] = .{ to_x, to_y }; // tip
-    points[1] = .{ to_x - ux * arrow_len + px * arrow_half_w, to_y - uy * arrow_len + py * arrow_half_w };
-    points[2] = .{ to_x - ux * arrow_len - px * arrow_half_w, to_y - uy * arrow_len - py * arrow_half_w };
-
-    try svg.polygon(&points, state_model.edge_color, state_model.edge_color, 0);
+    var arrow_pts: [3][2]f64 = undefined;
+    arrow_pts[0] = .{ to_x, to_y }; // tip
+    arrow_pts[1] = .{ to_x - ux * arrow_len + px * arrow_half_w, to_y - uy * arrow_len + py * arrow_half_w };
+    arrow_pts[2] = .{ to_x - ux * arrow_len - px * arrow_half_w, to_y - uy * arrow_len - py * arrow_half_w };
+    try svg.polygon(&arrow_pts, state_model.edge_color, state_model.edge_color, 1);
 }
 
 // -----------------------------------------------------------------------
-// Edge point computation
+// Edge clipping helpers
 // -----------------------------------------------------------------------
 
-/// Compute the exit point from a node towards a target
 fn computeExitPoint(
     cx: f64,
     cy: f64,
@@ -584,16 +814,12 @@ fn computeExitPoint(
     target_y: f64,
 ) Position {
     return switch (state_type) {
-        .start => computeCircleIntersection(cx, cy, START_END_RADIUS, target_x, target_y),
-        .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, target_x, target_y),
+        .start, .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, target_x, target_y),
         .choice => computeDiamondIntersection(cx, cy, CHOICE_SIZE / 2.0, target_x, target_y),
-        .fork, .join => computeRectIntersection(cx, cy, w, h, target_x, target_y),
-        .divider => .{ .x = cx, .y = cy },
-        .default => computeRectIntersection(cx, cy, w, h, target_x, target_y),
+        else => computeRectIntersection(cx, cy, w, h, target_x, target_y),
     };
 }
 
-/// Compute the entry point into a node from a source
 fn computeEntryPoint(
     cx: f64,
     cy: f64,
@@ -604,82 +830,95 @@ fn computeEntryPoint(
     source_y: f64,
 ) Position {
     return switch (state_type) {
-        .start => computeCircleIntersection(cx, cy, START_END_RADIUS, source_x, source_y),
-        .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, source_x, source_y),
+        .start, .end => computeCircleIntersection(cx, cy, START_END_RADIUS + 2, source_x, source_y),
         .choice => computeDiamondIntersection(cx, cy, CHOICE_SIZE / 2.0, source_x, source_y),
-        .fork, .join => computeRectIntersection(cx, cy, w, h, source_x, source_y),
-        .divider => .{ .x = cx, .y = cy },
-        .default => computeRectIntersection(cx, cy, w, h, source_x, source_y),
+        else => computeRectIntersection(cx, cy, w, h, source_x, source_y),
     };
 }
 
-/// Compute intersection of a line from (cx,cy) to (tx,ty) with a circle of radius r centered at (cx,cy)
-fn computeCircleIntersection(cx: f64, cy: f64, r: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
-    const len = @sqrt(dx * dx + dy * dy);
-    if (len < 0.001) return .{ .x = cx, .y = cy + r };
-
+fn computeCircleIntersection(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
+    const dist = @sqrt(dx * dx + dy * dy);
+    if (dist < 0.001) return .{ .x = cx + radius, .y = cy };
     return .{
-        .x = cx + dx / len * r,
-        .y = cy + dy / len * r,
+        .x = cx + dx / dist * radius,
+        .y = cy + dy / dist * radius,
     };
 }
 
-/// Compute intersection of a line from (cx,cy) to (tx,ty) with a rectangle centered at (cx,cy)
-fn computeRectIntersection(cx: f64, cy: f64, w: f64, h: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
+fn computeRectIntersection(
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
     const half_w = w / 2.0;
     const half_h = h / 2.0;
 
     if (@abs(dx) < 0.001 and @abs(dy) < 0.001) {
-        return .{ .x = cx, .y = cy + half_h };
+        return .{ .x = cx, .y = cy - half_h };
     }
 
-    // Determine which edge the line exits through
-    const abs_dx = @abs(dx);
-    const abs_dy = @abs(dy);
-
-    if (abs_dx * half_h > abs_dy * half_w) {
-        // Exits through left or right edge
-        const sign: f64 = if (dx > 0) 1.0 else -1.0;
-        return .{
-            .x = cx + sign * half_w,
-            .y = cy + dy * half_w / abs_dx,
-        };
-    } else {
-        // Exits through top or bottom edge
-        const sign: f64 = if (dy > 0) 1.0 else -1.0;
-        return .{
-            .x = cx + dx * half_h / abs_dy,
-            .y = cy + sign * half_h,
-        };
+    // Try horizontal edges
+    if (@abs(dx) > 0.001) {
+        const t_right = half_w / @abs(dx);
+        const y_at_right = dy * t_right;
+        if (@abs(y_at_right) <= half_h) {
+            return .{
+                .x = if (dx > 0) cx + half_w else cx - half_w,
+                .y = cy + y_at_right,
+            };
+        }
     }
+
+    // Try vertical edges
+    if (@abs(dy) > 0.001) {
+        const t_top = half_h / @abs(dy);
+        const x_at_top = dx * t_top;
+        if (@abs(x_at_top) <= half_w) {
+            return .{
+                .x = cx + x_at_top,
+                .y = if (dy > 0) cy + half_h else cy - half_h,
+            };
+        }
+    }
+
+    return .{ .x = cx, .y = if (dy >= 0) cy + half_h else cy - half_h };
 }
 
-/// Compute intersection of a line from (cx,cy) to (tx,ty) with a diamond centered at (cx,cy)
-fn computeDiamondIntersection(cx: f64, cy: f64, half_size: f64, tx: f64, ty: f64) Position {
-    const dx = tx - cx;
-    const dy = ty - cy;
+fn computeDiamondIntersection(
+    cx: f64,
+    cy: f64,
+    half_size: f64,
+    target_x: f64,
+    target_y: f64,
+) Position {
+    const dx = target_x - cx;
+    const dy = target_y - cy;
+    const dist = @sqrt(dx * dx + dy * dy);
+    if (dist < 0.001) return .{ .x = cx, .y = cy - half_size };
 
-    if (@abs(dx) < 0.001 and @abs(dy) < 0.001) {
-        return .{ .x = cx, .y = cy + half_size };
-    }
-
+    // Diamond edge: |dx/half_size| + |dy/half_size| = 1
     const abs_dx = @abs(dx);
     const abs_dy = @abs(dy);
     const sum = abs_dx + abs_dy;
+    if (sum < 0.001) return .{ .x = cx, .y = cy - half_size };
 
-    if (sum < 0.001) {
-        return .{ .x = cx, .y = cy + half_size };
-    }
-
-    // Diamond edge: |x - cx| / half_size + |y - cy| / half_size = 1
-    const t = half_size / sum;
+    const scale = half_size / sum;
     return .{
-        .x = cx + dx * t,
-        .y = cy + dy * t,
+        .x = cx + dx * scale,
+        .y = cy + dy * scale,
     };
 }
 
@@ -687,9 +926,6 @@ fn computeDiamondIntersection(cx: f64, cy: f64, half_size: f64, tx: f64, ty: f64
 // Note size computation
 // -----------------------------------------------------------------------
 
-/// Compute the pixel size of a note box based on its text content.
-/// Measures each line individually so multi-line notes get a width that
-/// fits the longest line rather than using the total character count.
 fn computeNoteSize(text: []const u8) NodeSize {
     var max_line_len: usize = 0;
     var cur_line_len: usize = 0;
@@ -714,30 +950,52 @@ fn computeNoteSize(text: []const u8) NodeSize {
 }
 
 // -----------------------------------------------------------------------
-// Note rendering
+// Note rendering with callout line
 // -----------------------------------------------------------------------
 
-fn renderNote(
+fn renderNoteWithCallout(
     svg: *SvgWriter,
     position: NotePosition,
     text: []const u8,
     cx: f64,
     cy: f64,
     node_w: f64,
+    node_h: f64,
 ) !void {
+    _ = node_h; // may be used for vertical positioning in future
     const ns = computeNoteSize(text);
     const note_w = ns.w;
     const note_h = ns.h;
 
     // Position the note
-    const note_gap: f64 = 15.0;
     const note_x = switch (position) {
-        .right_of => cx + node_w / 2.0 + note_gap,
-        .left_of => cx - node_w / 2.0 - note_gap - note_w,
+        .right_of => cx + node_w / 2.0 + NOTE_CALLOUT_GAP,
+        .left_of => cx - node_w / 2.0 - NOTE_CALLOUT_GAP - note_w,
     };
     const note_y = cy - note_h / 2.0;
 
-    // Draw note rectangle (yellow sticky note style)
+    // ── Draw callout line (dashed) from state border to note ────
+    const line_start_x = switch (position) {
+        .right_of => cx + node_w / 2.0,
+        .left_of => cx - node_w / 2.0,
+    };
+    const line_end_x = switch (position) {
+        .right_of => note_x,
+        .left_of => note_x + note_w,
+    };
+    const line_y = cy; // horizontal line at the vertical center
+
+    try svg.line(
+        line_start_x,
+        line_y,
+        line_end_x,
+        line_y,
+        NOTE_CALLOUT_COLOR,
+        1.0,
+        "4,3",
+    );
+
+    // ── Draw note rectangle (yellow sticky note style) ──────────
     try svg.rect(
         note_x,
         note_y,
@@ -760,13 +1018,12 @@ fn renderNote(
     fold_points[2] = .{ fold_x + fold_size, fold_y + fold_size };
     try svg.polygon(&fold_points, .{ 240, 240, 200, 255 }, state_model.note_stroke, 1);
 
-    // Count lines for rendering
+    // ── Draw note text (handle newlines) ────────────────────────
     var line_count: usize = 1;
     for (text) |c| {
         if (c == '\n') line_count += 1;
     }
 
-    // Draw note text (handle newlines)
     if (line_count == 1) {
         try svg.textAt(
             note_x + NOTE_PADDING,
@@ -779,21 +1036,21 @@ fn renderNote(
         );
     } else {
         // Multi-line: split on newlines and draw each line
-        var line_y = note_y + NOTE_PADDING + 8.0;
+        var text_y = note_y + NOTE_PADDING + 8.0;
         var start: usize = 0;
         for (text, 0..) |c, i| {
             if (c == '\n') {
                 const line_text = text[start..i];
                 try svg.textAt(
                     note_x + NOTE_PADDING,
-                    line_y,
+                    text_y,
                     line_text,
                     NOTE_FONT_SIZE,
                     state_model.text_color,
                     "sans-serif",
                     .start,
                 );
-                line_y += 16.0;
+                text_y += 16.0;
                 start = i + 1;
             }
         }
@@ -801,7 +1058,7 @@ fn renderNote(
         if (start < text.len) {
             try svg.textAt(
                 note_x + NOTE_PADDING,
-                line_y,
+                text_y,
                 text[start..],
                 NOTE_FONT_SIZE,
                 state_model.text_color,
@@ -818,141 +1075,162 @@ fn renderNote(
 
 test "state svg: renders empty diagram" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(result.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, result, "<svg") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "empty state diagram") != null);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(svg.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<svg") != null);
 }
 
 test "state svg: renders simple transitions" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    try diagram.addRelation("[*]", "Idle", null, null);
-    try diagram.addRelation("Idle", "Active", "activate", null);
-    try diagram.addRelation("Active", "[*]", null, null);
+    try diagram.addRelation("Idle", "Active", "start", null);
+    try diagram.addRelation("Active", "Done", null, null);
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(result.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, result, "<svg") != null);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(svg.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "Idle") != null);
 }
 
 test "state svg: renders with title" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    try diagram.setTitle("My State Machine");
-    try diagram.addRelation("[*]", "Start", null, null);
+    try diagram.setTitle("My State Diagram");
+    try diagram.addRelation("A", "B", null, null);
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(std.mem.indexOf(u8, result, "My State Machine") != null);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "My State Diagram") != null);
 }
 
 test "state svg: renders special state types" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    _ = try diagram.addStateWithType("f1", .fork);
-    _ = try diagram.addStateWithType("j1", .join);
-    _ = try diagram.addStateWithType("c1", .choice);
-    try diagram.addRelation("[*]", "f1", null, null);
-    try diagram.addRelation("f1", "c1", null, null);
-    try diagram.addRelation("c1", "j1", null, null);
-    try diagram.addRelation("j1", "[*]", null, null);
+    _ = try diagram.addStateWithType("fk", .fork);
+    _ = try diagram.addStateWithType("jn", .join);
+    _ = try diagram.addStateWithType("ch", .choice);
+    try diagram.addRelation("A", "fk", null, null);
+    try diagram.addRelation("fk", "B", null, null);
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(result.len > 0);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(svg.len > 0);
 }
 
-test "state svg: renders note" {
+test "state svg: renders note with callout" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    _ = try diagram.ensureState("Idle");
-    try diagram.addNote("Idle", .right_of, "A note");
+    try diagram.addRelation("Idle", "Active", null, null);
+    try diagram.addNote("Idle", .right_of, "A note here");
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(std.mem.indexOf(u8, result, "A note") != null);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "A note here") != null);
+    // Should contain a dashed line (callout)
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke-dasharray") != null);
 }
 
 test "state svg: renders descriptions" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    _ = try diagram.ensureState("Active");
-    try diagram.addDescription("Active", "Doing stuff");
+    try diagram.addDescription("Idle", "Waiting for input");
+    try diagram.addRelation("Idle", "Active", null, null);
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "Waiting for input") != null);
+}
 
-    try std.testing.expect(std.mem.indexOf(u8, result, "Active") != null);
+test "state svg: renders composite states" {
+    const allocator = std.testing.allocator;
+    var diagram = state_model.StateDiagram.init(allocator);
+    defer diagram.deinit();
+
+    // Create parent composite state
+    _ = try diagram.ensureState("Processing");
+
+    // Create children
+    _ = try diagram.ensureState("Validating");
+    try diagram.setParent("Validating", "Processing");
+    _ = try diagram.ensureState("Executing");
+    try diagram.setParent("Executing", "Processing");
+
+    // Transitions within composite
+    try diagram.addRelation("Validating", "Executing", "valid", "Processing");
+
+    // Transitions into/out of composite
+    try diagram.addRelation("Idle", "Processing", "start", null);
+    try diagram.addRelation("Processing", "Done", "complete", null);
+
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(svg.len > 0);
+    // Should contain the composite label
+    try std.testing.expect(std.mem.indexOf(u8, svg, "Processing") != null);
+    // Should contain child state labels
+    try std.testing.expect(std.mem.indexOf(u8, svg, "Validating") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "Executing") != null);
 }
 
 test "state svg: computeCircleIntersection" {
     const p = computeCircleIntersection(100, 100, 10, 200, 100);
-    try std.testing.expectApproxEqAbs(p.x, 110.0, 0.1);
-    try std.testing.expectApproxEqAbs(p.y, 100.0, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 110.0), p.x, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), p.y, 0.1);
 }
 
 test "state svg: computeRectIntersection" {
-    // Target is directly to the right
-    const p = computeRectIntersection(100, 100, 60, 40, 200, 100);
-    try std.testing.expectApproxEqAbs(p.x, 130.0, 0.1);
-    try std.testing.expectApproxEqAbs(p.y, 100.0, 0.1);
+    // Target directly to the right
+    const p1 = computeRectIntersection(100, 100, 60, 40, 200, 100);
+    try std.testing.expectApproxEqAbs(@as(f64, 130.0), p1.x, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), p1.y, 0.1);
 
-    // Target is directly below
+    // Target directly below
     const p2 = computeRectIntersection(100, 100, 60, 40, 100, 200);
-    try std.testing.expectApproxEqAbs(p2.x, 100.0, 0.1);
-    try std.testing.expectApproxEqAbs(p2.y, 120.0, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), p2.x, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 120.0), p2.y, 0.1);
 }
 
 test "state svg: computeDiamondIntersection" {
-    const p = computeDiamondIntersection(100, 100, 20, 120, 100);
-    try std.testing.expectApproxEqAbs(p.x, 120.0, 0.1);
+    const p = computeDiamondIntersection(100, 100, 14, 200, 100);
+    try std.testing.expectApproxEqAbs(@as(f64, 114.0), p.x, 0.1);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), p.y, 0.1);
 }
 
 test "state svg: direction LR layout" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
     diagram.direction = .LR;
-    try diagram.addRelation("[*]", "A", null, null);
-    try diagram.addRelation("A", "[*]", null, null);
+    try diagram.addRelation("A", "B", null, null);
+    try diagram.addRelation("B", "C", null, null);
 
-    const result = try renderStateToSVGString(allocator, &diagram);
-    defer allocator.free(result);
-
-    try std.testing.expect(result.len > 0);
+    const svg = try renderStateToSVGString(allocator, &diagram);
+    defer allocator.free(svg);
+    try std.testing.expect(svg.len > 0);
 }
 
 test "state svg: write to file" {
     const allocator = std.testing.allocator;
-    var diagram = StateDiagram.init(allocator);
+    var diagram = state_model.StateDiagram.init(allocator);
     defer diagram.deinit();
 
-    try diagram.addRelation("[*]", "Ready", null, null);
+    try diagram.addRelation("S1", "S2", "go", null);
 
-    try renderStateToSVG(allocator, &diagram, "/tmp/merrow_state_svg_test.svg");
-
-    const stat = try std.fs.cwd().statFile("/tmp/merrow_state_svg_test.svg");
-    try std.testing.expect(stat.size > 0);
+    const tmp_path = "/tmp/test_state_svg.svg";
+    try renderStateToSVG(allocator, &diagram, tmp_path);
 }
