@@ -174,6 +174,7 @@ pub fn main() !void {
     // ---------------------------------------------------------------
     var bulk_mode = false;
     var force_svg = false;
+    var verbose = false;
     var positional_buf: [8][]const u8 = undefined;
     var positional_count: usize = 0;
 
@@ -182,6 +183,8 @@ pub fn main() !void {
             bulk_mode = true;
         } else if (std.mem.eql(u8, arg, "--svg")) {
             force_svg = true;
+        } else if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
+            verbose = true;
         } else if (!std.mem.startsWith(u8, arg, "--")) {
             if (positional_count < positional_buf.len) {
                 positional_buf[positional_count] = arg;
@@ -439,6 +442,175 @@ pub fn main() !void {
     }
 
     // ---------------------------------------------------------------
+    // Verbose layout analysis
+    // ---------------------------------------------------------------
+    if (verbose) {
+        std.debug.print("\n=== VERBOSE LAYOUT ANALYSIS ===\n\n", .{});
+
+        // 1. List all containers (subgraph nodes) with sizes
+        std.debug.print("--- Containers (subgraph nodes) ---\n", .{});
+        var container_count: usize = 0;
+        for (node_ids) |id| {
+            if (graph.getNode(id)) |node| {
+                if (node.is_subgraph) {
+                    const title = node.subgraph_title orelse node.label orelse id;
+                    std.debug.print("  Container '{s}' (id='{s}')\n", .{ title, id });
+                    std.debug.print("    Position: ({d:.1}, {d:.1})\n", .{ node.x, node.y });
+                    std.debug.print("    Size:     {d:.1} x {d:.1}\n", .{ node.width, node.height });
+                    const left = node.x - node.width / 2.0;
+                    const right = node.x + node.width / 2.0;
+                    const top = node.y - node.height / 2.0;
+                    const bottom = node.y + node.height / 2.0;
+                    std.debug.print("    Bounds:   left={d:.1} right={d:.1} top={d:.1} bottom={d:.1}\n", .{
+                        left, right, top, bottom,
+                    });
+
+                    // List children inside this container
+                    const children = graph.getChildren(id);
+                    std.debug.print("    Children ({d}):\n", .{children.len});
+                    var all_inside = true;
+                    for (children) |cid| {
+                        if (graph.getNode(cid)) |child| {
+                            if (child.is_subgraph or child.dummy) continue;
+                            const clabel = child.label orelse cid;
+                            const c_left = child.x - child.width / 2.0;
+                            const c_right = child.x + child.width / 2.0;
+                            const c_top = child.y - child.height / 2.0;
+                            const c_bottom = child.y + child.height / 2.0;
+                            const inside = c_left >= left - 1.0 and c_right <= right + 1.0 and
+                                c_top >= top - 1.0 and c_bottom <= bottom + 1.0;
+                            if (!inside) all_inside = false;
+                            std.debug.print("      {s}: ({d:.1}, {d:.1}) [{d:.0}x{d:.0}] {s}\n", .{
+                                clabel, child.x, child.y, child.width, child.height,
+                                if (inside) "✓ inside" else "✗ OUTSIDE!",
+                            });
+                        }
+                    }
+                    std.debug.print("    => All children contained: {s}\n\n", .{
+                        if (all_inside) "YES ✓" else "NO ✗ — PROBLEM",
+                    });
+                    container_count += 1;
+                }
+            }
+        }
+        if (container_count == 0) {
+            std.debug.print("  (no containers — flat graph)\n\n", .{});
+        }
+
+        // 2. Check container-container overlap
+        std.debug.print("--- Container overlap check ---\n", .{});
+        {
+            // Collect container bounding boxes
+            const ContRect = struct { id: []const u8, left: f64, right: f64, top: f64, bottom: f64 };
+            var rects = std.ArrayListUnmanaged(ContRect){};
+            defer rects.deinit(allocator);
+
+            for (node_ids) |id| {
+                if (graph.getNode(id)) |node| {
+                    if (node.is_subgraph and node.width > 1.0) {
+                        try rects.append(allocator, .{
+                            .id = id,
+                            .left = node.x - node.width / 2.0,
+                            .right = node.x + node.width / 2.0,
+                            .top = node.y - node.height / 2.0,
+                            .bottom = node.y + node.height / 2.0,
+                        });
+                    }
+                }
+            }
+
+            var overlap_found = false;
+            for (rects.items, 0..) |a, i| {
+                for (rects.items[i + 1 ..]) |b| {
+                    // Check if parent-child (skip those)
+                    const a_parent = graph.getParent(a.id);
+                    const b_parent = graph.getParent(b.id);
+                    const is_nested = blk: {
+                        if (a_parent) |p| {
+                            if (std.mem.eql(u8, p, b.id)) break :blk true;
+                        }
+                        if (b_parent) |p| {
+                            if (std.mem.eql(u8, p, a.id)) break :blk true;
+                        }
+                        break :blk false;
+                    };
+                    if (is_nested) continue;
+
+                    const h_overlap = a.left < b.right and a.right > b.left;
+                    const v_overlap = a.top < b.bottom and a.bottom > b.top;
+                    if (h_overlap and v_overlap) {
+                        std.debug.print("  ✗ OVERLAP: '{s}' and '{s}'\n", .{ a.id, b.id });
+                        overlap_found = true;
+                    }
+                }
+            }
+            if (!overlap_found) {
+                std.debug.print("  ✓ No container overlaps\n", .{});
+            }
+        }
+
+        // 3. Analyse inter-container edges
+        std.debug.print("\n--- Inter-container edge analysis ---\n", .{});
+        {
+            var edge_it = graph.edgeIterator();
+            var inter_count: usize = 0;
+            var intra_count: usize = 0;
+            while (edge_it.next()) |entry| {
+                const v_parent = graph.getParent(entry.v);
+                const w_parent = graph.getParent(entry.w);
+                const v_node = graph.getNode(entry.v);
+                const w_node = graph.getNode(entry.w);
+                if (v_node == null or w_node == null) continue;
+                // Skip dummy nodes
+                if (v_node.?.dummy or w_node.?.dummy) continue;
+
+                const same_parent = blk: {
+                    if (v_parent == null and w_parent == null) break :blk true;
+                    if (v_parent) |vp| {
+                        if (w_parent) |wp| {
+                            break :blk std.mem.eql(u8, vp, wp);
+                        }
+                    }
+                    break :blk false;
+                };
+
+                if (same_parent) {
+                    intra_count += 1;
+                } else {
+                    inter_count += 1;
+                    const v_label = v_node.?.label orelse entry.v;
+                    const w_label = w_node.?.label orelse entry.w;
+                    const v_cont = v_parent orelse "(root)";
+                    const w_cont = w_parent orelse "(root)";
+
+                    // Check if edge has pre-computed points
+                    const has_points = entry.data.points.items.len > 0;
+                    std.debug.print("  {s}[{s}] -> {s}[{s}]", .{
+                        v_label, v_cont, w_label, w_cont,
+                    });
+                    if (has_points) {
+                        std.debug.print(" ({d} waypoints)\n", .{entry.data.points.items.len});
+                    } else {
+                        std.debug.print(" (no waypoints — uses dummy chain)\n", .{});
+                    }
+                }
+            }
+            std.debug.print("  Summary: {d} intra-container, {d} inter-container edges\n", .{
+                intra_count, inter_count,
+            });
+        }
+
+        // 4. Success criteria summary
+        std.debug.print("\n--- Success criteria (from container-edges-first.md) ---\n", .{});
+        std.debug.print("  1. Containers tightly sized:  (check sizes above)\n", .{});
+        std.debug.print("  2. No edge crosses foreign container: (check edge routing above)\n", .{});
+        std.debug.print("  3. Flat diagrams unchanged:   (flat path = no subgraphs)\n", .{});
+        std.debug.print("  4. Subgraph diagrams clean:   (visual inspection needed)\n", .{});
+        std.debug.print("  5. zig build test passes:     (run separately)\n", .{});
+        std.debug.print("\n=== END VERBOSE ===\n\n", .{});
+    }
+
+    // ---------------------------------------------------------------
     // Render to output format
     // ---------------------------------------------------------------
     const render_config = RenderConfig{
@@ -489,11 +661,15 @@ pub fn main() !void {
 
 fn printUsage(prog: []const u8) void {
     std.debug.print("Usage:\n", .{});
-    std.debug.print("  {s} <input.mmd> [output.png|output.svg] [--svg]\n", .{prog});
+    std.debug.print("  {s} <input.mmd> [output.png|output.svg] [--svg] [--verbose]\n", .{prog});
     std.debug.print("  {s} --bulk <infolder> <outfolder> [--force] [--svg]\n\n", .{prog});
     std.debug.print("Renders Mermaid diagrams to PNG or SVG images.\n", .{});
     std.debug.print("Supports: flowchart/graph, sequenceDiagram, pie, classDiagram,\n", .{});
     std.debug.print("          stateDiagram, journey, erDiagram, gantt\n\n", .{});
+    std.debug.print("Options:\n", .{});
+    std.debug.print("  --svg       Force SVG output\n", .{});
+    std.debug.print("  --verbose   Print detailed layout analysis (containers, edges, overlaps)\n", .{});
+    std.debug.print("  -v          Short form of --verbose\n\n", .{});
     std.debug.print("Single file mode:\n", .{});
     std.debug.print("  Output format is auto-detected from the file extension.\n", .{});
     std.debug.print("  Use --svg to force SVG output when no extension is given.\n\n", .{});
