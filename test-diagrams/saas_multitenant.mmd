@@ -1,0 +1,56 @@
+flowchart TD
+    subgraph Tenants[Tenant Access]
+        T1[Tenant A]
+        T2[Tenant B]
+        T3[Tenant C]
+    end
+
+    subgraph Gateway[API Gateway Layer]
+        LB[Load Balancer]
+        Auth[Auth & Tenant Resolution]
+        Rate[Rate Limiter]
+        LB --> Auth
+        Auth --> Rate
+    end
+
+    subgraph AppTier[Application Tier]
+        subgraph Core[Core Services]
+            UserSvc[User Service]
+            BillSvc[Billing Service]
+            NotifSvc[Notification Service]
+        end
+        subgraph Workflow[Workflow Engine]
+            Sched[Task Scheduler]
+            Queue[Job Queue]
+            Exec[Executor Pool]
+            Sched --> Queue
+            Queue --> Exec
+        end
+        UserSvc --> NotifSvc
+        BillSvc --> NotifSvc
+    end
+
+    subgraph DataTier[Data Tier]
+        subgraph Primary[Primary Storage]
+            PG[(PostgreSQL)]
+            Redis[(Redis Cache)]
+        end
+        subgraph Analytics[Analytics Store]
+            DW[(Data Warehouse)]
+            ES[(Elasticsearch)]
+        end
+        PG --> DW
+    end
+
+    T1 --> LB
+    T2 --> LB
+    T3 --> LB
+    Rate --> UserSvc
+    Rate --> BillSvc
+    Exec --> PG
+    Exec --> Redis
+    UserSvc --> PG
+    BillSvc --> PG
+    NotifSvc --> Queue
+    UserSvc --> Redis
+    UserSvc --> ES

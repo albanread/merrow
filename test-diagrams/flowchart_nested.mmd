@@ -1,0 +1,33 @@
+flowchart TD
+    subgraph Cloud[Cloud Platform]
+        subgraph Frontend[Frontend Tier]
+            WebApp[React App]
+            CDN[CDN Cache]
+            WebApp --> CDN
+        end
+        subgraph Backend[Backend Tier]
+            subgraph API[API Layer]
+                Gateway[API Gateway]
+                Auth[Auth Service]
+                Gateway --> Auth
+            end
+            subgraph Workers[Worker Pool]
+                W1[Worker 1]
+                W2[Worker 2]
+                W3[Worker 3]
+            end
+            Auth --> W1
+            Auth --> W2
+        end
+        subgraph Data[Data Tier]
+            DB[(Database)]
+            Cache[(Redis)]
+            DB --> Cache
+        end
+    end
+
+    User[User] --> WebApp
+    CDN --> Gateway
+    W1 --> DB
+    W2 --> DB
+    W3 --> Cache

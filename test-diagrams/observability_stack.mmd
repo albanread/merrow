@@ -1,0 +1,53 @@
+flowchart TD
+    subgraph Sources[Data Sources]
+        App1[App Server Logs]
+        App2[Database Logs]
+        App3[Network Traffic]
+        Agents[Host Agents]
+    end
+
+    subgraph Ingestion[Ingestion Layer]
+        subgraph Collectors[Log Collectors]
+            Fluentd[Fluentd]
+            Beats[Filebeat]
+        end
+        subgraph Stream[Stream Processing]
+            KafkaIn[Kafka Ingest]
+            Flink[Apache Flink]
+            KafkaIn --> Flink
+        end
+        Fluentd --> KafkaIn
+        Beats --> KafkaIn
+    end
+
+    subgraph Storage[Storage & Index]
+        subgraph HotStore[Hot Storage]
+            ES[(Elasticsearch)]
+            TSdb[(TimescaleDB)]
+        end
+        subgraph ColdStore[Cold Storage]
+            S3[S3 Archive]
+            Glacier[Glacier Deep]
+            S3 --> Glacier
+        end
+        ES --> S3
+    end
+
+    subgraph Analysis[Analysis & Alerting]
+        Grafana[Grafana Dashboards]
+        AlertMgr[Alert Manager]
+        PagerDuty[PagerDuty]
+        Runbook[Runbook Automation]
+        AlertMgr --> PagerDuty
+        AlertMgr --> Runbook
+    end
+
+    App1 --> Fluentd
+    App2 --> Fluentd
+    App3 --> Beats
+    Agents --> Beats
+    Flink --> ES
+    Flink --> TSdb
+    ES --> Grafana
+    TSdb --> Grafana
+    Grafana --> AlertMgr

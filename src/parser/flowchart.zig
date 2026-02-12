@@ -26,6 +26,58 @@ pub const ParserError = error{
 /// Maximum nesting depth for subgraphs.
 const max_subgraph_depth: usize = 16;
 
+/// Strip HTML tags from label text, replacing common tags like <br>, <br/>,
+/// <br />, <b>, </b>, <i>, </i>, etc. with a space (for line-break tags)
+/// or nothing (for formatting tags).  Operates in-place on the buffer and
+/// returns the trimmed length.
+fn stripHtmlTags(buf: []u8) usize {
+    var read: usize = 0;
+    var write: usize = 0;
+    while (read < buf.len) {
+        if (buf[read] == '<') {
+            // Find the closing '>'.
+            var end = read + 1;
+            while (end < buf.len and buf[end] != '>') : (end += 1) {}
+            if (end < buf.len) {
+                // Extract tag content (between < and >).
+                const tag = buf[read + 1 .. end];
+                // Check if it's a line-break tag: br, br/, br /
+                const is_br = isBrTag(tag);
+                end += 1; // skip '>'
+                if (is_br) {
+                    // Replace <br> variants with a space.
+                    buf[write] = ' ';
+                    write += 1;
+                }
+                // For all other HTML tags, just skip them entirely.
+                read = end;
+            } else {
+                // No closing '>' found — keep the '<' as literal.
+                buf[write] = buf[read];
+                write += 1;
+                read += 1;
+            }
+        } else {
+            buf[write] = buf[read];
+            write += 1;
+            read += 1;
+        }
+    }
+    return write;
+}
+
+/// Check if the tag content (between < and >) represents a <br> variant.
+fn isBrTag(tag: []const u8) bool {
+    // Trim leading '/' for closing tags.
+    var t = tag;
+    if (t.len > 0 and t[0] == '/') t = t[1..];
+    // Trim trailing whitespace and '/'.
+    while (t.len > 0 and (t[t.len - 1] == ' ' or t[t.len - 1] == '/')) {
+        t = t[0 .. t.len - 1];
+    }
+    return std.mem.eql(u8, t, "br") or std.mem.eql(u8, t, "BR");
+}
+
 /// A style class definition parsed from `classDef className fill:#f9f,...`
 pub const StyleClass = struct {
     fill_color: ?[4]u8 = null,
@@ -769,7 +821,8 @@ pub const Parser = struct {
                 }
 
                 if (label_buf.items.len > 0) {
-                    edge_label = try self.allocator.dupe(u8, label_buf.items);
+                    const clean_len_e = stripHtmlTags(label_buf.items);
+                    edge_label = try self.allocator.dupe(u8, label_buf.items[0..clean_len_e]);
                 }
 
                 if (self.curr.type == .whitespace) self.advance();
@@ -1135,7 +1188,8 @@ pub const Parser = struct {
                                 shape = .parallelogram_alt;
                             }
                             self.advance(); // consume ]
-                            label = try self.allocator.dupe(u8, label_buf_slash.items);
+                            const clean_len_s = stripHtmlTags(label_buf_slash.items);
+                            label = try self.allocator.dupe(u8, label_buf_slash.items[0..clean_len_s]);
                             // Skip the normal label accumulation below
                             break;
                         } else {
@@ -1147,7 +1201,8 @@ pub const Parser = struct {
                     } else if (self.curr.type == .r_bracket) {
                         // Closing ] without slash — treat as box fallback
                         self.advance();
-                        label = try self.allocator.dupe(u8, label_buf_slash.items);
+                        const clean_len_s2 = stripHtmlTags(label_buf_slash.items);
+                        label = try self.allocator.dupe(u8, label_buf_slash.items[0..clean_len_s2]);
                         break;
                     } else {
                         try label_buf_slash.appendSlice(self.allocator, self.curr.text);
@@ -1231,8 +1286,11 @@ pub const Parser = struct {
                 self.advance();
             }
 
+            // Strip HTML tags (e.g. <br>, <b>) from the label text.
+            const clean_len = stripHtmlTags(label_buf.items);
+
             // Copy label to persistent memory
-            label = try self.allocator.dupe(u8, label_buf.items);
+            label = try self.allocator.dupe(u8, label_buf.items[0..clean_len]);
 
             // Consume primary closer
             if (self.curr.type == closer) {

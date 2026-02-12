@@ -1,0 +1,53 @@
+flowchart TD
+    subgraph Clients[Client Layer]
+        Web[Web Browser]
+        Mobile[Mobile App]
+        Desktop[Desktop Client]
+    end
+
+    subgraph Presentation[Presentation Tier]
+        CDN[CDN / Static Assets]
+        WebServer[Nginx Web Server]
+        SSR[Server-Side Rendering]
+        CDN --> WebServer
+        WebServer --> SSR
+    end
+
+    subgraph Logic[Business Logic Tier]
+        subgraph APICluster[API Cluster]
+            REST[REST API]
+            GQL[GraphQL API]
+            WS[WebSocket Server]
+        end
+        subgraph Processing[Background Processing]
+            Workers[Worker Processes]
+            Cron[Cron Scheduler]
+            ML[ML Inference]
+            Cron --> Workers
+        end
+        REST --> Workers
+        GQL --> Workers
+    end
+
+    subgraph Data[Data Tier]
+        MySQL[(MySQL Primary)]
+        Replica[(MySQL Replica)]
+        Memcache[(Memcached)]
+        S3[Object Storage]
+        MySQL --> Replica
+    end
+
+    Web --> CDN
+    Mobile --> REST
+    Desktop --> REST
+    WebServer --> REST
+    WebServer --> GQL
+    SSR --> GQL
+    REST --> MySQL
+    GQL --> MySQL
+    REST --> Memcache
+    GQL --> Memcache
+    Workers --> MySQL
+    Workers --> S3
+    ML --> S3
+    GQL --> Replica

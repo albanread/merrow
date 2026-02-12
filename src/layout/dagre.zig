@@ -222,12 +222,16 @@ const EdgeRef = struct {
     name: ?[]const u8,
 };
 
-/// Information about a root-level container (subgraph).
+/// Information about a container (subgraph) at any nesting level.
 const ContainerInfo = struct {
     id: []const u8,
+    /// Direct children: leaf nodes + nested sub-containers.
     children: std.ArrayListUnmanaged([]const u8),
+    /// Edges where both endpoints are direct children of this container.
     intra_edges: std.ArrayListUnmanaged(EdgeRef),
     internal_bounds: BBox,
+    /// Nesting depth (0 = root-level subgraph).
+    depth: usize,
 
     fn deinit(self: *ContainerInfo, allocator: std.mem.Allocator) void {
         self.children.deinit(allocator);
@@ -272,6 +276,11 @@ fn findImmediateContainer(graph: *Graph, node_id: []const u8) ?[]const u8 {
 
 /// Phase 1: Classify all nodes and edges into containers, free nodes,
 /// intra-container edges and inter-container edges.
+///
+/// Unlike the old version, this classifies each node into its IMMEDIATE
+/// parent container (not the root), and registers nested sub-containers
+/// as children of their parent container.  This enables recursive
+/// bottom-up layout of nested subgraphs.
 fn classifyNodesAndEdges(
     allocator: std.mem.Allocator,
     graph: *Graph,
@@ -279,65 +288,104 @@ fn classifyNodesAndEdges(
     free_nodes: *std.ArrayListUnmanaged([]const u8),
     inter_edges: *std.ArrayListUnmanaged(InterEdge),
 ) !void {
-    // First pass: identify containers and free nodes.
-    var node_it = graph.nodes.iterator();
-    while (node_it.next()) |entry| {
-        const id = entry.key_ptr.*;
-        const node = entry.value_ptr.*;
-        if (node.is_subgraph) {
-            // Register as container.
-            const gop = try containers.getOrPut(id);
-            if (!gop.found_existing) {
-                gop.value_ptr.* = .{
-                    .id = id,
-                    .children = .{},
-                    .intra_edges = .{},
-                    .internal_bounds = .{},
-                };
-            }
-        } else if (!node.dummy) {
-            // Leaf node — find its root container.
-            const root = findRootContainer(graph, id);
-            if (root) |container_id| {
-                var gop = try containers.getOrPut(container_id);
+    // First pass: identify all containers (subgraphs) and compute depths.
+    {
+        var node_it = graph.nodes.iterator();
+        while (node_it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const node = entry.value_ptr.*;
+            if (node.is_subgraph) {
+                // Compute nesting depth by walking parent chain.
+                var depth: usize = 0;
+                var cursor: ?[]const u8 = graph.getParent(id);
+                while (cursor) |pid| {
+                    const p = graph.getNode(pid) orelse break;
+                    if (p.is_subgraph) depth += 1;
+                    cursor = graph.getParent(pid);
+                }
+                const gop = try containers.getOrPut(id);
                 if (!gop.found_existing) {
                     gop.value_ptr.* = .{
-                        .id = container_id,
+                        .id = id,
                         .children = .{},
                         .intra_edges = .{},
                         .internal_bounds = .{},
+                        .depth = depth,
                     };
                 }
-                try gop.value_ptr.children.append(allocator, id);
+            }
+        }
+    }
+
+    // Second pass: assign each non-dummy, non-subgraph node to its
+    // IMMEDIATE container (direct parent subgraph), not the root.
+    {
+        var node_it2 = graph.nodes.iterator();
+        while (node_it2.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const node = entry.value_ptr.*;
+            if (node.is_subgraph or node.dummy) continue;
+
+            const imm = findImmediateContainer(graph, id);
+            if (imm) |container_id| {
+                if (containers.getPtr(container_id)) |ci| {
+                    try ci.children.append(allocator, id);
+                }
             } else {
                 try free_nodes.append(allocator, id);
             }
         }
     }
 
-    // Second pass: classify edges.
+    // Also register nested sub-containers as children of their parent container.
+    // We need to collect IDs first to avoid mutating the map while iterating.
+    {
+        var nested_pairs = std.ArrayListUnmanaged(struct { child: []const u8, parent: []const u8 }){};
+        defer nested_pairs.deinit(allocator);
+
+        var cit = containers.iterator();
+        while (cit.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const parent_sg = findImmediateContainer(graph, id);
+            if (parent_sg) |pid| {
+                if (containers.contains(pid)) {
+                    try nested_pairs.append(allocator, .{ .child = id, .parent = pid });
+                }
+            }
+        }
+        for (nested_pairs.items) |pair| {
+            if (containers.getPtr(pair.parent)) |parent_ci| {
+                try parent_ci.children.append(allocator, pair.child);
+            }
+        }
+    }
+
+    // Third pass: classify edges.
+    // An edge is "intra" for a container if both endpoints' immediate
+    // containers are the same.
     var edge_it = graph.edgeIterator();
     while (edge_it.next()) |entry| {
         const v = entry.v;
         const w = entry.w;
         const name = entry.name;
-        const src_container = findRootContainer(graph, v);
-        const tgt_container = findRootContainer(graph, w);
 
-        // Same container → intra; different or null → inter.
-        const same = blk: {
-            if (src_container == null and tgt_container == null) break :blk true;
-            if (src_container) |sc| {
-                if (tgt_container) |tc| {
-                    break :blk std.mem.eql(u8, sc, tc);
+        // Find immediate container for intra-edge classification.
+        const v_imm = findImmediateContainer(graph, v);
+        const w_imm = findImmediateContainer(graph, w);
+
+        const same_imm = blk: {
+            if (v_imm == null and w_imm == null) break :blk true;
+            if (v_imm) |vi| {
+                if (w_imm) |wi| {
+                    break :blk std.mem.eql(u8, vi, wi);
                 }
             }
             break :blk false;
         };
 
-        if (same) {
-            if (src_container) |sc| {
-                if (containers.getPtr(sc)) |ci| {
+        if (same_imm) {
+            if (v_imm) |ci_id| {
+                if (containers.getPtr(ci_id)) |ci| {
                     try ci.intra_edges.append(allocator, .{
                         .v = v,
                         .w = w,
@@ -345,9 +393,8 @@ fn classifyNodesAndEdges(
                     });
                 }
             }
-            // If both are free nodes with no container, that's a "root-level"
-            // edge; it will be handled via the meta-graph as a free→free edge.
-            if (src_container == null and tgt_container == null) {
+            // Both free nodes — goes to inter-edges for root meta-graph.
+            if (v_imm == null and w_imm == null) {
                 try inter_edges.append(allocator, .{
                     .src_node = v,
                     .tgt_node = w,
@@ -357,11 +404,14 @@ fn classifyNodesAndEdges(
                 });
             }
         } else {
+            // Cross-container edge.  Use ROOT containers for meta-graph routing.
+            const src_root = findRootContainer(graph, v);
+            const tgt_root = findRootContainer(graph, w);
             try inter_edges.append(allocator, .{
                 .src_node = v,
                 .tgt_node = w,
-                .src_container = src_container,
-                .tgt_container = tgt_container,
+                .src_container = src_root,
+                .tgt_container = tgt_root,
                 .edge_name = name,
             });
         }
@@ -386,7 +436,33 @@ fn collectAllLeafDescendants(
     }
 }
 
-/// Phase 2: Lay out a single container's children in a temporary graph.
+/// Offset ALL descendants of a node by (dx, dy) using the graph's
+/// parent-child hierarchy.  This is used after a parent container's layout
+/// relocates a nested sub-container — all nodes inside it must move by the
+/// same delta.
+fn offsetAllDescendants(
+    graph: *Graph,
+    parent_id: []const u8,
+    dx: f64,
+    dy: f64,
+) void {
+    const children = graph.getChildren(parent_id);
+    for (children) |cid| {
+        if (graph.getNodePtr(cid)) |ptr| {
+            ptr.x += dx;
+            ptr.y += dy;
+        }
+        // Recurse into sub-containers.
+        const child = graph.getNode(cid) orelse continue;
+        if (child.is_subgraph) {
+            offsetAllDescendants(graph, cid, dx, dy);
+        }
+    }
+}
+
+/// Phase 2: Lay out a single container's DIRECT children in a temporary graph.
+/// Direct children include leaf nodes AND nested sub-containers (which have
+/// already been sized by the bottom-up pass).
 /// Writes positions back to the original graph and returns the bounding box.
 fn layoutContainerInternal(
     allocator: std.mem.Allocator,
@@ -394,30 +470,34 @@ fn layoutContainerInternal(
     container: *ContainerInfo,
     config: DagreConfig,
 ) !BBox {
-    // Collect all leaf descendants (handles nested subgraphs).
-    var all_leaves = std.ArrayListUnmanaged([]const u8){};
-    defer all_leaves.deinit(allocator);
-    try collectAllLeafDescendants(allocator, graph, container.id, &all_leaves);
-
-    if (all_leaves.items.len == 0) {
+    if (container.children.items.len == 0) {
         return BBox{ .min_x = 0, .min_y = 0, .max_x = 80, .max_y = 40 };
     }
 
-    // Build temporary graph with only this container's leaves + intra edges.
+    // Build temporary graph with this container's direct children + intra edges.
     var temp = Graph.init(allocator);
     defer {
         normalize.freeDummyIds(allocator, &temp);
         temp.deinitDeep();
     }
 
-    // Add leaf nodes.
-    for (all_leaves.items) |cid| {
+    // Add direct children (leaf nodes and nested sub-containers).
+    for (container.children.items) |cid| {
         const orig = graph.getNode(cid) orelse continue;
+        // For nested sub-containers, inflate the size used in layout by
+        // nested_container_margin on each side.  This creates breathing
+        // room between the child container border and its siblings / the
+        // parent container border.  The actual container dimensions in
+        // the original graph remain unchanged.
+        const extra = if (orig.is_subgraph) nested_container_margin else 0.0;
         try temp.setNode(cid, .{
-            .width = orig.width,
-            .height = orig.height,
+            .width = orig.width + extra * 2.0,
+            .height = orig.height + extra * 2.0,
             .shape = orig.shape,
             .label = orig.label,
+            // Mark as NOT a subgraph in the temp graph so layoutFlat doesn't
+            // try to run subgraph fixup phases on nested containers.
+            .is_subgraph = false,
         });
     }
 
@@ -440,12 +520,30 @@ fn layoutContainerInternal(
     try layoutFlat(allocator, &temp, config);
 
     // Read positions back and compute bounding box.
+    // IMPORTANT: when a direct child is a nested sub-container that was
+    // already laid out (bottom-up), its descendants have positions relative
+    // to its old internal coordinate system.  Now that the parent's temp
+    // layout has moved this sub-container to a new position, we must offset
+    // all of the sub-container's descendants by the delta.
     var bb = BBox{};
-    for (all_leaves.items) |cid| {
+    for (container.children.items) |cid| {
         const temp_node = temp.getNode(cid) orelse continue;
         if (graph.getNodePtr(cid)) |orig_ptr| {
+            const old_x = orig_ptr.x;
+            const old_y = orig_ptr.y;
             orig_ptr.x = temp_node.x;
             orig_ptr.y = temp_node.y;
+
+            // If this child is a nested sub-container, propagate the
+            // position delta to all of its descendants.
+            const orig_node = graph.getNode(cid);
+            if (orig_node != null and orig_node.?.is_subgraph) {
+                const dx = temp_node.x - old_x;
+                const dy = temp_node.y - old_y;
+                if (@abs(dx) > 0.001 or @abs(dy) > 0.001) {
+                    offsetAllDescendants(graph, cid, dx, dy);
+                }
+            }
         }
         const half_w = temp_node.width / 2.0;
         const half_h = temp_node.height / 2.0;
@@ -459,6 +557,8 @@ fn layoutContainerInternal(
 }
 
 /// Phase 4: Offset children positions by the meta-graph container position.
+/// Only root-level containers (depth == 0) are positioned by the meta-graph.
+/// Nested sub-containers and their children are offset recursively.
 fn applyMetaPositions(
     allocator: std.mem.Allocator,
     graph: *Graph,
@@ -466,29 +566,22 @@ fn applyMetaPositions(
     containers: *std.StringHashMap(ContainerInfo),
     free_nodes: []const []const u8,
 ) !void {
-    // Position containers and their children.
+    // Only process root-level containers (depth 0) from the meta-graph.
     var it = containers.iterator();
     while (it.next()) |entry| {
         const ci = entry.value_ptr;
+        if (ci.depth != 0) continue; // nested containers handled recursively
+
         const meta_node = meta.getNode(ci.id) orelse continue;
 
         const bb = ci.internal_bounds;
         const offset_x = meta_node.x - bb.centerX();
         const offset_y = meta_node.y - bb.centerY() + subgraph_title_height / 2.0;
 
-        // Offset all leaf descendants.
-        var all_leaves = std.ArrayListUnmanaged([]const u8){};
-        defer all_leaves.deinit(allocator);
-        try collectAllLeafDescendants(allocator, graph, ci.id, &all_leaves);
+        // Recursively offset all descendants (leaf nodes + nested containers).
+        try offsetContainerDescendants(allocator, graph, containers, ci.id, offset_x, offset_y);
 
-        for (all_leaves.items) |cid| {
-            if (graph.getNodePtr(cid)) |ptr| {
-                ptr.x += offset_x;
-                ptr.y += offset_y;
-            }
-        }
-
-        // Set the container node's position and size.
+        // Set the root container node's position and size.
         if (graph.getNodePtr(ci.id)) |sg_ptr| {
             sg_ptr.x = meta_node.x;
             sg_ptr.y = meta_node.y;
@@ -507,15 +600,85 @@ fn applyMetaPositions(
     }
 }
 
-/// Phase 5: Compute waypoints for inter-container edges.
-/// Simple routing: source center → source container border →
-/// target container border → target center.
+/// Recursively offset all direct children of a container.
+/// For nested sub-containers, offset the sub-container node itself,
+/// then recurse to offset its children.
+fn offsetContainerDescendants(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    containers: *std.StringHashMap(ContainerInfo),
+    container_id: []const u8,
+    offset_x: f64,
+    offset_y: f64,
+) !void {
+    const ci = containers.get(container_id) orelse return;
+    for (ci.children.items) |cid| {
+        const child = graph.getNode(cid) orelse continue;
+        if (child.is_subgraph) {
+            // Nested sub-container: offset its position and recurse.
+            if (graph.getNodePtr(cid)) |ptr| {
+                ptr.x += offset_x;
+                ptr.y += offset_y;
+            }
+            try offsetContainerDescendants(allocator, graph, containers, cid, offset_x, offset_y);
+        } else {
+            // Leaf node: just offset position.
+            if (graph.getNodePtr(cid)) |ptr| {
+                ptr.x += offset_x;
+                ptr.y += offset_y;
+            }
+        }
+    }
+}
+
+/// An axis-aligned rectangle used as an obstacle during edge routing.
+const ObstacleRect = struct {
+    id: []const u8,
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+    cx: f64,
+    cy: f64,
+};
+
+/// Phase 5: Compute waypoints for inter-container edges that avoid
+/// crossing through foreign container boxes.
+///
+/// For each inter-container edge we:
+///  1. Collect all root-level container rectangles as obstacles (excluding
+///     the containers that own the source/target nodes).
+///  2. Check whether the straight-line path crosses any obstacle.
+///  3. If it does, insert waypoints that route around obstacles by going
+///     to the nearest side then along the obstacle boundary with a margin.
 fn routeInterContainerEdges(
     allocator: std.mem.Allocator,
     graph: *Graph,
     inter_edges_list: []const InterEdge,
 ) !void {
-    _ = allocator;
+    // Margin around obstacle boxes for routed paths.
+    const margin: f64 = 15.0;
+
+    // Collect ALL container (subgraph) rectangles from the graph.
+    var all_rects = std.ArrayListUnmanaged(ObstacleRect){};
+    defer all_rects.deinit(allocator);
+
+    var node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const node = entry.value_ptr.*;
+        if (!node.is_subgraph) continue;
+        if (node.width < 1.0) continue;
+        try all_rects.append(allocator, .{
+            .id = entry.key_ptr.*,
+            .left = node.x - node.width / 2.0,
+            .right = node.x + node.width / 2.0,
+            .top = node.y - node.height / 2.0,
+            .bottom = node.y + node.height / 2.0,
+            .cx = node.x,
+            .cy = node.y,
+        });
+    }
+
     for (inter_edges_list) |ie| {
         const ed_ptr = graph.getEdgePtr(ie.src_node, ie.tgt_node, ie.edge_name) orelse continue;
 
@@ -524,14 +687,403 @@ fn routeInterContainerEdges(
 
         ed_ptr.points.clearRetainingCapacity();
 
-        // Simple 2-point path: source center → target center.
-        // The renderer will clip to node borders.
-        try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
-        try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+        // Determine which containers OWN source and target (by ancestry).
+        // These are not obstacles — the edge is allowed to pass through
+        // the containers that actually contain its endpoints.
+
+        // Collect obstacle rectangles: containers that do NOT own either
+        // endpoint.  A container "owns" a node if the node is a descendant
+        // of that container.
+        var obstacles = std.ArrayListUnmanaged(ObstacleRect){};
+        defer obstacles.deinit(allocator);
+
+        for (all_rects.items) |r| {
+            // Skip if this container is an ancestor of src or tgt.
+            if (isAncestor(graph, r.id, ie.src_node) or
+                isAncestor(graph, r.id, ie.tgt_node))
+                continue;
+            // Also skip if this container is a descendant of src/tgt's container
+            // (nested children of an endpoint's container are not blocking).
+            if (ie.src_container) |sc| {
+                if (std.mem.eql(u8, r.id, sc) or isAncestor(graph, sc, r.id))
+                    continue;
+            }
+            if (ie.tgt_container) |tc| {
+                if (std.mem.eql(u8, r.id, tc) or isAncestor(graph, tc, r.id))
+                    continue;
+            }
+            try obstacles.append(allocator, r);
+        }
+
+        // If no obstacles, straight line.
+        if (obstacles.items.len == 0) {
+            try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
+            try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+            continue;
+        }
+
+        // Check which obstacles the straight line actually crosses.
+        var blocking = std.ArrayListUnmanaged(ObstacleRect){};
+        defer blocking.deinit(allocator);
+
+        for (obstacles.items) |obs| {
+            if (lineIntersectsRect(src.x, src.y, tgt.x, tgt.y, obs.left, obs.top, obs.right, obs.bottom)) {
+                try blocking.append(allocator, obs);
+            }
+        }
+
+        if (blocking.items.len == 0) {
+            // Straight line is clear.
+            try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
+            try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+            continue;
+        }
+
+        // Route around blocking obstacles.
+        // Strategy: compute waypoints that go around each blocking obstacle.
+        // For simplicity and visual clarity, route around the combined
+        // bounding box of all blocking obstacles, choosing the shorter side.
+        try routeAroundObstacles(
+            allocator,
+            graph,
+            ed_ptr,
+            src.x,
+            src.y,
+            tgt.x,
+            tgt.y,
+            blocking.items,
+            obstacles.items,
+            margin,
+        );
     }
 }
 
+/// Check if `ancestor_id` is an ancestor (parent, grandparent, …) of `node_id`.
+fn isAncestor(graph: *Graph, ancestor_id: []const u8, node_id: []const u8) bool {
+    var cursor: ?[]const u8 = graph.getParent(node_id);
+    while (cursor) |pid| {
+        if (std.mem.eql(u8, pid, ancestor_id)) return true;
+        cursor = graph.getParent(pid);
+    }
+    return false;
+}
+
+/// Test whether a line segment from (x1,y1)→(x2,y2) intersects an
+/// axis-aligned rectangle [left,top]–[right,bottom].
+fn lineIntersectsRect(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+) bool {
+    // Cohen–Sutherland outcode approach.
+    const INSIDE: u4 = 0;
+    const LEFT: u4 = 1;
+    const RIGHT: u4 = 2;
+    const BOTTOM: u4 = 4;
+    const TOP: u4 = 8;
+
+    const outcode = struct {
+        fn compute(x: f64, y: f64, l: f64, t: f64, r: f64, b: f64) u4 {
+            var code: u4 = INSIDE;
+            if (x < l) code |= LEFT else if (x > r) code |= RIGHT;
+            if (y < t) code |= TOP else if (y > b) code |= BOTTOM;
+            return code;
+        }
+    }.compute;
+
+    var ax = x1;
+    var ay = y1;
+    var bx = x2;
+    var by = y2;
+    var oc1 = outcode(ax, ay, left, top, right, bottom);
+    var oc2 = outcode(bx, by, left, top, right, bottom);
+
+    var iterations: u32 = 0;
+    while (iterations < 20) : (iterations += 1) {
+        if ((oc1 | oc2) == 0) return true; // both inside
+        if ((oc1 & oc2) != 0) return false; // both outside same side
+        // Pick the point outside.
+        const oc_out = if (oc1 != 0) oc1 else oc2;
+        var nx: f64 = 0;
+        var ny: f64 = 0;
+        if (oc_out & TOP != 0) {
+            nx = ax + (bx - ax) * (top - ay) / (by - ay);
+            ny = top;
+        } else if (oc_out & BOTTOM != 0) {
+            nx = ax + (bx - ax) * (bottom - ay) / (by - ay);
+            ny = bottom;
+        } else if (oc_out & RIGHT != 0) {
+            ny = ay + (by - ay) * (right - ax) / (bx - ax);
+            nx = right;
+        } else if (oc_out & LEFT != 0) {
+            ny = ay + (by - ay) * (left - ax) / (bx - ax);
+            nx = left;
+        }
+        if (oc_out == oc1) {
+            ax = nx;
+            ay = ny;
+            oc1 = outcode(ax, ay, left, top, right, bottom);
+        } else {
+            bx = nx;
+            by = ny;
+            oc2 = outcode(bx, by, left, top, right, bottom);
+        }
+    }
+    return false;
+}
+
+/// Route an edge around one or more blocking obstacles.
+///
+/// Uses a **4-point** route: src → corner_near → corner_far → tgt.
+/// The two corner points are placed on one side of the merged blocker
+/// bounding box at the obstacle's near and far edges (top/bottom for
+/// vertical edges, left/right for horizontal edges).  This creates a
+/// smooth curve that bows outward around the obstacle when the renderer
+/// applies Catmull-Rom spline interpolation.
+///
+/// The bypass x (or y) is offset from the obstacle edge by enough margin
+/// to account for the Catmull-Rom spline's inward sag (~12% of the
+/// segment length).
+///
+/// We try both sides and pick the shorter clear route.
+fn routeAroundObstacles(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    ed_ptr: *model.EdgeData,
+    sx: f64,
+    sy: f64,
+    tx: f64,
+    ty: f64,
+    blockers: []const ObstacleRect,
+    all_obstacles: []const ObstacleRect,
+    margin: f64,
+) !void {
+    _ = allocator;
+    _ = all_obstacles;
+
+    // Compute the merged bounding box of all blocking obstacles.
+    var bb_left: f64 = std.math.floatMax(f64);
+    var bb_right: f64 = -std.math.floatMax(f64);
+    var bb_top: f64 = std.math.floatMax(f64);
+    var bb_bottom: f64 = -std.math.floatMax(f64);
+
+    for (blockers) |b| {
+        if (b.left < bb_left) bb_left = b.left;
+        if (b.right > bb_right) bb_right = b.right;
+        if (b.top < bb_top) bb_top = b.top;
+        if (b.bottom > bb_bottom) bb_bottom = b.bottom;
+    }
+
+    // The Catmull-Rom spline sags inward from control points.  For the
+    // diagonal segments (src→corner, corner→tgt), the sag can push the
+    // curve back toward the obstacle.  We need extra clearance proportional
+    // to the diagonal length of those segments.
+    //
+    // For a 4-point route with corners at the obstacle edges, the longest
+    // diagonal is roughly hypot(bypass_offset, obstacle_height/2).
+    // The sag is ~12% of the chord length.  We solve iteratively:
+    //   needed_offset = margin + 0.12 * hypot(needed_offset, half_h)
+    // A safe closed-form over-estimate:
+    const obstacle_h = bb_bottom - bb_top;
+    const obstacle_w = bb_right - bb_left;
+    const half_h = obstacle_h / 2.0;
+    const half_w = obstacle_w / 2.0;
+
+    // Determine whether the edge is predominantly vertical or horizontal.
+    const is_vertical = @abs(ty - sy) >= @abs(tx - sx);
+
+    const Route = struct {
+        points: [4]Point,
+        length: f64,
+    };
+
+    var candidates: [2]Route = undefined;
+    var candidate_count: usize = 0;
+
+    if (is_vertical) {
+        // Route goes mostly top→bottom.  Bypass to LEFT or RIGHT.
+        // Corner points sit at the obstacle's top and bottom y-coords.
+        const y_near = if (sy < ty) bb_top else bb_bottom;
+        const y_far = if (sy < ty) bb_bottom else bb_top;
+
+        // Compute needed x-offset.  The diagonal from src to corner_near
+        // has length ~hypot(offset, |sy - y_near|).  Sag ≈ 0.12 * that.
+        const dy_near = @abs(sy - y_near);
+        const dy_far = @abs(ty - y_far);
+        const max_dy = @max(dy_near, dy_far);
+        // offset = margin + 0.12 * hypot(offset, max_dy)
+        // Approximate: offset ≈ margin + 0.12 * max_dy  (offset << max_dy)
+        // Add a safety factor:
+        const sag_extra = 0.15 * @max(max_dy, half_h);
+        const offset = margin + sag_extra;
+
+        // RIGHT bypass
+        {
+            const bx = bb_right + offset;
+            const pts = [4]Point{
+                .{ .x = sx, .y = sy },
+                .{ .x = bx, .y = y_near },
+                .{ .x = bx, .y = y_far },
+                .{ .x = tx, .y = ty },
+            };
+            candidates[candidate_count] = .{
+                .points = pts,
+                .length = computePathLength(&pts),
+            };
+            candidate_count += 1;
+        }
+
+        // LEFT bypass
+        {
+            const bx = bb_left - offset;
+            const pts = [4]Point{
+                .{ .x = sx, .y = sy },
+                .{ .x = bx, .y = y_near },
+                .{ .x = bx, .y = y_far },
+                .{ .x = tx, .y = ty },
+            };
+            candidates[candidate_count] = .{
+                .points = pts,
+                .length = computePathLength(&pts),
+            };
+            candidate_count += 1;
+        }
+    } else {
+        // Predominantly horizontal — bypass ABOVE or BELOW.
+        const x_near = if (sx < tx) bb_left else bb_right;
+        const x_far = if (sx < tx) bb_right else bb_left;
+
+        const dx_near = @abs(sx - x_near);
+        const dx_far = @abs(tx - x_far);
+        const max_dx = @max(dx_near, dx_far);
+        const sag_extra = 0.15 * @max(max_dx, half_w);
+        const offset = margin + sag_extra;
+
+        // TOP bypass
+        {
+            const by = bb_top - offset;
+            const pts = [4]Point{
+                .{ .x = sx, .y = sy },
+                .{ .x = x_near, .y = by },
+                .{ .x = x_far, .y = by },
+                .{ .x = tx, .y = ty },
+            };
+            candidates[candidate_count] = .{
+                .points = pts,
+                .length = computePathLength(&pts),
+            };
+            candidate_count += 1;
+        }
+
+        // BOTTOM bypass
+        {
+            const by = bb_bottom + offset;
+            const pts = [4]Point{
+                .{ .x = sx, .y = sy },
+                .{ .x = x_near, .y = by },
+                .{ .x = x_far, .y = by },
+                .{ .x = tx, .y = ty },
+            };
+            candidates[candidate_count] = .{
+                .points = pts,
+                .length = computePathLength(&pts),
+            };
+            candidate_count += 1;
+        }
+    }
+
+    // Pick the shorter route whose straight-line segments don't cross any blocker.
+    var best_idx: usize = 0;
+    var best_len: f64 = std.math.floatMax(f64);
+    var any_clear = false;
+
+    for (0..candidate_count) |ci| {
+        const route = candidates[ci];
+        const crosses = routeCrossesAnyBlocker(&route.points, blockers);
+        if (!crosses) {
+            if (!any_clear or route.length < best_len) {
+                best_len = route.length;
+                best_idx = ci;
+                any_clear = true;
+            }
+        } else if (!any_clear) {
+            if (route.length < best_len) {
+                best_len = route.length;
+                best_idx = ci;
+            }
+        }
+    }
+
+    // Fallback: L-bend.
+    if (!any_clear) {
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const mid_x = (sx + tx) / 2.0;
+        const mid_y = (sy + ty) / 2.0;
+        ed_ptr.points.clearRetainingCapacity();
+        try ed_ptr.points.append(graph.allocator, .{ .x = sx, .y = sy });
+        if (@abs(dx) > @abs(dy)) {
+            try ed_ptr.points.append(graph.allocator, .{ .x = mid_x, .y = sy });
+            try ed_ptr.points.append(graph.allocator, .{ .x = mid_x, .y = ty });
+        } else {
+            try ed_ptr.points.append(graph.allocator, .{ .x = sx, .y = mid_y });
+            try ed_ptr.points.append(graph.allocator, .{ .x = tx, .y = mid_y });
+        }
+        try ed_ptr.points.append(graph.allocator, .{ .x = tx, .y = ty });
+        return;
+    }
+
+    const best = candidates[best_idx];
+    ed_ptr.points.clearRetainingCapacity();
+    for (best.points[0..4]) |pt| {
+        try ed_ptr.points.append(graph.allocator, pt);
+    }
+}
+
+/// Compute the total Euclidean length of a polyline.
+fn computePathLength(pts: []const Point) f64 {
+    var total: f64 = 0;
+    for (1..pts.len) |i| {
+        const dx = pts[i].x - pts[i - 1].x;
+        const dy = pts[i].y - pts[i - 1].y;
+        total += @sqrt(dx * dx + dy * dy);
+    }
+    return total;
+}
+
+/// Check if any segment of a polyline crosses any of the given blocker rects.
+fn routeCrossesAnyBlocker(
+    pts: []const Point,
+    blockers: []const ObstacleRect,
+) bool {
+    for (1..pts.len) |i| {
+        for (blockers) |b| {
+            if (lineIntersectsRect(
+                pts[i - 1].x,
+                pts[i - 1].y,
+                pts[i].x,
+                pts[i].y,
+                b.left,
+                b.top,
+                b.right,
+                b.bottom,
+            )) return true;
+        }
+    }
+    return false;
+}
+
 /// Main hierarchical layout orchestrator.
+///
+/// Processes containers BOTTOM-UP: deepest-nested subgraphs are laid out
+/// first, then their sizes feed into the layout of their parent containers,
+/// and so on up to root-level containers.  Finally a meta-graph positions
+/// root containers and free nodes relative to each other.
 fn layoutHierarchical(
     allocator: std.mem.Allocator,
     graph: *Graph,
@@ -562,27 +1114,63 @@ fn layoutHierarchical(
         inter_edges.items.len,
     });
 
-    // Phase 2: Internal layout per container.
-    std.debug.print("[dagre-hier] Phase 2: Internal container layouts...\n", .{});
+    // Phase 2: Bottom-up internal layout.
+    // Find max depth, then process from deepest to shallowest.
+    std.debug.print("[dagre-hier] Phase 2: Bottom-up container layouts...\n", .{});
+    var max_depth: usize = 0;
     {
         var cit = containers.iterator();
         while (cit.next()) |entry| {
+            if (entry.value_ptr.depth > max_depth) max_depth = entry.value_ptr.depth;
+        }
+    }
+
+    // Process deepest containers first, then work upward.
+    var current_depth: usize = max_depth + 1;
+    while (current_depth > 0) {
+        current_depth -= 1;
+        var cit = containers.iterator();
+        while (cit.next()) |entry| {
             const ci = entry.value_ptr;
-            std.debug.print("[dagre-hier]   Laying out container '{s}' ({d} children)...\n", .{
-                ci.id, ci.children.items.len,
+            if (ci.depth != current_depth) continue;
+
+            std.debug.print("[dagre-hier]   Laying out container '{s}' (depth={d}, {d} children)...\n", .{
+                ci.id, ci.depth, ci.children.items.len,
             });
             ci.internal_bounds = try layoutContainerInternal(allocator, graph, ci, config);
-            std.debug.print("[dagre-hier]   Container '{s}' bounds: [{d:.1}, {d:.1}] to [{d:.1}, {d:.1}]\n", .{
+
+            // Now that internal layout is done, set this container's size
+            // AND position in the original graph so parent containers can
+            // use it.  The position is the center of the content area,
+            // adjusted for padding and title.
+            const sg = graph.getNode(ci.id) orelse continue;
+            const pad = sg.subgraph_padding;
+            const bb = ci.internal_bounds;
+            const sized_w = bb.width() + pad * 2.0;
+            const sized_h = bb.height() + pad * 2.0 + subgraph_title_height;
+
+            if (graph.getNodePtr(ci.id)) |sg_ptr| {
+                sg_ptr.width = sized_w;
+                sg_ptr.height = sized_h;
+                // Set container center: horizontally centered on children,
+                // vertically shifted down to account for the title bar above.
+                sg_ptr.x = bb.centerX();
+                sg_ptr.y = bb.centerY() + subgraph_title_height / 2.0;
+            }
+
+            std.debug.print("[dagre-hier]   Container '{s}' bounds: [{d:.1}, {d:.1}] to [{d:.1}, {d:.1}] → size {d:.1}x{d:.1}\n", .{
                 ci.id,
-                ci.internal_bounds.min_x,
-                ci.internal_bounds.min_y,
-                ci.internal_bounds.max_x,
-                ci.internal_bounds.max_y,
+                bb.min_x,
+                bb.min_y,
+                bb.max_x,
+                bb.max_y,
+                sized_w,
+                sized_h,
             });
         }
     }
 
-    // Phase 3: Build and layout meta-graph.
+    // Phase 3: Build and layout meta-graph (root-level containers + free nodes).
     std.debug.print("[dagre-hier] Phase 3: Meta-graph layout...\n", .{});
     var meta = Graph.init(allocator);
     defer {
@@ -590,20 +1178,17 @@ fn layoutHierarchical(
         meta.deinitDeep();
     }
 
-    // Add container nodes to meta-graph (sized by internal bounds + padding).
+    // Add ONLY root-level containers (depth 0) to meta-graph.
     {
         var cit = containers.iterator();
         while (cit.next()) |entry| {
             const ci = entry.value_ptr;
-            const sg = graph.getNode(ci.id) orelse continue;
-            const pad = sg.subgraph_padding;
-            const bb = ci.internal_bounds;
-            const meta_w = bb.width() + pad * 2.0;
-            const meta_h = bb.height() + pad * 2.0 + subgraph_title_height;
+            if (ci.depth != 0) continue; // nested containers are inside their parents
 
+            const sg = graph.getNode(ci.id) orelse continue;
             try meta.setNode(ci.id, .{
-                .width = meta_w,
-                .height = meta_h,
+                .width = sg.width,
+                .height = sg.height,
                 // NOT a subgraph in the meta-graph — treat as opaque box.
                 .is_subgraph = false,
             });
@@ -634,7 +1219,7 @@ fn layoutHierarchical(
     // Run flat layout on meta-graph.
     try layoutFlat(allocator, &meta, config);
 
-    // Phase 4: Apply meta-graph positions.
+    // Phase 4: Apply meta-graph positions (root containers + free nodes).
     std.debug.print("[dagre-hier] Phase 4: Applying meta positions...\n", .{});
     try applyMetaPositions(allocator, graph, &meta, &containers, free_nodes.items);
 
@@ -821,6 +1406,12 @@ const subgraph_title_height: f64 = 32.0;
 
 /// Minimum gap between sibling subgraph boxes (pixels).
 const sibling_subgraph_gap: f64 = 30.0;
+
+/// Extra margin added around nested sub-container nodes when they are
+/// placed inside a parent container's temporary layout graph.  This
+/// ensures visual breathing room between the child container border
+/// and its sibling nodes / the parent container border.
+const nested_container_margin: f64 = 20.0;
 
 /// After layout, compute the bounding box of every subgraph node from
 /// its children's positions and sizes.  The subgraph node's (x, y, width,

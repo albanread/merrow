@@ -1,0 +1,57 @@
+flowchart TD
+    subgraph ClientSide[Client Side]
+        Browser[Browser SPA]
+        CLI[CLI Tool]
+    end
+
+    subgraph Edge[Edge Network]
+        CF[CloudFlare]
+        WAF[WAF Rules]
+        CF --> WAF
+    end
+
+    subgraph Backend[Server Side]
+        subgraph PublicAPI[Public API]
+            Gateway[API Gateway]
+            AuthZ[Authorization]
+            Gateway --> AuthZ
+        end
+        subgraph Internal[Internal Services]
+            Catalog[Product Catalog]
+            Cart[Shopping Cart]
+            Orders[Order Processing]
+            Payments[Payment Gateway]
+            Inventory[Inventory Manager]
+            Cart --> Orders
+            Orders --> Payments
+            Orders --> Inventory
+        end
+        subgraph Events[Event Bus]
+            Kafka[Apache Kafka]
+            DLQ[Dead Letter Queue]
+            Kafka --> DLQ
+        end
+        AuthZ --> Catalog
+        AuthZ --> Cart
+        AuthZ --> Orders
+        Catalog --> Kafka
+        Orders --> Kafka
+        Inventory --> Kafka
+    end
+
+    subgraph Persistence[Storage Layer]
+        Mongo[(MongoDB)]
+        PG[(PostgreSQL)]
+        RedisCache[(Redis)]
+        Blob[Blob Storage]
+    end
+
+    Browser --> CF
+    CLI --> CF
+    WAF --> Gateway
+    Catalog --> Mongo
+    Cart --> RedisCache
+    Orders --> PG
+    Payments --> PG
+    Inventory --> PG
+    Inventory --> Blob

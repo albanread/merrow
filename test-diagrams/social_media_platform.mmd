@@ -1,0 +1,71 @@
+flowchart TD
+    subgraph Users[User Devices]
+        iOS[iOS App]
+        Android[Android App]
+        WebApp[Web Dashboard]
+    end
+
+    subgraph Gateway[API Management]
+        APIGW[API Gateway]
+        OAuth[OAuth2 Server]
+        Throttle[Throttle / Quota]
+        APIGW --> OAuth
+        OAuth --> Throttle
+    end
+
+    subgraph Microservices[Microservice Mesh]
+        subgraph UserDomain[User Domain]
+            Profile[Profile Service]
+            Prefs[Preferences Service]
+        end
+        subgraph ContentDomain[Content Domain]
+            Media[Media Service]
+            Feed[Feed Generator]
+            Search[Search Service]
+            Feed --> Search
+        end
+        subgraph Social[Social Domain]
+            Friends[Friends Service]
+            Messaging[Messaging Service]
+            Notif[Push Notifications]
+            Friends --> Notif
+            Messaging --> Notif
+        end
+        Profile --> Feed
+        Profile --> Friends
+    end
+
+    subgraph Infrastructure[Infrastructure Layer]
+        subgraph Databases[Databases]
+            UserDB[(User DB)]
+            ContentDB[(Content DB)]
+            GraphDB[(Neo4j Graph)]
+        end
+        subgraph Cache[Caching]
+            AppCache[(Redis Cluster)]
+            CDNCache[CDN Edge Cache]
+        end
+        subgraph MessageBus[Message Bus]
+            RabbitMQ[RabbitMQ]
+            SNS[AWS SNS]
+        end
+    end
+
+    iOS --> APIGW
+    Android --> APIGW
+    WebApp --> APIGW
+    Throttle --> Profile
+    Throttle --> Media
+    Throttle --> Feed
+    Throttle --> Friends
+    Throttle --> Messaging
+    Profile --> UserDB
+    Media --> ContentDB
+    Feed --> ContentDB
+    Friends --> GraphDB
+    Messaging --> RabbitMQ
+    Notif --> SNS
+    Profile --> AppCache
+    Feed --> AppCache
+    Media --> CDNCache
+    Search --> AppCache

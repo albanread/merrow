@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph Endpoints[Client Endpoints]
+        POS[POS Terminal]
+        Kiosk[Self-Service Kiosk]
+        Admin[Admin Portal]
+    end
+
+    subgraph MiddleTier[Application Server]
+        subgraph API[API Services]
+            AuthAPI[Auth API]
+            TxnAPI[Transaction API]
+            ReportAPI[Reporting API]
+        end
+        subgraph BizLogic[Business Rules]
+            Pricing[Pricing Engine]
+            Tax[Tax Calculator]
+            Discount[Discount Engine]
+            Pricing --> Tax
+            Pricing --> Discount
+        end
+        TxnAPI --> Pricing
+        ReportAPI --> TxnAPI
+    end
+
+    subgraph DataLayer[Database Layer]
+        Master[(Master DB)]
+        Slave[(Read Replica)]
+        Audit[(Audit Log DB)]
+        Master --> Slave
+        Master --> Audit
+    end
+
+    POS --> AuthAPI
+    Kiosk --> AuthAPI
+    Admin --> AuthAPI
+    POS --> TxnAPI
+    Kiosk --> TxnAPI
+    Admin --> ReportAPI
+    AuthAPI --> Master
+    TxnAPI --> Master
+    ReportAPI --> Slave

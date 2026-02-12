@@ -1664,6 +1664,23 @@ fn drawEdges(
         if (waypoints.items.len < 2) continue;
 
         // -----------------------------------------------------------------
+        // If the layout router has set explicit waypoints on this edge
+        // (e.g. to route around containers), use those instead of the
+        // simple source→target straight line.
+        // -----------------------------------------------------------------
+        if (edge_data) |ed| {
+            if (ed.points.items.len >= 2) {
+                waypoints.clearRetainingCapacity();
+                for (ed.points.items) |pt| {
+                    try waypoints.append(allocator, .{
+                        .x = pt.x + offset_x,
+                        .y = pt.y + offset_y,
+                    });
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
         // Clip the first segment to the source node's border
         // -----------------------------------------------------------------
         const src_node = v_node;

@@ -522,15 +522,19 @@ pub fn main() !void {
             var overlap_found = false;
             for (rects.items, 0..) |a, i| {
                 for (rects.items[i + 1 ..]) |b| {
-                    // Check if parent-child (skip those)
-                    const a_parent = graph.getParent(a.id);
-                    const b_parent = graph.getParent(b.id);
+                    // Check if one is an ancestor of the other (skip nested).
                     const is_nested = blk: {
-                        if (a_parent) |p| {
-                            if (std.mem.eql(u8, p, b.id)) break :blk true;
+                        // Walk a's parent chain to see if b is an ancestor.
+                        var cursor: ?[]const u8 = graph.getParent(a.id);
+                        while (cursor) |pid| {
+                            if (std.mem.eql(u8, pid, b.id)) break :blk true;
+                            cursor = graph.getParent(pid);
                         }
-                        if (b_parent) |p| {
-                            if (std.mem.eql(u8, p, a.id)) break :blk true;
+                        // Walk b's parent chain to see if a is an ancestor.
+                        cursor = graph.getParent(b.id);
+                        while (cursor) |pid| {
+                            if (std.mem.eql(u8, pid, a.id)) break :blk true;
+                            cursor = graph.getParent(pid);
                         }
                         break :blk false;
                     };
@@ -590,6 +594,11 @@ pub fn main() !void {
                     });
                     if (has_points) {
                         std.debug.print(" ({d} waypoints)\n", .{entry.data.points.items.len});
+                        if (entry.data.points.items.len > 2) {
+                            for (entry.data.points.items, 0..) |pt, pi| {
+                                std.debug.print("    wp[{d}] = ({d:.1}, {d:.1})\n", .{ pi, pt.x, pt.y });
+                            }
+                        }
                     } else {
                         std.debug.print(" (no waypoints — uses dummy chain)\n", .{});
                     }
