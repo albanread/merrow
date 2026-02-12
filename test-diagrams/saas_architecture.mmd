@@ -1,0 +1,117 @@
+flowchart TD
+    subgraph Customer[Customer Environment]
+        Browser[Web Browser]
+        Mobile[Mobile App]
+    end
+
+    subgraph Edge[Edge & CDN]
+        CDN[CloudFront CDN]
+        WAF[Web App Firewall]
+        LB[Load Balancer]
+        CDN --> WAF
+        WAF --> LB
+    end
+
+    subgraph Frontend[Frontend Layer]
+        WebApp[React SPA]
+        SSR[Next.js SSR]
+        WebSocket[WebSocket Gateway]
+    end
+
+    subgraph AuthSec[Auth & Security]
+        Gateway[API Gateway]
+        AuthSvc[Auth Service]
+        OAuth[OAuth2 / OIDC]
+        RBAC[RBAC Policy Engine]
+        Gateway --> AuthSvc
+        AuthSvc --> OAuth
+        AuthSvc --> RBAC
+    end
+
+    subgraph Services[Core Microservices]
+        UserSvc[User Service]
+        BillingSvc[Billing Service]
+        TenantSvc[Tenant Manager]
+        NotifySvc[Notification Service]
+        DocSvc[Document Service]
+        SearchSvc[Search Service]
+        UserSvc --> NotifySvc
+        BillingSvc --> NotifySvc
+        TenantSvc --> UserSvc
+    end
+
+    subgraph RAG[RAG Pipeline]
+        Ingest[Document Ingestion]
+        Chunker[Text Chunker]
+        EmbedGen[Embedding Generator]
+        VectorDB[(Vector Store)]
+        QueryEng[Query Engine]
+        Reranker[Reranker]
+        Ingest --> Chunker
+        Chunker --> EmbedGen
+        EmbedGen --> VectorDB
+        QueryEng --> VectorDB
+        QueryEng --> Reranker
+    end
+
+    subgraph DataLayer[Data & Storage]
+        Postgres[(PostgreSQL)]
+        Redis[(Redis Cache)]
+        S3[Object Storage S3]
+        MQ[Message Queue]
+        Kafka[Event Stream]
+    end
+
+    subgraph AI[Cloud AI Providers]
+        OpenAI[OpenAI GPT-4]
+        Anthropic[Anthropic Claude]
+        Bedrock[AWS Bedrock]
+        Cohere[Cohere Embed]
+    end
+
+    subgraph Monitoring[Observability]
+        Logs[Log Aggregator]
+        Metrics[Prometheus Metrics]
+        Traces[Distributed Tracing]
+        Alerts[PagerDuty Alerts]
+        Dashboard[Grafana Dashboard]
+        Logs --> Alerts
+        Metrics --> Dashboard
+        Metrics --> Alerts
+        Traces --> Dashboard
+    end
+
+    Browser --> CDN
+    Mobile --> CDN
+    LB --> WebApp
+    LB --> SSR
+    LB --> WebSocket
+    WebApp --> Gateway
+    SSR --> Gateway
+    WebSocket --> Gateway
+    Gateway --> UserSvc
+    Gateway --> BillingSvc
+    Gateway --> TenantSvc
+    Gateway --> DocSvc
+    Gateway --> SearchSvc
+    DocSvc --> Ingest
+    SearchSvc --> QueryEng
+    UserSvc --> Postgres
+    BillingSvc --> Postgres
+    TenantSvc --> Postgres
+    UserSvc --> Redis
+    DocSvc --> S3
+    NotifySvc --> MQ
+    BillingSvc --> Kafka
+    EmbedGen --> OpenAI
+    EmbedGen --> Cohere
+    QueryEng --> Anthropic
+    QueryEng --> OpenAI
+    Reranker --> Bedrock
+    Gateway --> Logs
+    Gateway --> Metrics
+    Gateway --> Traces
+    UserSvc --> Logs
+    BillingSvc --> Logs
+    DocSvc --> Kafka
+    Kafka --> Logs

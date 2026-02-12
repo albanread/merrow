@@ -78,28 +78,12 @@ pub const Ranker = enum {
     longest_path,
 };
 
-/// Main layout function - applies Dagre layout algorithm to graph
+/// Main layout function - applies Dagre layout algorithm to graph.
 ///
-/// This implements the full Dagre layout pipeline:
-/// 1. Make space for edge labels
-/// 2. Remove self-edges
-/// 3. Make graph acyclic
-/// 4. Build nesting graph (for compound graphs)
-/// 5. Assign ranks to nodes
-/// 6. Inject edge label proxies
-/// 7. Normalize edges (break long edges into unit segments)
-/// 8. Parent dummy chains (compound graphs)
-/// 9. Add border segments (compound graphs)
-/// 10. Order nodes within ranks (crossing minimization)
-/// 11. Insert self-edge dummy nodes
-/// 12. Assign coordinates
-/// 13. Position self-edges
-/// 14. Remove border nodes
-/// 15. Denormalize (collect edge points)
-/// 16. Fix edge label coordinates
-/// 17. Compute edge-node intersections
-/// 18. Undo acyclic transformation
-/// 19. Compute graph dimensions
+/// Dispatches to either the hierarchical container-first pipeline
+/// (when the graph contains subgraphs) or the flat pipeline (original
+/// Dagre phases).  Coordinate system adjustment/undo wraps both paths
+/// so the entire layout operates in normalized TB space.
 pub fn layout(
     allocator: std.mem.Allocator,
     graph: *Digraph(NodeData, EdgeData, GraphData),
@@ -113,24 +97,48 @@ pub fn layout(
     });
 
     // Phase 0: Adjust coordinate system for LR/RL
-    // For LR/RL, swap width↔height on all nodes so the layout algorithm
-    // (which always works in TB mode) sees the correct dimensions.
     try adjustCoordinateSystem(allocator, graph, config.rankdir);
 
-    // Phase 1: Make space for edge labels
-    // NOT YET PORTED — Rust halves ranksep and doubles edge minlen to create
-    // vertical space for edge label proxy nodes.  Requires edge_labels module.
+    if (hasSubgraphs(graph)) {
+        // Hierarchical container-first layout.
+        // We are already in adjusted (TB) coordinate space, so pass TB
+        // to children to prevent double-flipping during recursion.
+        std.debug.print("[dagre] Graph has subgraphs — using hierarchical layout\n", .{});
+        var child_config = config;
+        child_config.rankdir = .TB;
+        try layoutHierarchical(allocator, graph, child_config);
+    } else {
+        try layoutFlat(allocator, graph, config);
+    }
 
-    // Phase 1.5: Remove self-edges (v == w) before acyclic/ranking.
-    // Self-edges confuse cycle detection and ranking — they are zero-length
-    // cycles that produce nonsensical reversed edges and break coordinate
-    // assignment.  We remove them, run layout, then restore them so the
-    // renderer can draw them as loop arcs.
+    // Phase 20: Undo coordinate system transformation.
+    std.debug.print("[dagre] Undoing coordinate system adjustment (rankdir={s})...\n", .{@tagName(config.rankdir)});
+    try undoCoordinateSystem(allocator, graph, config.rankdir);
+
+    std.debug.print("[dagre] Layout complete\n", .{});
+}
+
+/// Check whether the graph contains any subgraph nodes.
+fn hasSubgraphs(graph: *Graph) bool {
+    var it = graph.nodes.iterator();
+    while (it.next()) |entry| {
+        if (entry.value_ptr.is_subgraph) return true;
+    }
+    return false;
+}
+
+/// The original flat Dagre layout pipeline (phases 1–19).
+/// Used for graphs without subgraphs, and also called recursively
+/// for internal container layouts.
+fn layoutFlat(
+    allocator: std.mem.Allocator,
+    graph: *Digraph(NodeData, EdgeData, GraphData),
+    config: DagreConfig,
+) !void {
+    // Phase 1.5: Remove self-edges
     std.debug.print("[dagre] Phase 1.5: Removing self-edges...\n", .{});
     var self_edges = std.ArrayListUnmanaged(SelfEdgeInfo){};
     defer {
-        // Safety: free any self-edges that weren't restored (shouldn't
-        // happen in normal flow, but guards against early-return on error).
         for (self_edges.items) |*se| {
             if (se.edge_name_owned) {
                 if (se.edge_name) |n| allocator.free(n);
@@ -146,87 +154,495 @@ pub fn layout(
     std.debug.print("[dagre] Phase 2: Making graph acyclic...\n", .{});
     try acyclic.run(allocator, graph, config.acyclicer);
 
-    // Phase 3 + 3.5: Nesting graph + redirect edges (compound graphs)
-    // NOT YET PORTED — Rust creates border top/bottom dummy nodes for each
-    // subgraph and redirects edges to border nodes so subgraph children are
-    // constrained between parent borders during ranking and ordering.
-    // The Zig port instead uses post-layout subgraph compaction (phase 18b).
-
     // Phase 4: Assign ranks
     std.debug.print("[dagre] Phase 4: Assigning ranks...\n", .{});
     try rank.assignRanks(allocator, graph, config.ranker);
 
-    // Phase 5: Normalize edges (break long edges into unit segments)
+    // Phase 5: Normalize edges
     std.debug.print("[dagre] Phase 5: Normalizing edges...\n", .{});
     try normalize.normalizeEdges(allocator, graph);
 
-    // Phases 5b–11: Edge label proxies, empty rank removal, nesting graph
-    // cleanup, compound rank min/max, parent dummy chains, border segments.
-    // NOT YET PORTED — these phases handle edge label positioning and
-    // compound graph formalism.  See PROGRESS.md for the full gap list.
-
-    // Phase 12: Order nodes within ranks (crossing minimization)
+    // Phase 12: Order nodes within ranks
     std.debug.print("[dagre] Phase 12: Ordering nodes...\n", .{});
     try order_mod.order(allocator, graph);
-
-    // Phase 12.5: Insert self-edge dummy nodes
-    // NOT YET PORTED — Rust inserts dummy nodes after ordering so self-edges
-    // reserve space in the rank.  Currently self-edges are removed before
-    // layout and restored after (they render as loops but don't affect spacing).
 
     // Phase 13: Assign coordinates
     std.debug.print("[dagre] Phase 13: Assigning coordinates...\n", .{});
     try position_mod.position(allocator, graph, config);
 
-    // Phases 13.5–17: Self-edge positioning, border node removal,
-    // edge denormalization (collecting dummy positions into bend-point
-    // polylines), edge label coordinate fixup, edge-node intersection
-    // clipping, and reversed-edge point reversal.
-    // NOT YET PORTED — these are the edge-routing and post-processing
-    // phases.  Edges are currently rendered as straight lines or
-    // renderer-computed splines rather than layout-routed waypoints.
-
     // Undo acyclic transformation
     std.debug.print("[dagre] Undoing acyclic transformation...\n", .{});
     try acyclic.undo(allocator, graph);
 
-    // Restore self-edges now that layout is complete.  They go back into
-    // the graph so the renderer can detect them (v == w) and draw loops.
+    // Restore self-edges
     std.debug.print("[dagre] Restoring {d} self-edge(s)...\n", .{self_edges.items.len});
     try restoreSelfEdges(allocator, graph, &self_edges);
 
-    // Phase 18b: Compact subgraph children so nodes belonging to the
-    // same subgraph are vertically aligned across ranks.  Without this
-    // step, each rank is centered independently and nodes from the same
-    // subgraph can end up hundreds of pixels apart horizontally.
-    // NOTE: This runs in TB-space (before coordinate system undo) so
-    // the x-axis is always the within-rank axis regardless of rankdir.
+    // Phase 18b–19b: Subgraph fixups (only for the top-level flat path;
+    // internal container layouts skip these since they have no subgraphs).
     std.debug.print("[dagre] Compacting subgraph children...\n", .{});
     try compactSubgraphChildren(allocator, graph, config);
 
-    // Phase 19: Compute subgraph bounding boxes from children positions
-    // Still in TB-space so bounding-box logic is direction-agnostic.
     std.debug.print("[dagre] Computing subgraph bounds...\n", .{});
     try computeSubgraphBounds(allocator, graph);
 
-    // Phase 19b: Separate overlapping sibling subgraphs and recompute bounds
-    // Still in TB-space — siblings are pushed apart along x (within-rank).
     std.debug.print("[dagre] Separating sibling subgraphs...\n", .{});
     try separateSiblingSubgraphs(allocator, graph);
+}
 
-    // Phase 20: Undo coordinate system transformation.
-    // For LR/RL this swaps x↔y and width↔height on ALL nodes (including
-    // subgraph container nodes and dummy nodes) so the final positions
-    // are in the correct orientation.  For BT it flips the Y axis.
-    std.debug.print("[dagre] Undoing coordinate system adjustment (rankdir={s})...\n", .{@tagName(config.rankdir)});
-    try undoCoordinateSystem(allocator, graph, config.rankdir);
+// ===========================================================================
+// Hierarchical container-first layout
+// ===========================================================================
 
-    // Phase 21: Compute graph dimensions
-    // NOT YET PORTED — Rust translates all coordinates to origin and records
-    // overall width/height on the graph label.  Currently handled implicitly
-    // by the renderer's bounding-box computation.
+/// Bounding box of a container's internal layout.
+const BBox = struct {
+    min_x: f64 = std.math.floatMax(f64),
+    min_y: f64 = std.math.floatMax(f64),
+    max_x: f64 = -std.math.floatMax(f64),
+    max_y: f64 = -std.math.floatMax(f64),
 
-    std.debug.print("[dagre] Layout complete\n", .{});
+    fn width(self: BBox) f64 {
+        return self.max_x - self.min_x;
+    }
+    fn height(self: BBox) f64 {
+        return self.max_y - self.min_y;
+    }
+    fn centerX(self: BBox) f64 {
+        return (self.min_x + self.max_x) / 2.0;
+    }
+    fn centerY(self: BBox) f64 {
+        return (self.min_y + self.max_y) / 2.0;
+    }
+};
+
+/// Reference to an edge in the original graph.
+const EdgeRef = struct {
+    v: []const u8,
+    w: []const u8,
+    name: ?[]const u8,
+};
+
+/// Information about a root-level container (subgraph).
+const ContainerInfo = struct {
+    id: []const u8,
+    children: std.ArrayListUnmanaged([]const u8),
+    intra_edges: std.ArrayListUnmanaged(EdgeRef),
+    internal_bounds: BBox,
+
+    fn deinit(self: *ContainerInfo, allocator: std.mem.Allocator) void {
+        self.children.deinit(allocator);
+        self.intra_edges.deinit(allocator);
+    }
+};
+
+/// An edge that crosses container boundaries.
+const InterEdge = struct {
+    src_node: []const u8,
+    tgt_node: []const u8,
+    src_container: ?[]const u8, // null = free node
+    tgt_container: ?[]const u8, // null = free node
+    edge_name: ?[]const u8,
+};
+
+/// Walk the parent chain to find the root-level container a node belongs to.
+/// Returns null if the node is a free node (no subgraph parent).
+fn findRootContainer(graph: *Graph, node_id: []const u8) ?[]const u8 {
+    var root: ?[]const u8 = null;
+    var cursor: ?[]const u8 = graph.getParent(node_id);
+    while (cursor) |pid| {
+        const p = graph.getNode(pid) orelse break;
+        if (p.is_subgraph) {
+            root = pid;
+        }
+        cursor = graph.getParent(pid);
+    }
+    return root;
+}
+
+/// Find the immediate container (direct subgraph parent) of a node.
+fn findImmediateContainer(graph: *Graph, node_id: []const u8) ?[]const u8 {
+    var cursor: ?[]const u8 = graph.getParent(node_id);
+    while (cursor) |pid| {
+        const p = graph.getNode(pid) orelse break;
+        if (p.is_subgraph) return pid;
+        cursor = graph.getParent(pid);
+    }
+    return null;
+}
+
+/// Phase 1: Classify all nodes and edges into containers, free nodes,
+/// intra-container edges and inter-container edges.
+fn classifyNodesAndEdges(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    containers: *std.StringHashMap(ContainerInfo),
+    free_nodes: *std.ArrayListUnmanaged([]const u8),
+    inter_edges: *std.ArrayListUnmanaged(InterEdge),
+) !void {
+    // First pass: identify containers and free nodes.
+    var node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const id = entry.key_ptr.*;
+        const node = entry.value_ptr.*;
+        if (node.is_subgraph) {
+            // Register as container.
+            const gop = try containers.getOrPut(id);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{
+                    .id = id,
+                    .children = .{},
+                    .intra_edges = .{},
+                    .internal_bounds = .{},
+                };
+            }
+        } else if (!node.dummy) {
+            // Leaf node — find its root container.
+            const root = findRootContainer(graph, id);
+            if (root) |container_id| {
+                var gop = try containers.getOrPut(container_id);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .{
+                        .id = container_id,
+                        .children = .{},
+                        .intra_edges = .{},
+                        .internal_bounds = .{},
+                    };
+                }
+                try gop.value_ptr.children.append(allocator, id);
+            } else {
+                try free_nodes.append(allocator, id);
+            }
+        }
+    }
+
+    // Second pass: classify edges.
+    var edge_it = graph.edgeIterator();
+    while (edge_it.next()) |entry| {
+        const v = entry.v;
+        const w = entry.w;
+        const name = entry.name;
+        const src_container = findRootContainer(graph, v);
+        const tgt_container = findRootContainer(graph, w);
+
+        // Same container → intra; different or null → inter.
+        const same = blk: {
+            if (src_container == null and tgt_container == null) break :blk true;
+            if (src_container) |sc| {
+                if (tgt_container) |tc| {
+                    break :blk std.mem.eql(u8, sc, tc);
+                }
+            }
+            break :blk false;
+        };
+
+        if (same) {
+            if (src_container) |sc| {
+                if (containers.getPtr(sc)) |ci| {
+                    try ci.intra_edges.append(allocator, .{
+                        .v = v,
+                        .w = w,
+                        .name = name,
+                    });
+                }
+            }
+            // If both are free nodes with no container, that's a "root-level"
+            // edge; it will be handled via the meta-graph as a free→free edge.
+            if (src_container == null and tgt_container == null) {
+                try inter_edges.append(allocator, .{
+                    .src_node = v,
+                    .tgt_node = w,
+                    .src_container = null,
+                    .tgt_container = null,
+                    .edge_name = name,
+                });
+            }
+        } else {
+            try inter_edges.append(allocator, .{
+                .src_node = v,
+                .tgt_node = w,
+                .src_container = src_container,
+                .tgt_container = tgt_container,
+                .edge_name = name,
+            });
+        }
+    }
+}
+
+/// Recursively collect all leaf (non-subgraph, non-dummy) descendants of a node.
+fn collectAllLeafDescendants(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    root_id: []const u8,
+    result: *std.ArrayListUnmanaged([]const u8),
+) !void {
+    const children = graph.getChildren(root_id);
+    for (children) |cid| {
+        const child = graph.getNode(cid) orelse continue;
+        if (child.is_subgraph) {
+            try collectAllLeafDescendants(allocator, graph, cid, result);
+        } else if (!child.dummy) {
+            try result.append(allocator, cid);
+        }
+    }
+}
+
+/// Phase 2: Lay out a single container's children in a temporary graph.
+/// Writes positions back to the original graph and returns the bounding box.
+fn layoutContainerInternal(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    container: *ContainerInfo,
+    config: DagreConfig,
+) !BBox {
+    // Collect all leaf descendants (handles nested subgraphs).
+    var all_leaves = std.ArrayListUnmanaged([]const u8){};
+    defer all_leaves.deinit(allocator);
+    try collectAllLeafDescendants(allocator, graph, container.id, &all_leaves);
+
+    if (all_leaves.items.len == 0) {
+        return BBox{ .min_x = 0, .min_y = 0, .max_x = 80, .max_y = 40 };
+    }
+
+    // Build temporary graph with only this container's leaves + intra edges.
+    var temp = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &temp);
+        temp.deinitDeep();
+    }
+
+    // Add leaf nodes.
+    for (all_leaves.items) |cid| {
+        const orig = graph.getNode(cid) orelse continue;
+        try temp.setNode(cid, .{
+            .width = orig.width,
+            .height = orig.height,
+            .shape = orig.shape,
+            .label = orig.label,
+        });
+    }
+
+    // Add intra-edges (only if both endpoints are in the temp graph).
+    for (container.intra_edges.items) |eref| {
+        if (temp.hasNode(eref.v) and temp.hasNode(eref.w)) {
+            const orig_ed = graph.edge(eref.v, eref.w, eref.name);
+            if (orig_ed) |ed| {
+                try temp.setEdge(eref.v, eref.w, .{
+                    .minlen = ed.minlen,
+                    .weight = ed.weight,
+                }, eref.name);
+            } else {
+                try temp.setEdge(eref.v, eref.w, .{}, eref.name);
+            }
+        }
+    }
+
+    // Run flat layout on the temp graph.
+    try layoutFlat(allocator, &temp, config);
+
+    // Read positions back and compute bounding box.
+    var bb = BBox{};
+    for (all_leaves.items) |cid| {
+        const temp_node = temp.getNode(cid) orelse continue;
+        if (graph.getNodePtr(cid)) |orig_ptr| {
+            orig_ptr.x = temp_node.x;
+            orig_ptr.y = temp_node.y;
+        }
+        const half_w = temp_node.width / 2.0;
+        const half_h = temp_node.height / 2.0;
+        if (temp_node.x - half_w < bb.min_x) bb.min_x = temp_node.x - half_w;
+        if (temp_node.x + half_w > bb.max_x) bb.max_x = temp_node.x + half_w;
+        if (temp_node.y - half_h < bb.min_y) bb.min_y = temp_node.y - half_h;
+        if (temp_node.y + half_h > bb.max_y) bb.max_y = temp_node.y + half_h;
+    }
+
+    return bb;
+}
+
+/// Phase 4: Offset children positions by the meta-graph container position.
+fn applyMetaPositions(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    meta: *Graph,
+    containers: *std.StringHashMap(ContainerInfo),
+    free_nodes: []const []const u8,
+) !void {
+    // Position containers and their children.
+    var it = containers.iterator();
+    while (it.next()) |entry| {
+        const ci = entry.value_ptr;
+        const meta_node = meta.getNode(ci.id) orelse continue;
+
+        const bb = ci.internal_bounds;
+        const offset_x = meta_node.x - bb.centerX();
+        const offset_y = meta_node.y - bb.centerY() + subgraph_title_height / 2.0;
+
+        // Offset all leaf descendants.
+        var all_leaves = std.ArrayListUnmanaged([]const u8){};
+        defer all_leaves.deinit(allocator);
+        try collectAllLeafDescendants(allocator, graph, ci.id, &all_leaves);
+
+        for (all_leaves.items) |cid| {
+            if (graph.getNodePtr(cid)) |ptr| {
+                ptr.x += offset_x;
+                ptr.y += offset_y;
+            }
+        }
+
+        // Set the container node's position and size.
+        if (graph.getNodePtr(ci.id)) |sg_ptr| {
+            sg_ptr.x = meta_node.x;
+            sg_ptr.y = meta_node.y;
+            sg_ptr.width = meta_node.width;
+            sg_ptr.height = meta_node.height;
+        }
+    }
+
+    // Position free nodes directly from meta-graph.
+    for (free_nodes) |fid| {
+        const meta_node = meta.getNode(fid) orelse continue;
+        if (graph.getNodePtr(fid)) |ptr| {
+            ptr.x = meta_node.x;
+            ptr.y = meta_node.y;
+        }
+    }
+}
+
+/// Phase 5: Compute waypoints for inter-container edges.
+/// Simple routing: source center → source container border →
+/// target container border → target center.
+fn routeInterContainerEdges(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    inter_edges_list: []const InterEdge,
+) !void {
+    _ = allocator;
+    for (inter_edges_list) |ie| {
+        const ed_ptr = graph.getEdgePtr(ie.src_node, ie.tgt_node, ie.edge_name) orelse continue;
+
+        const src = graph.getNode(ie.src_node) orelse continue;
+        const tgt = graph.getNode(ie.tgt_node) orelse continue;
+
+        ed_ptr.points.clearRetainingCapacity();
+
+        // Simple 2-point path: source center → target center.
+        // The renderer will clip to node borders.
+        try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
+        try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+    }
+}
+
+/// Main hierarchical layout orchestrator.
+fn layoutHierarchical(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    config: DagreConfig,
+) !void {
+    // Phase 1: Classify nodes and edges.
+    std.debug.print("[dagre-hier] Phase 1: Classifying nodes and edges...\n", .{});
+    var containers = std.StringHashMap(ContainerInfo).init(allocator);
+    defer {
+        var cit = containers.iterator();
+        while (cit.next()) |entry| {
+            entry.value_ptr.deinit(allocator);
+        }
+        containers.deinit();
+    }
+
+    var free_nodes = std.ArrayListUnmanaged([]const u8){};
+    defer free_nodes.deinit(allocator);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(allocator);
+
+    try classifyNodesAndEdges(allocator, graph, &containers, &free_nodes, &inter_edges);
+
+    std.debug.print("[dagre-hier]   {d} containers, {d} free nodes, {d} inter-edges\n", .{
+        containers.count(),
+        free_nodes.items.len,
+        inter_edges.items.len,
+    });
+
+    // Phase 2: Internal layout per container.
+    std.debug.print("[dagre-hier] Phase 2: Internal container layouts...\n", .{});
+    {
+        var cit = containers.iterator();
+        while (cit.next()) |entry| {
+            const ci = entry.value_ptr;
+            std.debug.print("[dagre-hier]   Laying out container '{s}' ({d} children)...\n", .{
+                ci.id, ci.children.items.len,
+            });
+            ci.internal_bounds = try layoutContainerInternal(allocator, graph, ci, config);
+            std.debug.print("[dagre-hier]   Container '{s}' bounds: [{d:.1}, {d:.1}] to [{d:.1}, {d:.1}]\n", .{
+                ci.id,
+                ci.internal_bounds.min_x,
+                ci.internal_bounds.min_y,
+                ci.internal_bounds.max_x,
+                ci.internal_bounds.max_y,
+            });
+        }
+    }
+
+    // Phase 3: Build and layout meta-graph.
+    std.debug.print("[dagre-hier] Phase 3: Meta-graph layout...\n", .{});
+    var meta = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &meta);
+        meta.deinitDeep();
+    }
+
+    // Add container nodes to meta-graph (sized by internal bounds + padding).
+    {
+        var cit = containers.iterator();
+        while (cit.next()) |entry| {
+            const ci = entry.value_ptr;
+            const sg = graph.getNode(ci.id) orelse continue;
+            const pad = sg.subgraph_padding;
+            const bb = ci.internal_bounds;
+            const meta_w = bb.width() + pad * 2.0;
+            const meta_h = bb.height() + pad * 2.0 + subgraph_title_height;
+
+            try meta.setNode(ci.id, .{
+                .width = meta_w,
+                .height = meta_h,
+                // NOT a subgraph in the meta-graph — treat as opaque box.
+                .is_subgraph = false,
+            });
+        }
+    }
+
+    // Add free nodes to meta-graph.
+    for (free_nodes.items) |fid| {
+        const orig = graph.getNode(fid) orelse continue;
+        try meta.setNode(fid, .{
+            .width = orig.width,
+            .height = orig.height,
+            .shape = orig.shape,
+        });
+    }
+
+    // Add inter-edges to meta-graph.
+    for (inter_edges.items) |ie| {
+        const src_meta = ie.src_container orelse ie.src_node;
+        const tgt_meta = ie.tgt_container orelse ie.tgt_node;
+        // Skip self-edges in meta-graph (same container on both ends).
+        if (std.mem.eql(u8, src_meta, tgt_meta)) continue;
+        // Check both nodes exist in meta-graph.
+        if (!meta.hasNode(src_meta) or !meta.hasNode(tgt_meta)) continue;
+        try meta.setEdge(src_meta, tgt_meta, .{}, null);
+    }
+
+    // Run flat layout on meta-graph.
+    try layoutFlat(allocator, &meta, config);
+
+    // Phase 4: Apply meta-graph positions.
+    std.debug.print("[dagre-hier] Phase 4: Applying meta positions...\n", .{});
+    try applyMetaPositions(allocator, graph, &meta, &containers, free_nodes.items);
+
+    // Phase 5: Route inter-container edges.
+    std.debug.print("[dagre-hier] Phase 5: Routing inter-container edges...\n", .{});
+    try routeInterContainerEdges(allocator, graph, inter_edges.items);
+
+    std.debug.print("[dagre-hier] Hierarchical layout complete\n", .{});
 }
 
 /// ---------------------------------------------------------------------------

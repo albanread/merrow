@@ -1,0 +1,43 @@
+flowchart TD
+    subgraph Frontend[Frontend Layer]
+        UI[User Interface]
+        Router[Router]
+        State[State Manager]
+        UI --> Router
+        Router --> State
+    end
+
+    subgraph Backend[Backend Services]
+        API[API Gateway]
+        Auth[Auth Service]
+        BL[Business Logic]
+        API --> Auth
+        Auth --> BL
+    end
+
+    subgraph Database[Database Layer]
+        Cache[Redis Cache]
+        DB[(PostgreSQL)]
+        Queue[Message Queue]
+        Cache --> DB
+        Queue --> DB
+    end
+
+    subgraph Monitoring[Monitoring & Logging]
+        Logs[Log Aggregator]
+        Metrics[Metrics Collector]
+        Alerts[Alert Manager]
+        Logs --> Alerts
+        Metrics --> Alerts
+    end
+
+    State --> API
+    BL --> Cache
+    BL --> Queue
+    API --> Logs
+    API --> Metrics
+    Auth --> Logs
+    DB --> Metrics
+
+    Start([Start]) --> UI
+    Alerts --> Notify[Send Notification]
