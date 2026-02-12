@@ -4,7 +4,7 @@ A fast, self-contained Mermaid diagram renderer.
 
 Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). 
 
-The main use case for merrow is the generation of Flowchart and Sequence diagrams for document - hence the focus on PNG rendering.
+The main use case for merrow is the generation of Flowchart and Sequence diagrams for documents - hence the focus on PNG rendering.
 
 ## Supported Diagram Types
 
