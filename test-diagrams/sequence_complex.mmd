@@ -1,0 +1,54 @@
+sequenceDiagram
+    title Order Processing System
+    participant C as Customer
+    participant W as Web Frontend
+    participant API as API Gateway
+    participant Auth as Auth Service
+    participant O as Order Service
+    participant P as Payment Service
+    participant I as Inventory Service
+    participant N as Notification Service
+    participant DB as Database
+
+    C->>W: Browse products
+    W->>API: GET /products
+    API->>DB: Query products
+    DB-->>API: Product list
+    API-->>W: Product catalog
+    W-->>C: Display products
+
+    C->>W: Add to cart
+    C->>W: Proceed to checkout
+
+    W->>API: POST /orders
+    API->>Auth: Validate token
+    Auth-->>API: Token valid
+
+    API->>O: Create order
+    O->>DB: Save order (pending)
+    DB-->>O: Order ID: 12345
+
+    O->>I: Check availability
+    I->>DB: Query stock levels
+    DB-->>I: Stock data
+    I-->>O: All items available
+
+    O->>P: Process payment
+    P->>P: Validate card details
+    P-->>O: Payment authorized
+
+    O->>I: Reserve items
+    I->>DB: Decrement stock
+    DB-->>I: Stock updated
+    I-->>O: Items reserved
+
+    O->>DB: Update order (confirmed)
+    DB-->>O: Order updated
+
+    O->>N: Send confirmation
+    N->>C: Order confirmation email
+    N->>C: SMS notification
+
+    O-->>API: Order confirmed
+    API-->>W: Order response
+    W-->>C: Show confirmation page

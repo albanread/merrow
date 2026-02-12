@@ -57,7 +57,7 @@ pub fn renderGraphToSVGWithFont(
     graph: *Graph,
     filename: []const u8,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     const svg_data = try renderGraphToSVGString(allocator, graph, config, font);
     defer allocator.free(svg_data);
@@ -73,7 +73,7 @@ pub fn renderGraphToSVGString(
     allocator: Allocator,
     graph: *Graph,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) ![]u8 {
     // Calculate bounding box
     const bounds = try graph_mod.calculateBounds(allocator, graph, config);
@@ -208,7 +208,7 @@ fn drawNodes(
     offset_x: f64,
     offset_y: f64,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     const nodes = try graph.allNodes(allocator);
     defer {
@@ -444,7 +444,7 @@ fn drawEdges(
     offset_x: f64,
     offset_y: f64,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     // Collect label placements for collision resolution (same as PNG path).
     var label_placements = std.ArrayListUnmanaged(LabelPlacement){};
@@ -758,7 +758,7 @@ fn drawSelfEdgeLoop(
     edge_thickness: f64,
     has_arrow: bool,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
     edge_data: ?EdgeData,
     label_placements: *std.ArrayListUnmanaged(LabelPlacement),
     dash_array: ?[]const u8,

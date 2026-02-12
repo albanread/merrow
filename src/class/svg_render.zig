@@ -57,7 +57,7 @@ pub fn renderClassToSVG(
     allocator: Allocator,
     diagram: *const ClassDiagram,
     output_path: []const u8,
-    maybe_font: ?*const Font,
+    maybe_font: ?*Font,
 ) !void {
     const svg_content = try renderClassToSVGString(allocator, diagram, maybe_font);
     defer allocator.free(svg_content);
@@ -71,7 +71,7 @@ pub fn renderClassToSVG(
 pub fn renderClassToSVGString(
     allocator: Allocator,
     diagram: *const ClassDiagram,
-    maybe_font: ?*const Font,
+    maybe_font: ?*Font,
 ) ![]u8 {
     // ── 1. Build Dagre graph ────────────────────────────────────
     var graph = Graph.init(allocator);
@@ -233,7 +233,7 @@ const BoxSize = struct {
     height: f64,
 };
 
-fn computeClassBoxSize(cls: *const ClassNode, maybe_font: ?*const Font) BoxSize {
+fn computeClassBoxSize(cls: *const ClassNode, maybe_font: ?*Font) BoxSize {
     _ = maybe_font; // TODO: use font for precise measurement
 
     // Header section: class name (+ annotation + generic)

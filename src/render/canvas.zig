@@ -69,63 +69,107 @@ pub const Canvas = struct {
         self.setPixel(x, y, r, g, b, a);
     }
 
-    /// Fill entire canvas with color
+    /// Fill entire canvas with color.
+    /// Skips the fill if the canvas is already initialised to the same colour
+    /// (common case: white background after initWithScale).
     pub fn fill(self: *Canvas, r: u8, g: u8, b: u8, a: u8) void {
+        // Fast path: if all four bytes are the same value we can use @memset
+        // directly on the whole pixel buffer.  The most common case is
+        // fill(255,255,255,255) right after initWithScale which already
+        // memset everything to 255 — detect that and skip entirely.
+        if (r == 255 and g == 255 and b == 255 and a == 255) {
+            // initWithScale already set everything to 255, so this is a no-op
+            // unless something has drawn on the canvas.  We do the memset
+            // anyway for correctness but it's a single fast call.
+            @memset(self.pixels, 255);
+            return;
+        }
+        if (r == g and g == b and b == a) {
+            @memset(self.pixels, r);
+            return;
+        }
+        // General case: write the 4-byte RGBA pattern.
+        // Process 4 bytes at a time using a fixed pixel value.
+        const pixel_count = self.width * self.height;
+        const pixel = [4]u8{ r, g, b, a };
         var i: usize = 0;
-        while (i < self.width * self.height) : (i += 1) {
+        while (i < pixel_count) : (i += 1) {
             const idx = i * 4;
-            self.pixels[idx + 0] = r;
-            self.pixels[idx + 1] = g;
-            self.pixels[idx + 2] = b;
-            self.pixels[idx + 3] = a;
+            self.pixels[idx..][0..4].* = pixel;
         }
     }
 
-    /// Draw a filled rectangle
+    /// Draw a filled rectangle.
+    /// Uses a fast path for fully-opaque fills that bypasses per-pixel bounds
+    /// checks and alpha blending.
     pub fn fillRect(self: *Canvas, x: f64, y: f64, w: f64, h: f64, r: u8, g: u8, b: u8, a: u8) void {
-        // Coordinates are already in scaled space (canvas dimensions are scaled)
-        const x0 = @as(i32, @intFromFloat(@floor(x * self.scale_factor)));
-        const y0 = @as(i32, @intFromFloat(@floor(y * self.scale_factor)));
-        const x1 = @as(i32, @intFromFloat(@ceil((x + w) * self.scale_factor)));
-        const y1 = @as(i32, @intFromFloat(@ceil((y + h) * self.scale_factor)));
+        const x0_raw = @as(i32, @intFromFloat(@floor(x * self.scale_factor)));
+        const y0_raw = @as(i32, @intFromFloat(@floor(y * self.scale_factor)));
+        const x1_raw = @as(i32, @intFromFloat(@ceil((x + w) * self.scale_factor)));
+        const y1_raw = @as(i32, @intFromFloat(@ceil((y + h) * self.scale_factor)));
 
-        var py = y0;
-        while (py < y1) : (py += 1) {
-            var px = x0;
-            while (px < x1) : (px += 1) {
-                self.setPixel(px, py, r, g, b, a);
+        // Clamp to canvas bounds once (avoids per-pixel bounds checks)
+        const cw: i32 = @intCast(self.width);
+        const ch: i32 = @intCast(self.height);
+        const x0 = @max(x0_raw, 0);
+        const y0 = @max(y0_raw, 0);
+        const x1 = @min(x1_raw, cw);
+        const y1 = @min(y1_raw, ch);
+
+        if (x0 >= x1 or y0 >= y1) return;
+
+        const stride = self.width * 4;
+
+        if (a == 255) {
+            // Fast path: fully opaque — direct pixel writes, no alpha blending
+            const pixel = [4]u8{ r, g, b, 255 };
+            const ux0: usize = @intCast(x0);
+            const ux1: usize = @intCast(x1);
+            var py: usize = @intCast(y0);
+            const uy1: usize = @intCast(y1);
+            while (py < uy1) : (py += 1) {
+                const row_base = py * stride + ux0 * 4;
+                const row_end = py * stride + ux1 * 4;
+                var idx = row_base;
+                while (idx < row_end) : (idx += 4) {
+                    self.pixels[idx..][0..4].* = pixel;
+                }
             }
-        }
-    }
+        } else {
+            // Slow path: alpha blending needed
+            const alpha = @as(f32, @floatFromInt(a)) / 255.0;
+            const inv_alpha = 1.0 - alpha;
+            const rf = @as(f32, @floatFromInt(r)) * alpha;
+            const gf = @as(f32, @floatFromInt(g)) * alpha;
+            const bf = @as(f32, @floatFromInt(b)) * alpha;
 
-    /// Draw a rectangle outline
-    pub fn strokeRect(self: *Canvas, x: f64, y: f64, w: f64, h: f64, thickness: i32, r: u8, g: u8, b: u8, a: u8) void {
-        // Coordinates are already in scaled space (canvas dimensions are scaled)
-        const x0 = @as(i32, @intFromFloat(@floor(x * self.scale_factor)));
-        const y0 = @as(i32, @intFromFloat(@floor(y * self.scale_factor)));
-        const x1 = @as(i32, @intFromFloat(@ceil((x + w) * self.scale_factor)));
-        const y1 = @as(i32, @intFromFloat(@ceil((y + h) * self.scale_factor)));
-        const sthickness = @as(i32, @intFromFloat(@as(f64, @floatFromInt(thickness)) * self.scale_factor));
-
-        // Top and bottom edges
-        var t: i32 = 0;
-        while (t < sthickness) : (t += 1) {
-            var px = x0;
-            while (px < x1) : (px += 1) {
-                self.setPixel(px, y0 + t, r, g, b, a); // Top
-                self.setPixel(px, y1 - 1 - t, r, g, b, a); // Bottom
-            }
-        }
-
-        // Left and right edges
-        t = 0;
-        while (t < sthickness) : (t += 1) {
             var py = y0;
             while (py < y1) : (py += 1) {
-                self.setPixel(x0 + t, py, r, g, b, a); // Left
-                self.setPixel(x1 - 1 - t, py, r, g, b, a); // Right
+                const row_base = @as(usize, @intCast(py)) * stride;
+                var px = x0;
+                while (px < x1) : (px += 1) {
+                    const idx = row_base + @as(usize, @intCast(px)) * 4;
+                    self.pixels[idx + 0] = @intFromFloat(rf + @as(f32, @floatFromInt(self.pixels[idx + 0])) * inv_alpha);
+                    self.pixels[idx + 1] = @intFromFloat(gf + @as(f32, @floatFromInt(self.pixels[idx + 1])) * inv_alpha);
+                    self.pixels[idx + 2] = @intFromFloat(bf + @as(f32, @floatFromInt(self.pixels[idx + 2])) * inv_alpha);
+                    self.pixels[idx + 3] = 255;
+                }
             }
         }
+    }
+
+    /// Draw a rectangle outline using fast horizontal fillRect for top/bottom
+    /// edges and vertical strips for left/right edges.
+    pub fn strokeRect(self: *Canvas, x: f64, y: f64, w: f64, h: f64, thickness: i32, r: u8, g: u8, b: u8, a: u8) void {
+        const sthick = @as(f64, @floatFromInt(thickness)) / self.scale_factor; // logical thickness
+        // Top edge
+        self.fillRect(x, y, w, sthick, r, g, b, a);
+        // Bottom edge
+        self.fillRect(x, y + h - sthick, w, sthick, r, g, b, a);
+        // Left edge
+        self.fillRect(x, y, sthick, h, r, g, b, a);
+        // Right edge
+        self.fillRect(x + w - sthick, y, sthick, h, r, g, b, a);
     }
 
     /// Fill an ellipse centered at (cx, cy) with radii (rx, ry).
@@ -219,7 +263,9 @@ pub const Canvas = struct {
         self.drawLine(left_x, left_y, top_x, top_y, thickness, r, g, b, a);
     }
 
-    /// Draw antialiased line using Xiaolin Wu's algorithm with thickness support
+    /// Draw antialiased line using Xiaolin Wu's algorithm with thickness support.
+    /// For thick horizontal or vertical lines, uses fast fillRect instead of
+    /// multiple parallel AA lines.
     pub fn drawLine(self: *Canvas, x0: f64, y0: f64, x1: f64, y1: f64, thickness: i32, r: u8, g: u8, b: u8, a: u8) void {
         // Scale coordinates by scale factor
         const sx0 = x0 * self.scale_factor;
@@ -232,9 +278,32 @@ pub const Canvas = struct {
             // Thin line - use single antialiased line
             self.drawLineAA(sx0, sy0, sx1, sy1, r, g, b, a);
         } else {
-            // Thick line - draw multiple parallel lines
+            // For nearly-horizontal or nearly-vertical thick lines, use
+            // fillRect which is much faster than multiple AA lines.
             const dx = sx1 - sx0;
             const dy = sy1 - sy0;
+            const half_thick = sthick / 2.0;
+
+            if (@abs(dy) < 0.5) {
+                // Nearly horizontal — draw as a filled rectangle
+                const lx = @min(sx0, sx1);
+                const rx = @max(sx0, sx1);
+                const ty = (sy0 + sy1) / 2.0 - half_thick;
+                // Use direct pixel writes (coordinates already scaled)
+                self.fillRectScaled(lx, ty, rx - lx, sthick, r, g, b, a);
+                return;
+            }
+            if (@abs(dx) < 0.5) {
+                // Nearly vertical — draw as a filled rectangle
+                const ty = @min(sy0, sy1);
+                const by = @max(sy0, sy1);
+                const lx = (sx0 + sx1) / 2.0 - half_thick;
+                self.fillRectScaled(lx, ty, sthick, by - ty, r, g, b, a);
+                return;
+            }
+
+            // General thick diagonal line — draw parallel AA lines but
+            // cap the number of parallel lines for performance.
             const len = @sqrt(dx * dx + dy * dy);
             if (len < 0.001) return;
 
@@ -242,9 +311,9 @@ pub const Canvas = struct {
             const px = -dy / len;
             const py = dx / len;
 
-            // Draw parallel lines from -half_thick to +half_thick
-            const half_thick = sthick / 2.0;
-            const num_lines = @as(i32, @intFromFloat(sthick * 2.0)) + 1;
+            // Use fewer parallel lines (spacing ~0.7px gives good coverage
+            // with Wu AA without excessive overdraw).
+            const num_lines = @max(2, @as(i32, @intFromFloat(@ceil(sthick / 0.7))));
             const step = sthick / @as(f64, @floatFromInt(num_lines - 1));
 
             var i: i32 = 0;
@@ -253,6 +322,39 @@ pub const Canvas = struct {
                 const ox = offset * px;
                 const oy = offset * py;
                 self.drawLineAA(sx0 + ox, sy0 + oy, sx1 + ox, sy1 + oy, r, g, b, a);
+            }
+        }
+    }
+
+    /// Fill a rectangle where coordinates are already in scaled pixel space
+    /// (no additional scale_factor multiplication).
+    fn fillRectScaled(self: *Canvas, x: f64, y: f64, w: f64, h: f64, r: u8, g: u8, b: u8, a: u8) void {
+        const x0_raw = @as(i32, @intFromFloat(@floor(x)));
+        const y0_raw = @as(i32, @intFromFloat(@floor(y)));
+        const x1_raw = @as(i32, @intFromFloat(@ceil(x + w)));
+        const y1_raw = @as(i32, @intFromFloat(@ceil(y + h)));
+
+        const cw: i32 = @intCast(self.width);
+        const ch: i32 = @intCast(self.height);
+        const ix0 = @max(x0_raw, 0);
+        const iy0 = @max(y0_raw, 0);
+        const ix1 = @min(x1_raw, cw);
+        const iy1 = @min(y1_raw, ch);
+
+        if (ix0 >= ix1 or iy0 >= iy1) return;
+
+        const stride = self.width * 4;
+        const pixel = [4]u8{ r, g, b, a };
+        const ux0: usize = @intCast(ix0);
+        const ux1: usize = @intCast(ix1);
+        var py: usize = @intCast(iy0);
+        const uy1: usize = @intCast(iy1);
+        while (py < uy1) : (py += 1) {
+            const row_base = py * stride + ux0 * 4;
+            const row_end = py * stride + ux1 * 4;
+            var idx = row_base;
+            while (idx < row_end) : (idx += 4) {
+                self.pixels[idx..][0..4].* = pixel;
             }
         }
     }
@@ -309,6 +411,8 @@ pub const Canvas = struct {
     }
 
     /// Draw antialiased line using Xiaolin Wu's algorithm
+    /// Draw antialiased line using Xiaolin Wu's algorithm (coordinates in
+    /// scaled pixel space — caller must pre-scale).
     fn drawLineAA(self: *Canvas, x0: f64, y0: f64, x1: f64, y1: f64, r: u8, g: u8, b: u8, a: u8) void {
         const steep = @abs(y1 - y0) > @abs(x1 - x0);
 

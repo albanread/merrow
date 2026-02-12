@@ -215,7 +215,7 @@ const BoxSize = struct {
     height: f64,
 };
 
-fn computeClassBoxSize(cls: *const ClassNode, maybe_font: ?*const Font) BoxSize {
+fn computeClassBoxSize(cls: *const ClassNode, maybe_font: ?*Font) BoxSize {
     _ = maybe_font;
 
     var header_lines: usize = 1;

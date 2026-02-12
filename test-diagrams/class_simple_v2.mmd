@@ -1,0 +1,20 @@
+classDiagram
+    class Book {
+        +String title
+        +String isbn
+        +int pages
+        +checkout()
+        +returnBook()
+    }
+    class Author {
+        +String name
+        +String nationality
+        +writeBook(String title)
+    }
+    class Library {
+        +String name
+        +addBook(Book b)
+        +findBook(String isbn) Book
+    }
+    Author "1" --> "*" Book : writes
+    Library "1" o-- "*" Book : contains

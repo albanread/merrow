@@ -85,7 +85,7 @@ fn estimateNodeSize(label: []const u8, shape: NodeShape) NodeSize {
 
 /// Measure a node's dimensions using a real font, with text wrapping for
 /// labels that exceed `max_label_width`.
-fn measureNodeSize(font: *const Font, label: []const u8, shape: NodeShape) NodeSize {
+fn measureNodeSize(font: *Font, label: []const u8, shape: NodeShape) NodeSize {
     // Check if text needs wrapping
     const single_line_w = font.measureText(label, font_size);
     var text_w: f64 = undefined;
@@ -1016,7 +1016,7 @@ fn renderSequenceDiagram(
         defer if (maybe_seq_font) |*f| f.deinit();
 
         const png_config = SeqPngRender.SeqPngRenderConfig{};
-        const font_ptr: ?*const SeqFont = if (maybe_seq_font) |*f| f else null;
+        const font_ptr: ?*SeqFont = if (maybe_seq_font) |*f| f else null;
 
         try SeqPngRender.renderToPNGFile(
             allocator,

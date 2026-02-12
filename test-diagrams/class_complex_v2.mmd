@@ -1,0 +1,99 @@
+classDiagram
+    class User {
+        <<abstract>>
+        +int id
+        +String username
+        +String email
+        -String passwordHash
+        +login(String password) bool
+        +logout()
+        +getProfile() Profile
+    }
+    class Customer {
+        +String shippingAddress
+        +String billingAddress
+        +placeOrder(Cart cart) Order
+        +viewOrderHistory() List~Order~
+    }
+    class Admin {
+        +String role
+        +manageUsers()
+        +generateReport() Report
+        +banUser(User user)
+    }
+    class Product {
+        +int id
+        +String name
+        +String description
+        -double cost
+        +double price
+        +int stockCount
+        +isAvailable() bool
+        +applyDiscount(double percent)
+    }
+    class Cart {
+        -List~CartItem~ items
+        +addItem(Product p, int qty)
+        +removeItem(int productId)
+        +getTotal() double
+        +clear()
+        +itemCount() int
+    }
+    class CartItem {
+        +Product product
+        +int quantity
+        +getSubtotal() double
+    }
+    class Order {
+        +int id
+        +Date createdAt
+        +String status
+        +double totalAmount
+        +confirm()
+        +cancel()
+        +getInvoice() Invoice
+    }
+    class Payment {
+        <<interface>>
+        +process(double amount) bool
+        +refund(double amount) bool
+        +getTransactionId() String
+    }
+    class CreditCardPayment {
+        -String cardNumber
+        -String expiry
+        +process(double amount) bool
+        +refund(double amount) bool
+        +getTransactionId() String
+    }
+    class PayPalPayment {
+        -String accountEmail
+        +process(double amount) bool
+        +refund(double amount) bool
+        +getTransactionId() String
+    }
+    class Invoice {
+        +int id
+        +Date issuedAt
+        +double total
+        +double taxAmount
+        +generatePDF() Blob
+    }
+    class Notification {
+        <<service>>
+        +sendEmail(String to, String subject)
+        +sendSMS(String phone, String msg)
+    }
+
+    User <|-- Customer
+    User <|-- Admin
+    Customer "1" --> "0..1" Cart : has
+    Cart "1" *-- "*" CartItem : contains
+    CartItem --> Product : references
+    Customer "1" --> "*" Order : places
+    Order "1" --> "1" Payment : paid via
+    Payment <|.. CreditCardPayment : implements
+    Payment <|.. PayPalPayment : implements
+    Order "1" --> "1" Invoice : generates
+    Order ..> Notification : triggers
+    Admin ..> Order : manages

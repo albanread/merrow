@@ -253,7 +253,7 @@ pub fn resolveLabelPlacements(
 fn drawLabels(
     labels: []const LabelPlacement,
     canvas: *Canvas,
-    font: *const Font,
+    font: *Font,
 ) !void {
     for (labels) |lbl| {
         // Background box
@@ -296,7 +296,7 @@ pub fn renderGraphToPNGWithFont(
     graph: *Graph,
     filename: []const u8,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     // Calculate bounding box
     const bounds = try calculateBounds(allocator, graph, config);
@@ -307,9 +307,6 @@ pub fn renderGraphToPNGWithFont(
 
     var canvas = try Canvas.initWithScale(allocator, canvas_width, canvas_height, config.scale_factor);
     defer canvas.deinit();
-
-    // Fill background
-    canvas.fill(255, 255, 255, 255);
 
     // Calculate offset to center the graph
     const offset_x = config.padding - bounds.min_x;
@@ -1028,7 +1025,7 @@ fn drawSubgraphs(
     offset_x: f64,
     offset_y: f64,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     const nodes = try graph.allNodes(allocator);
     defer {
@@ -1286,7 +1283,7 @@ fn drawNodes(
     offset_x: f64,
     offset_y: f64,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     const nodes = try graph.allNodes(allocator);
     defer {
@@ -1564,7 +1561,7 @@ fn drawEdges(
     offset_x: f64,
     offset_y: f64,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     // Collect label placements so we can resolve collisions after drawing
     // all edge lines.
@@ -1932,7 +1929,7 @@ fn drawSelfEdgeLoop(
     edge_thickness: i32,
     has_arrow: bool,
     config: RenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
     edge_data: ?EdgeData,
     label_placements: *std.ArrayListUnmanaged(LabelPlacement),
     line_style: LineStyle,

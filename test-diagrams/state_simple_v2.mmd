@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> Red
+    Red --> Green : Timer
+    Green --> Yellow : Timer
+    Yellow --> Red : Timer
+    Red --> [*] : Power off
+
+    Red : Stop
+    Green : Go
+    Yellow : Caution

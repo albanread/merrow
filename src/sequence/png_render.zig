@@ -113,7 +113,7 @@ pub fn renderToPNGFile(
     filename: []const u8,
     layout_config: LayoutConfig,
     render_config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     const canvas_w = @as(usize, @intFromFloat(@ceil(layout_result.width)));
     const canvas_h = @as(usize, @intFromFloat(@ceil(layout_result.height)));
@@ -163,7 +163,7 @@ fn drawTitle(
     title_text: []const u8,
     layout_result: LayoutResult,
     config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) void {
     if (font) |f| {
         const cx: f32 = @floatCast(layout_result.width / 2.0);
@@ -184,7 +184,7 @@ fn drawFragments(
     diag: *const SequenceDiagram,
     layout_config: LayoutConfig,
     config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     if (diag.fragments.items.len == 0) return;
 
@@ -385,7 +385,7 @@ fn drawMessages(
     diag: *const SequenceDiagram,
     layout_config: LayoutConfig,
     config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) !void {
     if (diag.messages.items.len == 0) return;
 
@@ -610,7 +610,7 @@ fn drawNotes(
     canvas: *Canvas,
     diag: *const SequenceDiagram,
     config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) void {
     if (diag.notes.items.len == 0) return;
 
@@ -695,7 +695,7 @@ fn drawParticipantBoxes(
     layout_result: LayoutResult,
     layout_config: LayoutConfig,
     config: SeqPngRenderConfig,
-    font: ?*const Font,
+    font: ?*Font,
 ) void {
     for (diag.participants.items) |p| {
         const label = p.displayName();
@@ -715,7 +715,7 @@ fn drawParticipantBox(
     layout_config: LayoutConfig,
     config: SeqPngRenderConfig,
     label: []const u8,
-    font: ?*const Font,
+    font: ?*Font,
 ) void {
     _ = layout_config;
 
@@ -760,7 +760,7 @@ fn drawActorFigure(
     total_h: f64,
     config: SeqPngRenderConfig,
     label: []const u8,
-    font: ?*const Font,
+    font: ?*Font,
 ) void {
     const ac = config.actor_color;
     const aw = config.actor_stroke_width;

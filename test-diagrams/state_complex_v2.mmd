@@ -1,0 +1,56 @@
+stateDiagram-v2
+    [*] --> New
+
+    New : Order created
+    New --> Pending : Customer submits
+
+    state Pending {
+        [*] --> PaymentCheck
+        PaymentCheck --> Authorized : Funds available
+        PaymentCheck --> Declined : Insufficient funds
+        Authorized --> [*]
+        Declined --> [*]
+    }
+
+    Pending --> Confirmed : Payment authorized
+    Pending --> Cancelled : Payment declined
+
+    state Fulfillment {
+        [*] --> Picking
+        Picking --> Packing : Items collected
+        Packing --> Shipping : Package sealed
+
+        state Shipping {
+            [*] --> LabelCreated
+            LabelCreated --> InTransit : Carrier pickup
+            InTransit --> OutForDelivery : Local hub
+            OutForDelivery --> [*]
+        }
+
+        Shipping --> [*]
+    }
+
+    Confirmed --> Fulfillment : Begin fulfillment
+    Fulfillment --> Delivered : Customer received
+
+    state Returns {
+        [*] --> ReturnRequested
+        ReturnRequested --> Inspecting : Item received
+        Inspecting --> Refunded : Approved
+        Inspecting --> Rejected : Denied
+        Refunded --> [*]
+        Rejected --> [*]
+    }
+
+    Delivered --> Returns : Customer requests return
+    Delivered --> Completed : No issues
+    Returns --> Completed : Return resolved
+    Cancelled --> [*]
+    Completed --> [*]
+
+    Completed : Order finalized
+    Cancelled : Order cancelled
+
+    note right of Pending : Payment gateway\nprocesses the charge
+    note left of Fulfillment : Warehouse handles\npick-pack-ship
+    note right of Returns : 30-day return\npolicy applies

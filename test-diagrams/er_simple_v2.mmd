@@ -1,0 +1,20 @@
+erDiagram
+    AUTHOR ||--o{ POST : writes
+    POST ||--o{ COMMENT : has
+    AUTHOR {
+        int id PK
+        string username
+        string email
+    }
+    POST {
+        int id PK
+        string title
+        text body
+        date published_at
+    }
+    COMMENT {
+        int id PK
+        string author_name
+        text content
+        date created_at
+    }

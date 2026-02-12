@@ -1,0 +1,103 @@
+erDiagram
+    HOSPITAL {
+        int id PK
+        string name
+        string address
+        string phone
+        int bed_count
+    }
+    DEPARTMENT {
+        int id PK
+        int hospital_id FK
+        string name
+        string floor
+        int capacity
+    }
+    DOCTOR {
+        int id PK
+        int department_id FK
+        string first_name
+        string last_name
+        string specialization
+        string license_number
+        date hire_date
+    }
+    NURSE {
+        int id PK
+        int department_id FK
+        string first_name
+        string last_name
+        string shift
+        date hire_date
+    }
+    PATIENT {
+        int id PK
+        string first_name
+        string last_name
+        date date_of_birth
+        string blood_type
+        string phone
+        string insurance_id
+    }
+    APPOINTMENT {
+        int id PK
+        int patient_id FK
+        int doctor_id FK
+        date scheduled_date
+        string status
+        string reason
+    }
+    PRESCRIPTION {
+        int id PK
+        int appointment_id FK
+        int medication_id FK
+        string dosage
+        int duration_days
+        string instructions
+    }
+    MEDICATION {
+        int id PK
+        string name
+        string manufacturer
+        float unit_price
+        string form
+    }
+    LAB_TEST {
+        int id PK
+        int patient_id FK
+        int doctor_id FK
+        string test_type
+        date ordered_date
+        date result_date
+        string result
+    }
+    ROOM {
+        int id PK
+        int department_id FK
+        string room_number
+        string type
+        int beds
+    }
+    ADMISSION {
+        int id PK
+        int patient_id FK
+        int room_id FK
+        int doctor_id FK
+        date admit_date
+        date discharge_date
+        string diagnosis
+    }
+
+    HOSPITAL ||--|{ DEPARTMENT : houses
+    DEPARTMENT ||--o{ DOCTOR : employs
+    DEPARTMENT ||--o{ NURSE : staffs
+    DEPARTMENT ||--|{ ROOM : contains
+    PATIENT ||--o{ APPOINTMENT : schedules
+    DOCTOR ||--o{ APPOINTMENT : attends
+    APPOINTMENT ||--o{ PRESCRIPTION : generates
+    MEDICATION ||--o{ PRESCRIPTION : "prescribed in"
+    PATIENT ||--o{ LAB_TEST : undergoes
+    DOCTOR ||--o{ LAB_TEST : orders
+    PATIENT ||--o{ ADMISSION : "admitted via"
+    ROOM ||--o{ ADMISSION : "assigned to"
+    DOCTOR ||--o{ ADMISSION : oversees

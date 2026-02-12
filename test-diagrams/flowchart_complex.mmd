@@ -1,0 +1,42 @@
+flowchart TD
+    A[Start Application] --> B{User Authenticated?}
+    B -->|Yes| C[Load Dashboard]
+    B -->|No| D[Show Login Page]
+    D --> E[Enter Credentials]
+    E --> F{Valid Credentials?}
+    F -->|Yes| G{Two-Factor Enabled?}
+    F -->|No| H[Show Error Message]
+    H --> D
+    G -->|Yes| I[Send 2FA Code]
+    I --> J[Enter 2FA Code]
+    J --> K{Code Valid?}
+    K -->|Yes| C
+    K -->|No| L{Attempts < 3?}
+    L -->|Yes| I
+    L -->|No| M[Lock Account]
+    M --> N[Send Admin Alert]
+    G -->|No| C
+    C --> O[Load User Preferences]
+    O --> P[Fetch Data from API]
+    P --> Q{API Response OK?}
+    Q -->|Yes| R[Render Dashboard Widgets]
+    Q -->|No| S[Show Cached Data]
+    S --> T[Display Stale Warning]
+    R --> U[User Interaction]
+    T --> U
+    U --> V{Action Type}
+    V -->|Navigate| W[Load New Page]
+    V -->|Submit Form| X[Validate Input]
+    V -->|Logout| Y[Clear Session]
+    X --> Z{Input Valid?}
+    Z -->|Yes| AA[Process Request]
+    Z -->|No| AB[Highlight Errors]
+    AB --> U
+    AA --> AC{Success?}
+    AC -->|Yes| AD[Show Confirmation]
+    AC -->|No| AE[Show Failure Message]
+    AD --> U
+    AE --> U
+    W --> U
+    Y --> D
+    N --> END[End]

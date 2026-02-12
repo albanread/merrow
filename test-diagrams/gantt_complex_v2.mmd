@@ -1,0 +1,50 @@
+gantt
+    title Mobile App Launch Timeline
+    dateFormat YYYY-MM-DD
+    excludes weekends
+
+    section Discovery
+    User interviews          : done, disc1, 2024-03-01, 5d
+    Competitive analysis     : done, disc2, 2024-03-01, 3d
+    Feature prioritization   : done, disc3, 2024-03-08, 2d
+    Discovery complete       : milestone, done, m1, 2024-03-11, 0d
+
+    section UX Design
+    User flow diagrams       : done, ux1, 2024-03-11, 4d
+    Wireframes               : done, ux2, 2024-03-15, 5d
+    Prototype                : active, ux3, 2024-03-22, 4d
+    Usability testing        : active, ux4, 2024-03-26, 3d
+    Design handoff           : milestone, active, m2, 2024-03-29, 0d
+
+    section iOS Development
+    Project setup            : crit, ios1, 2024-03-29, 2d
+    Authentication module    : crit, ios2, 2024-04-02, 5d
+    Home screen              : ios3, 2024-04-02, 6d
+    Push notifications       : ios4, 2024-04-09, 4d
+    In-app purchases         : crit, ios5, 2024-04-15, 5d
+    Offline mode             : ios6, 2024-04-15, 6d
+    iOS beta ready           : milestone, crit, m3, 2024-04-22, 0d
+
+    section Android Development
+    Project setup            : and1, 2024-03-29, 2d
+    Authentication module    : and2, 2024-04-02, 5d
+    Home screen              : and3, 2024-04-02, 6d
+    Push notifications       : and4, 2024-04-09, 4d
+    In-app purchases         : crit, and5, 2024-04-15, 5d
+    Offline mode             : and6, 2024-04-15, 6d
+    Android beta ready       : milestone, crit, m4, 2024-04-22, 0d
+
+    section Backend API
+    API gateway setup        : crit, api1, 2024-03-29, 3d
+    User service             : crit, api2, 2024-04-01, 5d
+    Content service          : api3, 2024-04-08, 4d
+    Payment service          : crit, api4, 2024-04-08, 6d
+    Notification service     : api5, 2024-04-15, 3d
+    API complete             : milestone, crit, m5, 2024-04-18, 0d
+
+    section QA & Launch
+    Beta testing             : crit, qa1, 2024-04-22, 7d
+    Bug fixes                : crit, qa2, 2024-04-29, 5d
+    App store submission     : crit, qa3, 2024-05-06, 2d
+    Marketing prep           : qa4, 2024-04-29, 7d
+    Launch day               : milestone, crit, m6, 2024-05-08, 0d

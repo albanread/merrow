@@ -81,7 +81,7 @@ fn estimateNodeSize(label: []const u8, shape: NodeShape) NodeSize {
 }
 
 /// Measure a node's dimensions using a real font.
-fn measureNodeSize(font: *const Font, label: []const u8, shape: NodeShape) NodeSize {
+fn measureNodeSize(font: *Font, label: []const u8, shape: NodeShape) NodeSize {
     const text_w: f64 = @floatCast(font.measureText(label, font_size));
     const line_height: f64 = @as(f64, @floatCast(font_size)) * 1.4;
     var w = @max(min_node_width, text_w + node_padding_h);

@@ -89,17 +89,57 @@ extern fn stbtt_GetCodepointHMetrics(info: *const stbtt_fontinfo, codepoint: c_i
 extern fn stbtt_GetCodepointBitmapBox(info: *const stbtt_fontinfo, codepoint: c_int, scale_x: f32, scale_y: f32, ix0: *c_int, iy0: *c_int, ix1: *c_int, iy1: *c_int) void;
 extern fn stbtt_MakeCodepointBitmap(info: *const stbtt_fontinfo, output: [*c]u8, out_w: c_int, out_h: c_int, out_stride: c_int, scale_x: f32, scale_y: f32, codepoint: c_int) void;
 
-/// Simple font for rendering text
+/// Cached glyph bitmap entry.
+const CachedGlyph = struct {
+    /// Pre-rendered alpha bitmap (one byte per pixel).
+    bitmap: []u8,
+    /// Width of the bitmap in pixels.
+    w: i32,
+    /// Height of the bitmap in pixels.
+    h: i32,
+    /// Horizontal offset from the glyph origin to the left edge of the bitmap.
+    ix0: i32,
+    /// Vertical offset from the baseline to the top edge of the bitmap.
+    iy0: i32,
+    /// Horizontal advance width in scaled pixels.
+    advance: f32,
+};
+
+/// Key for the glyph cache: codepoint + quantised scale.
+/// We quantise the scale to 1/64ths to avoid unbounded cache growth from
+/// floating-point variations while still being precise enough for rendering.
+const GlyphCacheKey = struct {
+    codepoint: u21,
+    /// Scale multiplied by 64 and truncated to integer.  This gives us
+    /// sub-pixel precision (1/64 of a pixel) which is more than enough.
+    scale_q: u32,
+};
+
+/// Maximum number of cached glyphs before we stop caching new ones.
+/// 512 unique (codepoint, size) pairs is plenty for any diagram.
+const MAX_CACHE_ENTRIES = 512;
+
+/// Simple font for rendering text with glyph caching
 pub const Font = struct {
     info: stbtt_fontinfo,
     font_data: []const u8,
     allocator: Allocator,
+
+    // Glyph cache: maps (codepoint, quantised_scale) -> pre-rendered bitmap.
+    // Using parallel arrays for keys and values since the cache is small and
+    // linear scan is cache-friendly for < 512 entries.
+    cache_keys: [MAX_CACHE_ENTRIES]GlyphCacheKey,
+    cache_vals: [MAX_CACHE_ENTRIES]CachedGlyph,
+    cache_count: usize,
 
     pub fn initFromMemory(allocator: Allocator, font_data: []const u8) !Font {
         var font = Font{
             .info = undefined,
             .font_data = font_data,
             .allocator = allocator,
+            .cache_keys = undefined,
+            .cache_vals = undefined,
+            .cache_count = 0,
         };
 
         const result = stbtt_InitFont(&font.info, font_data.ptr, 0);
@@ -111,8 +151,93 @@ pub const Font = struct {
     }
 
     pub fn deinit(self: *Font) void {
-        _ = self;
-        // Font data is owned by caller
+        // Free all cached glyph bitmaps
+        for (0..self.cache_count) |i| {
+            self.allocator.free(self.cache_vals[i].bitmap);
+        }
+        self.cache_count = 0;
+    }
+
+    /// Quantise a scale factor to an integer for cache lookup.
+    inline fn quantiseScale(scale: f32) u32 {
+        return @intFromFloat(@max(0.0, scale * 64.0));
+    }
+
+    /// Look up a cached glyph.  Returns the entry or null if not cached.
+    fn getCachedGlyph(self: *const Font, codepoint: u8, scale_q: u32) ?*const CachedGlyph {
+        const cp: u21 = codepoint;
+        for (0..self.cache_count) |i| {
+            if (self.cache_keys[i].codepoint == cp and self.cache_keys[i].scale_q == scale_q) {
+                return &self.cache_vals[i];
+            }
+        }
+        return null;
+    }
+
+    /// Rasterise a glyph and store it in the cache.  Returns a pointer to the
+    /// cached entry, or null if the cache is full.
+    fn cacheGlyph(self: *Font, codepoint: u8, scale: f32, scale_q: u32) !?*const CachedGlyph {
+        if (self.cache_count >= MAX_CACHE_ENTRIES) return null;
+
+        var advance_raw: c_int = 0;
+        var lsb: c_int = 0;
+        stbtt_GetCodepointHMetrics(&self.info, codepoint, &advance_raw, &lsb);
+
+        var ix0: c_int = 0;
+        var iy0: c_int = 0;
+        var ix1: c_int = 0;
+        var iy1: c_int = 0;
+        stbtt_GetCodepointBitmapBox(&self.info, codepoint, scale, scale, &ix0, &iy0, &ix1, &iy1);
+
+        const w = ix1 - ix0;
+        const h = iy1 - iy0;
+
+        var bitmap: []u8 = &.{};
+        if (w > 0 and h > 0) {
+            const bitmap_size = @as(usize, @intCast(w)) * @as(usize, @intCast(h));
+            bitmap = try self.allocator.alloc(u8, bitmap_size);
+            @memset(bitmap, 0);
+
+            stbtt_MakeCodepointBitmap(
+                &self.info,
+                bitmap.ptr,
+                w,
+                h,
+                w,
+                scale,
+                scale,
+                codepoint,
+            );
+        } else {
+            // Zero-size glyph (e.g. space).  Allocate a 0-length slice so
+            // deinit can always call free.
+            bitmap = try self.allocator.alloc(u8, 0);
+        }
+
+        const idx = self.cache_count;
+        self.cache_keys[idx] = .{
+            .codepoint = codepoint,
+            .scale_q = scale_q,
+        };
+        self.cache_vals[idx] = .{
+            .bitmap = bitmap,
+            .w = w,
+            .h = h,
+            .ix0 = ix0,
+            .iy0 = iy0,
+            .advance = @as(f32, @floatFromInt(advance_raw)) * scale,
+        };
+        self.cache_count += 1;
+
+        return &self.cache_vals[idx];
+    }
+
+    /// Get or create a cached glyph for the given codepoint at the given scale.
+    fn getOrCacheGlyph(self: *Font, codepoint: u8, scale: f32, scale_q: u32) !?*const CachedGlyph {
+        if (self.getCachedGlyph(codepoint, scale_q)) |cached| {
+            return cached;
+        }
+        return try self.cacheGlyph(codepoint, scale, scale_q);
     }
 
     /// Get scale factor for desired pixel height
@@ -120,8 +245,23 @@ pub const Font = struct {
         return stbtt_ScaleForPixelHeight(&self.info, pixel_height);
     }
 
-    /// Measure text width
-    pub fn measureText(self: *const Font, text: []const u8, font_size: f32) f32 {
+    /// Measure text width using cached advance widths where possible.
+    pub fn measureText(self: *Font, text: []const u8, font_size: f32) f32 {
+        const scale = self.getScale(font_size);
+        var width: f32 = 0;
+
+        for (text) |ch| {
+            var advance: c_int = 0;
+            var lsb: c_int = 0;
+            stbtt_GetCodepointHMetrics(&self.info, ch, &advance, &lsb);
+            width += @as(f32, @floatFromInt(advance)) * scale;
+        }
+
+        return width;
+    }
+
+    /// Const-compatible measureText for callers that have *const Font.
+    pub fn measureTextConst(self: *const Font, text: []const u8, font_size: f32) f32 {
         const scale = self.getScale(font_size);
         var width: f32 = 0;
 
@@ -216,7 +356,7 @@ pub const Font = struct {
         // Compute max line width
         var max_w: f32 = 0;
         for (spans.items) |span| {
-            const w = self.measureText(text[span.start..span.end], font_size_arg);
+            const w = self.measureTextConst(text[span.start..span.end], font_size_arg);
             if (w > max_w) max_w = w;
         }
 
@@ -248,7 +388,7 @@ pub const Font = struct {
     /// `cx` / `cy` are the **centre** of the text block in logical coords.
     /// Each line is horizontally centred around `cx`.
     pub fn drawWrappedText(
-        self: *const Font,
+        self: *Font,
         canvas: *Canvas,
         text: []const u8,
         cx: f32,
@@ -281,7 +421,7 @@ pub const Font = struct {
         }
     }
 
-    /// Draw text onto canvas at position.
+    /// Draw text onto canvas at position, using the glyph cache.
     ///
     /// `x` and `y` are in **logical** (unscaled) coordinates — the same
     /// coordinate space used by `Canvas.fillRect`, `Canvas.drawLine`, etc.
@@ -289,7 +429,7 @@ pub const Font = struct {
     /// The function applies the canvas `scale_factor` automatically so that
     /// text size and position match the rest of the drawing.
     pub fn drawText(
-        self: *const Font,
+        self: *Font,
         canvas: *Canvas,
         text: []const u8,
         x: f32,
@@ -305,6 +445,7 @@ pub const Font = struct {
         const sf: f32 = @floatCast(canvas.scale_factor);
         const scaled_font_size = font_size * sf;
         const scale = self.getScale(scaled_font_size);
+        const scale_q = quantiseScale(scale);
 
         // Compute font vertical metrics so we can centre the text
         // vertically around the supplied `y`.
@@ -324,68 +465,130 @@ pub const Font = struct {
         // Start cursor at scaled X position.
         var cursor_x = x * sf;
 
+        // Pre-compute alpha factor for blending
+        const a_factor = @as(f32, @floatFromInt(a));
+
         for (text) |ch| {
-            var advance: c_int = 0;
-            var lsb: c_int = 0;
-            stbtt_GetCodepointHMetrics(&self.info, ch, &advance, &lsb);
+            // Try to use cached glyph
+            if (try self.getOrCacheGlyph(ch, scale, scale_q)) |cached| {
+                // Use cached bitmap
+                if (cached.w > 0 and cached.h > 0) {
+                    const glyph_x = @as(i32, @intFromFloat(@floor(cursor_x))) + cached.ix0;
+                    const glyph_y = @as(i32, @intFromFloat(@floor(baseline_y))) + cached.iy0;
 
-            var ix0: c_int = 0;
-            var iy0: c_int = 0;
-            var ix1: c_int = 0;
-            var iy1: c_int = 0;
-            stbtt_GetCodepointBitmapBox(&self.info, ch, scale, scale, &ix0, &iy0, &ix1, &iy1);
-
-            const w = ix1 - ix0;
-            const h = iy1 - iy0;
-
-            if (w > 0 and h > 0) {
-                // Allocate bitmap for glyph
-                const bitmap_size = @as(usize, @intCast(w * h));
-                const bitmap = try self.allocator.alloc(u8, bitmap_size);
-                defer self.allocator.free(bitmap);
-                @memset(bitmap, 0);
-
-                // Render glyph at the scaled size
-                stbtt_MakeCodepointBitmap(
-                    &self.info,
-                    bitmap.ptr,
-                    w,
-                    h,
-                    w,
-                    scale,
-                    scale,
-                    ch,
-                );
-
-                // Place glyph relative to the baseline in scaled pixel space
-                const glyph_x = @as(i32, @intFromFloat(@floor(cursor_x))) + ix0;
-                const glyph_y = @as(i32, @intFromFloat(@floor(baseline_y))) + iy0;
-
-                var py: i32 = 0;
-                while (py < h) : (py += 1) {
-                    var px: i32 = 0;
-                    while (px < w) : (px += 1) {
-                        const bitmap_idx = @as(usize, @intCast(py * w + px));
-                        const alpha = bitmap[bitmap_idx];
-
-                        if (alpha > 0) {
-                            const screen_x = glyph_x + px;
-                            const screen_y = glyph_y + py;
-
-                            // Alpha blend
-                            const alpha_f = @as(f32, @floatFromInt(alpha)) / 255.0;
-                            const final_a = @as(u8, @intFromFloat(@as(f32, @floatFromInt(a)) * alpha_f));
-
-                            canvas.setPixel(screen_x, screen_y, r, g, b, final_a);
-                        }
-                    }
+                    // Blit the cached bitmap onto the canvas
+                    blitGlyphBitmap(canvas, cached.bitmap, cached.w, cached.h, glyph_x, glyph_y, r, g, b, a_factor);
                 }
-            }
+                cursor_x += cached.advance;
+            } else {
+                // Cache is full — fall back to uncached rendering
+                var advance: c_int = 0;
+                var lsb: c_int = 0;
+                stbtt_GetCodepointHMetrics(&self.info, ch, &advance, &lsb);
 
-            cursor_x += @as(f32, @floatFromInt(advance)) * scale;
+                var ix0: c_int = 0;
+                var iy0: c_int = 0;
+                var ix1: c_int = 0;
+                var iy1: c_int = 0;
+                stbtt_GetCodepointBitmapBox(&self.info, ch, scale, scale, &ix0, &iy0, &ix1, &iy1);
+
+                const w = ix1 - ix0;
+                const h = iy1 - iy0;
+
+                if (w > 0 and h > 0) {
+                    const bitmap_size = @as(usize, @intCast(w * h));
+                    const bitmap = try self.allocator.alloc(u8, bitmap_size);
+                    defer self.allocator.free(bitmap);
+                    @memset(bitmap, 0);
+
+                    stbtt_MakeCodepointBitmap(
+                        &self.info,
+                        bitmap.ptr,
+                        w,
+                        h,
+                        w,
+                        scale,
+                        scale,
+                        ch,
+                    );
+
+                    const glyph_x = @as(i32, @intFromFloat(@floor(cursor_x))) + ix0;
+                    const glyph_y = @as(i32, @intFromFloat(@floor(baseline_y))) + iy0;
+
+                    blitGlyphBitmap(canvas, bitmap, w, h, glyph_x, glyph_y, r, g, b, a_factor);
+                }
+
+                cursor_x += @as(f32, @floatFromInt(advance)) * scale;
+            }
         }
     }
 };
+
+/// Blit a glyph alpha bitmap onto the canvas with optimised row processing.
+/// This is factored out so both cached and uncached paths use the same
+/// optimised blitting code.
+fn blitGlyphBitmap(
+    canvas: *Canvas,
+    bitmap: []const u8,
+    w: i32,
+    h: i32,
+    glyph_x: i32,
+    glyph_y: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    a_factor: f32,
+) void {
+    const canvas_w: i32 = @intCast(canvas.width);
+    const canvas_h: i32 = @intCast(canvas.height);
+
+    // Early reject: entire glyph is off-screen
+    if (glyph_x + w <= 0 or glyph_x >= canvas_w or
+        glyph_y + h <= 0 or glyph_y >= canvas_h) return;
+
+    // Clamp row/column ranges to canvas bounds
+    const row_start: i32 = @max(0, -glyph_y);
+    const row_end: i32 = @min(h, canvas_h - glyph_y);
+    const col_start: i32 = @max(0, -glyph_x);
+    const col_end: i32 = @min(w, canvas_w - glyph_x);
+
+    if (row_start >= row_end or col_start >= col_end) return;
+
+    const stride = canvas.width * 4;
+    const bw: usize = @intCast(w);
+
+    // Pre-compute float colours
+    const rf = @as(f32, @floatFromInt(r));
+    const gf = @as(f32, @floatFromInt(g));
+    const bf = @as(f32, @floatFromInt(b));
+
+    var py = row_start;
+    while (py < row_end) : (py += 1) {
+        const screen_y: usize = @intCast(glyph_y + py);
+        const row_base = screen_y * stride;
+        const bitmap_row: usize = @intCast(py);
+        const bitmap_row_offset = bitmap_row * bw;
+
+        var px = col_start;
+        while (px < col_end) : (px += 1) {
+            const bitmap_idx = bitmap_row_offset + @as(usize, @intCast(px));
+            const alpha_byte = bitmap[bitmap_idx];
+            if (alpha_byte == 0) continue;
+
+            const screen_x: usize = @intCast(glyph_x + px);
+            const idx = row_base + screen_x * 4;
+
+            const alpha_f = @as(f32, @floatFromInt(alpha_byte)) / 255.0;
+            const final_alpha = a_factor * alpha_f / 255.0;
+            const inv_alpha = 1.0 - final_alpha;
+
+            canvas.pixels[idx + 0] = @intFromFloat(rf * final_alpha + @as(f32, @floatFromInt(canvas.pixels[idx + 0])) * inv_alpha);
+            canvas.pixels[idx + 1] = @intFromFloat(gf * final_alpha + @as(f32, @floatFromInt(canvas.pixels[idx + 1])) * inv_alpha);
+            canvas.pixels[idx + 2] = @intFromFloat(bf * final_alpha + @as(f32, @floatFromInt(canvas.pixels[idx + 2])) * inv_alpha);
+            // Keep alpha at 255 (opaque background)
+        }
+    }
+}
 
 /// Embedded default font (DejaVu Sans subset - we'll need to embed this)
 /// For now, returns error if no font data provided
