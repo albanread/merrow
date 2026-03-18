@@ -10,6 +10,9 @@ const LineStyle = merrow.LineStyle;
 const dagre = merrow.layout.dagre;
 const normalize = merrow.layout.normalize;
 const Parser = merrow.flowchart.Parser;
+const ClassParser = merrow.class.parser;
+const ClassSvgRender = merrow.class.svg_render;
+const ClassPngRender = merrow.class.png_render;
 const SeqParser = merrow.sequence.parser.Parser;
 const SeqLayout = merrow.sequence.seq_layout;
 const SeqSvgRender = merrow.sequence.svg_render;
@@ -22,6 +25,7 @@ const RenderConfig = graph_render.RenderConfig;
 const LabelPlacement = graph_render.LabelPlacement;
 const Vec2 = graph_render.Vec2;
 const seq_model = merrow.sequence.model;
+const class_model = merrow.class.model;
 
 const Graph = Digraph(NodeData, EdgeData, GraphData);
 
@@ -56,6 +60,7 @@ pub const StudioColor = extern struct {
 pub const StudioGraphType = enum(u32) {
     flowchart = 0,
     sequence = 1,
+    class = 2,
 };
 
 pub const StudioPoint = extern struct {
@@ -135,6 +140,9 @@ pub const StudioScene = extern struct {
 pub const StudioEditableNode = extern struct {
     id: [*c]const u8,
     label: [*c]const u8,
+    subtitle: [*c]const u8,
+    attributes_text: [*c]const u8,
+    methods_text: [*c]const u8,
     parent_subgraph_id: [*c]const u8,
     shape: u32,
     x: f64,
@@ -142,6 +150,7 @@ pub const StudioEditableNode = extern struct {
     width: f64,
     height: f64,
     fill: StudioColor,
+    body_fill: StudioColor,
     stroke: StudioColor,
     stroke_width: f32,
     label_color: StudioColor,
@@ -157,6 +166,8 @@ pub const StudioEditableEdge = extern struct {
     line_style: u32,
     has_arrow: u8,
     has_source_arrow: u8,
+    source_end_style: u32,
+    target_end_style: u32,
 };
 
 pub const StudioEditableSubgraph = extern struct {
@@ -229,6 +240,9 @@ const EditableGraphBuffers = struct {
         for (self.nodes.items) |item| {
             freeCString(allocator, item.id);
             freeCString(allocator, item.label);
+            freeCString(allocator, item.subtitle);
+            freeCString(allocator, item.attributes_text);
+            freeCString(allocator, item.methods_text);
             freeCString(allocator, item.parent_subgraph_id);
         }
         self.nodes.deinit(allocator);
@@ -309,6 +323,10 @@ fn detectSequenceDiagram(source: []const u8) bool {
     const keyword = "sequenceDiagram";
     if (idx + keyword.len > source.len) return false;
     return std.mem.eql(u8, source[idx .. idx + keyword.len], keyword);
+}
+
+fn detectClassDiagram(source: []const u8) bool {
+    return ClassParser.isClassDiagram(source);
 }
 
 fn rankDirFromText(text: []const u8) dagre.RankDir {
@@ -630,6 +648,239 @@ fn editableLineStyleTag(dashed: bool) u32 {
     return if (dashed) 1 else 0;
 }
 
+fn classRelationEndStyleTag(end_type: class_model.RelationEndType) u32 {
+    return switch (end_type) {
+        .none => 0,
+        .extension => 1,
+        .composition => 2,
+        .aggregation => 3,
+        .dependency => 4,
+        .lollipop => 5,
+    };
+}
+
+fn classLineStyleTag(line_type: class_model.LineType) u32 {
+    return switch (line_type) {
+        .solid => 0,
+        .dotted => 2,
+    };
+}
+
+fn classBoxSizeForEditable(cls: *const class_model.ClassNode) NodeSize {
+    const char_width: f64 = 8.0;
+    const header_char_width: f64 = 9.0;
+    const line_height: f64 = 22.0;
+    const section_pad: f64 = 8.0;
+    const horiz_pad: f64 = 16.0;
+    const min_box_width: f64 = 120.0;
+    const min_box_height: f64 = 40.0;
+
+    var header_lines: usize = 1;
+    header_lines += cls.annotations.items.len;
+
+    var max_text_width: f64 = 0.0;
+    const name = cls.displayName();
+    var name_width = @as(f64, @floatFromInt(name.len)) * header_char_width;
+    if (cls.generic) |g| {
+        name_width += @as(f64, @floatFromInt(g.len + 2)) * header_char_width;
+    }
+    if (name_width > max_text_width) max_text_width = name_width;
+
+    for (cls.annotations.items) |ann| {
+        const ann_width = (@as(f64, @floatFromInt(ann.len)) + 4.0) * char_width;
+        if (ann_width > max_text_width) max_text_width = ann_width;
+    }
+    for (cls.members.items) |member| {
+        const width = @as(f64, @floatFromInt(member.text.len)) * char_width;
+        if (width > max_text_width) max_text_width = width;
+    }
+    for (cls.methods.items) |method| {
+        const width = @as(f64, @floatFromInt(method.text.len)) * char_width;
+        if (width > max_text_width) max_text_width = width;
+    }
+
+    const box_width = @max(min_box_width, max_text_width + horiz_pad * 2.0);
+
+    var total_height: f64 = 0.0;
+    total_height += @as(f64, @floatFromInt(header_lines)) * line_height + section_pad * 2.0;
+    total_height += if (cls.members.items.len > 0)
+        @as(f64, @floatFromInt(cls.members.items.len)) * line_height + section_pad * 2.0
+    else
+        section_pad * 2.0;
+    total_height += if (cls.methods.items.len > 0)
+        @as(f64, @floatFromInt(cls.methods.items.len)) * line_height + section_pad * 2.0
+    else
+        section_pad * 2.0;
+
+    return .{ .w = box_width, .h = @max(min_box_height, total_height) };
+}
+
+fn dupJoinedClassAnnotations(allocator: std.mem.Allocator, cls: *const class_model.ClassNode) ![*c]const u8 {
+    if (cls.annotations.items.len == 0) return null;
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    for (cls.annotations.items, 0..) |ann, idx| {
+        if (idx > 0) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, "<<");
+        try buffer.appendSlice(allocator, ann);
+        try buffer.appendSlice(allocator, ">>");
+    }
+
+    return try dupCString(c_allocator, buffer.items);
+}
+
+fn dupJoinedClassMembers(allocator: std.mem.Allocator, items: []const class_model.ClassMember) ![*c]const u8 {
+    if (items.len == 0) return null;
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    for (items, 0..) |item, idx| {
+        if (idx > 0) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, item.text);
+    }
+
+    return try dupCString(c_allocator, buffer.items);
+}
+
+fn appendClassEditableGraph(
+    allocator: std.mem.Allocator,
+    diagram: *const class_model.ClassDiagram,
+    buffers: *EditableGraphBuffers,
+) !struct { width: f64, height: f64 } {
+    var graph = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var class_ids = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (class_ids.items) |id| allocator.free(id);
+        class_ids.deinit(allocator);
+    }
+
+    var class_iter = diagram.classes.iterator();
+    while (class_iter.next()) |entry| {
+        const cls = entry.value_ptr;
+        const id = entry.key_ptr.*;
+        const size = classBoxSizeForEditable(cls);
+
+        try graph.setNode(id, .{
+            .label = cls.displayName(),
+            .width = size.w,
+            .height = size.h,
+            .shape = .round,
+        });
+        try class_ids.append(allocator, try allocator.dupe(u8, id));
+    }
+
+    var graph_label = graph.getGraphLabel();
+    graph_label.rankdir = diagram.direction;
+    graph_label.nodesep = 60.0;
+    graph_label.ranksep = 60.0;
+
+    for (diagram.relations.items) |rel| {
+        const edge_label = rel.label orelse "";
+        try graph.setEdge(rel.id1, rel.id2, .{
+            .label = if (edge_label.len > 0) edge_label else null,
+            .minlen = 1,
+        }, null);
+    }
+
+    try dagre.layout(allocator, &graph, .{
+        .rankdir = rankDirFromText(diagram.direction),
+        .ranker = .network_simplex,
+        .nodesep = 60,
+        .ranksep = 60,
+    });
+
+    var min_x: f64 = std.math.floatMax(f64);
+    var min_y: f64 = std.math.floatMax(f64);
+    var max_x: f64 = -std.math.floatMax(f64);
+    var max_y: f64 = -std.math.floatMax(f64);
+
+    for (class_ids.items) |id| {
+        if (graph.getNode(id)) |node| {
+            const left = node.x - node.width / 2.0;
+            const right = node.x + node.width / 2.0;
+            const top = node.y - node.height / 2.0;
+            const bottom = node.y + node.height / 2.0;
+            if (left < min_x) min_x = left;
+            if (right > max_x) max_x = right;
+            if (top < min_y) min_y = top;
+            if (bottom > max_y) max_y = bottom;
+        }
+    }
+
+    var edge_iter = graph.edgeIterator();
+    while (edge_iter.next()) |entry| {
+        for (entry.data.points.items) |pt| {
+            if (pt.x < min_x) min_x = pt.x;
+            if (pt.x > max_x) max_x = pt.x;
+            if (pt.y < min_y) min_y = pt.y;
+            if (pt.y > max_y) max_y = pt.y;
+        }
+    }
+
+    if (min_x > max_x) {
+        min_x = 0.0;
+        min_y = 0.0;
+        max_x = 200.0;
+        max_y = 100.0;
+    }
+
+    const padding = 50.0;
+    const offset_x = padding - min_x;
+    const offset_y = padding - min_y;
+
+    for (class_ids.items) |id| {
+        const node = graph.getNode(id) orelse continue;
+        const cls = diagram.classes.getPtr(id) orelse continue;
+        try buffers.nodes.append(c_allocator, .{
+            .id = try dupCString(c_allocator, id),
+            .label = try dupCString(c_allocator, cls.displayName()),
+            .subtitle = try dupJoinedClassAnnotations(allocator, cls),
+            .attributes_text = try dupJoinedClassMembers(allocator, cls.members.items),
+            .methods_text = try dupJoinedClassMembers(allocator, cls.methods.items),
+            .parent_subgraph_id = null,
+            .shape = 1,
+            .x = node.x + offset_x,
+            .y = node.y + offset_y,
+            .width = node.width,
+            .height = node.height,
+            .fill = studioColor(class_model.class_header_color),
+            .body_fill = studioColor(class_model.class_body_color),
+            .stroke = studioColor(class_model.class_border_color),
+            .stroke_width = 2.0,
+            .label_color = studioColor(class_model.class_header_text_color),
+            .label_font_size = 15.0,
+        });
+    }
+
+    for (diagram.relations.items) |rel| {
+        try buffers.edges.append(c_allocator, .{
+            .source_id = try dupCString(c_allocator, rel.id1),
+            .target_id = try dupCString(c_allocator, rel.id2),
+            .label = if (rel.label) |text| if (text.len > 0) try dupCString(c_allocator, text) else null else null,
+            .color = studioColor(class_model.relation_color),
+            .thickness = 1.5,
+            .line_style = classLineStyleTag(rel.relation.line_type),
+            .has_arrow = if (rel.relation.type2 != .none) 1 else 0,
+            .has_source_arrow = if (rel.relation.type1 != .none) 1 else 0,
+            .source_end_style = classRelationEndStyleTag(rel.relation.type1),
+            .target_end_style = classRelationEndStyleTag(rel.relation.type2),
+        });
+    }
+
+    return .{
+        .width = (max_x - min_x) + padding * 2.0,
+        .height = (max_y - min_y) + padding * 2.0,
+    };
+}
+
 fn nodeShapeTag(shape: NodeShape) u32 {
     return switch (shape) {
         .box => 0,
@@ -750,6 +1001,9 @@ fn appendSequenceEditableGraph(
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, participant.id),
             .label = try dupCString(c_allocator, participant.displayName()),
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = null,
             .shape = sequenceParticipantShapeTag(participant.kind),
             .x = participant.center_x,
@@ -757,6 +1011,7 @@ fn appendSequenceEditableGraph(
             .width = participant.box_width,
             .height = participant.box_height,
             .fill = participant_fill,
+            .body_fill = participant_fill,
             .stroke = participant_stroke,
             .stroke_width = 2.0,
             .label_color = text_color,
@@ -769,6 +1024,9 @@ fn appendSequenceEditableGraph(
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, footer_participant_id),
             .label = try dupCString(c_allocator, participant.displayName()),
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = null,
             .shape = sequenceParticipantShapeTag(participant.kind),
             .x = participant.center_x,
@@ -776,6 +1034,7 @@ fn appendSequenceEditableGraph(
             .width = participant.box_width,
             .height = participant.box_height,
             .fill = participant_fill,
+            .body_fill = participant_fill,
             .stroke = participant_stroke,
             .stroke_width = 2.0,
             .label_color = text_color,
@@ -791,6 +1050,8 @@ fn appendSequenceEditableGraph(
             .line_style = editableLineStyleTag(true),
             .has_arrow = 0,
             .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
         });
     }
 
@@ -807,6 +1068,9 @@ fn appendSequenceEditableGraph(
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, note_id),
             .label = try dupCString(c_allocator, note.text orelse ""),
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 1,
             .x = x,
@@ -814,6 +1078,7 @@ fn appendSequenceEditableGraph(
             .width = note.width,
             .height = note.height,
             .fill = note_fill,
+            .body_fill = note_fill,
             .stroke = note_stroke,
             .stroke_width = 1.0,
             .label_color = studioColor(.{ 50, 50, 50, 255 }),
@@ -831,6 +1096,9 @@ fn appendSequenceEditableGraph(
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, activation_id),
             .label = null,
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 0,
             .x = x,
@@ -838,6 +1106,7 @@ fn appendSequenceEditableGraph(
             .width = 16.0,
             .height = height,
             .fill = activation_fill,
+            .body_fill = activation_fill,
             .stroke = activation_stroke,
             .stroke_width = 1.5,
             .label_color = text_color,
@@ -858,6 +1127,9 @@ fn appendSequenceEditableGraph(
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, source_anchor_id),
             .label = null,
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 0,
             .x = source_participant.center_x,
@@ -865,6 +1137,7 @@ fn appendSequenceEditableGraph(
             .width = 8.0,
             .height = 8.0,
             .fill = anchor_clear,
+            .body_fill = anchor_clear,
             .stroke = anchor_clear,
             .stroke_width = 0.0,
             .label_color = anchor_clear,
@@ -879,6 +1152,9 @@ fn appendSequenceEditableGraph(
             try buffers.nodes.append(c_allocator, .{
                 .id = try dupCString(c_allocator, value),
                 .label = null,
+                .subtitle = null,
+                .attributes_text = null,
+                .methods_text = null,
                 .parent_subgraph_id = null,
                 .shape = 0,
                 .x = target_participant.center_x,
@@ -886,6 +1162,7 @@ fn appendSequenceEditableGraph(
                 .width = 8.0,
                 .height = 8.0,
                 .fill = anchor_clear,
+                .body_fill = anchor_clear,
                 .stroke = anchor_clear,
                 .stroke_width = 0.0,
                 .label_color = anchor_clear,
@@ -904,6 +1181,8 @@ fn appendSequenceEditableGraph(
             .line_style = editableLineStyleTag(message.arrow_type.isDashed()),
             .has_arrow = if (message.arrow_type.hasArrowhead() or message.arrow_type.isOpenArrow()) 1 else 0,
             .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = if (message.arrow_type.hasArrowhead() or message.arrow_type.isOpenArrow()) classRelationEndStyleTag(.dependency) else 0,
         });
     }
 }
@@ -1458,6 +1737,9 @@ fn appendEditableNodes(temp_allocator: std.mem.Allocator, scene_allocator: std.m
         try buffers.nodes.append(scene_allocator, .{
             .id = try dupCString(scene_allocator, id),
             .label = try dupCString(scene_allocator, node.label orelse id),
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
             .parent_subgraph_id = if (parent_subgraph_id) |parent| try dupCString(scene_allocator, parent) else null,
             .shape = nodeShapeTag(node.shape),
             .x = node.x + offset_x,
@@ -1465,6 +1747,7 @@ fn appendEditableNodes(temp_allocator: std.mem.Allocator, scene_allocator: std.m
             .width = node.width,
             .height = node.height,
             .fill = studioColor(node.fill_color orelse config.node_fill_color),
+            .body_fill = studioColor(node.fill_color orelse config.node_fill_color),
             .stroke = studioColor(node.stroke_color orelse config.node_stroke_color),
             .stroke_width = @floatFromInt(node.stroke_width orelse config.node_stroke_width),
             .label_color = studioColor(node.text_color orelse config.text_color),
@@ -1517,6 +1800,8 @@ fn appendEditableEdges(scene_allocator: std.mem.Allocator, graph: *Graph, buffer
             .line_style = lineStyleTag(line_style),
             .has_arrow = if (has_arrow) 1 else 0,
             .has_source_arrow = if (has_source_arrow) 1 else 0,
+            .source_end_style = if (has_source_arrow) classRelationEndStyleTag(.dependency) else 0,
+            .target_end_style = if (has_arrow) classRelationEndStyleTag(.dependency) else 0,
         });
     }
 }
@@ -1560,6 +1845,17 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
 
         try appendSequenceEditableGraph(temp_allocator, &diag, layout, &buffers);
         return finalizeEditableGraph(c_allocator, .sequence, &buffers, layout.width, layout.height);
+    }
+
+    if (detectClassDiagram(source)) {
+        var diagram = try ClassParser.parse(temp_allocator, source);
+        defer diagram.deinit();
+
+        var buffers = EditableGraphBuffers{};
+        errdefer buffers.deinit(c_allocator);
+
+        const layout = try appendClassEditableGraph(temp_allocator, &diagram, &buffers);
+        return finalizeEditableGraph(c_allocator, .class, &buffers, layout.width, layout.height);
     }
 
     var parser = try Parser.init(temp_allocator, source);
@@ -1613,7 +1909,7 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
 }
 
 fn buildSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioScene {
-    if (detectSequenceDiagram(source)) return error.UnsupportedPreviewScene;
+    if (detectSequenceDiagram(source) or detectClassDiagram(source)) return error.UnsupportedPreviewScene;
 
     var parser = try Parser.init(temp_allocator, source);
     defer parser.deinit();
@@ -1728,7 +2024,7 @@ pub export fn merrow_studio_render_preview_png(
     const allocator = gpa.allocator();
 
     const source = source_ptr[0..source_len];
-    if (!detectSequenceDiagram(source)) {
+    if (!detectSequenceDiagram(source) and !detectClassDiagram(source)) {
         copyCString(out_message, out_message_len, "No fallback preview renderer for this diagram type");
         return 2;
     }
@@ -1745,17 +2041,35 @@ pub export fn merrow_studio_render_preview_png(
     };
     defer if (maybe_font) |*loaded| loaded.deinit(allocator);
 
-    renderSequenceDiagramToFile(
-        allocator,
-        source,
-        preview_path,
-        false,
-        if (maybe_font) |*loaded| loaded.data else null,
-        2.0,
-    ) catch |err| {
-        copyCString(out_message, out_message_len, @errorName(err));
-        return 4;
-    };
+    if (detectSequenceDiagram(source)) {
+        renderSequenceDiagramToFile(
+            allocator,
+            source,
+            preview_path,
+            false,
+            if (maybe_font) |*loaded| loaded.data else null,
+            2.0,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 4;
+        };
+    } else {
+        var diagram = ClassParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        ClassPngRender.renderClassToPNG(
+            allocator,
+            &diagram,
+            preview_path,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 4;
+        };
+    }
 
     copyCString(out_png_path, out_png_path_len, preview_path);
     copyCString(out_message, out_message_len, "Preview render complete");
@@ -1803,6 +2117,42 @@ pub export fn merrow_studio_export_diagram(
             copyCString(out_message, out_message_len, @errorName(err));
             return 4;
         };
+        copyCString(out_message, out_message_len, if (format == 0) "PNG export complete" else "SVG export complete");
+        return 0;
+    }
+
+    if (detectClassDiagram(source)) {
+        var diagram = ClassParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        switch (format) {
+            0 => ClassPngRender.renderClassToPNG(
+                allocator,
+                &diagram,
+                output_path,
+                if (maybe_font) |*loaded| &loaded.font else null,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            1 => ClassSvgRender.renderClassToSVG(
+                allocator,
+                &diagram,
+                output_path,
+                if (maybe_font) |*loaded| &loaded.font else null,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            else => {
+                copyCString(out_message, out_message_len, "Unsupported export format");
+                return 2;
+            },
+        }
+
         copyCString(out_message, out_message_len, if (format == 0) "PNG export complete" else "SVG export complete");
         return 0;
     }
@@ -2079,6 +2429,9 @@ pub export fn merrow_studio_free_editable_graph(graph: ?*StudioEditableGraph) ca
         for (nodes[0..g.node_count]) |item| {
             freeCString(c_allocator, item.id);
             freeCString(c_allocator, item.label);
+            freeCString(c_allocator, item.subtitle);
+            freeCString(c_allocator, item.attributes_text);
+            freeCString(c_allocator, item.methods_text);
             freeCString(c_allocator, item.parent_subgraph_id);
         }
         c_allocator.free(nodes[0..g.node_count]);
@@ -2102,6 +2455,17 @@ pub export fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source
     const allocator = gpa.allocator();
 
     const source = source_ptr[0..source_len];
+
+    if (detectClassDiagram(source)) {
+        var diagram = ClassParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        copyCString(out_message, out_message_len, "Syntax OK");
+        return 0;
+    }
 
     if (detectSequenceDiagram(source)) {
         var parser = SeqParser.init(allocator, source);
@@ -2171,6 +2535,25 @@ fn editableGraphEdgeMatches(
     return false;
 }
 
+fn editableGraphEdgeMatchesEndStyles(
+    graph: *const StudioEditableGraph,
+    expected_source: []const u8,
+    expected_target: []const u8,
+    expected_line_style: u32,
+    expected_source_end_style: u32,
+    expected_target_end_style: u32,
+) bool {
+    const edges = graph.edges orelse return false;
+    for (edges[0..graph.edge_count]) |item| {
+        if (!std.mem.eql(u8, std.mem.span(item.source_id), expected_source)) continue;
+        if (!std.mem.eql(u8, std.mem.span(item.target_id), expected_target)) continue;
+        return item.line_style == expected_line_style and
+            item.source_end_style == expected_source_end_style and
+            item.target_end_style == expected_target_end_style;
+    }
+    return false;
+}
+
 fn editableGraphHasNode(graph: *const StudioEditableGraph, expected_id: []const u8) bool {
     const nodes = graph.nodes orelse return false;
     for (nodes[0..graph.node_count]) |item| {
@@ -2184,6 +2567,41 @@ fn editableGraphNodeHasShape(graph: *const StudioEditableGraph, node_id: []const
     for (nodes[0..graph.node_count]) |item| {
         if (!std.mem.eql(u8, std.mem.span(item.id), node_id)) continue;
         return item.shape == expected_shape;
+    }
+    return false;
+}
+
+fn editableGraphNodeFieldMatches(
+    graph: *const StudioEditableGraph,
+    node_id: []const u8,
+    subtitle: ?[]const u8,
+    attributes_text: ?[]const u8,
+    methods_text: ?[]const u8,
+) bool {
+    const nodes = graph.nodes orelse return false;
+    for (nodes[0..graph.node_count]) |item| {
+        if (!std.mem.eql(u8, std.mem.span(item.id), node_id)) continue;
+
+        const item_subtitle = if (item.subtitle) |text| std.mem.span(text) else null;
+        const item_attributes = if (item.attributes_text) |text| std.mem.span(text) else null;
+        const item_methods = if (item.methods_text) |text| std.mem.span(text) else null;
+
+        const subtitle_matches = if (subtitle) |expected| blk: {
+            if (item_subtitle) |actual| break :blk std.mem.eql(u8, actual, expected);
+            break :blk false;
+        } else item_subtitle == null;
+
+        const attributes_matches = if (attributes_text) |expected| blk: {
+            if (item_attributes) |actual| break :blk std.mem.eql(u8, actual, expected);
+            break :blk false;
+        } else item_attributes == null;
+
+        const methods_matches = if (methods_text) |expected| blk: {
+            if (item_methods) |actual| break :blk std.mem.eql(u8, actual, expected);
+            break :blk false;
+        } else item_methods == null;
+
+        return subtitle_matches and attributes_matches and methods_matches;
     }
     return false;
 }
@@ -2337,6 +2755,48 @@ test "editable graph conversion fixture sequence features" {
     try std.testing.expect(second_message_y > first_message_y);
     try std.testing.expect(self_message_y > second_message_y);
     try std.testing.expect(footer_participant_y > self_message_y);
+}
+
+test "editable graph conversion fixture class simple preserves compartments and relation styles" {
+    const source = try loadTestDiagramFixture(std.testing.allocator, "test-diagrams/class_simple.mmd");
+    defer std.testing.allocator.free(source);
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    try std.testing.expectEqual(@as(u32, @intFromEnum(StudioGraphType.class)), graph.graph_type);
+    try std.testing.expectEqual(@as(usize, 3), graph.node_count);
+    try std.testing.expectEqual(@as(usize, 2), graph.edge_count);
+    try std.testing.expect(editableGraphNodeFieldMatches(
+        graph,
+        "Animal",
+        null,
+        "+String name\n+int age",
+        "+makeSound()\n+move(int distance)",
+    ));
+    try std.testing.expect(editableGraphNodeFieldMatches(
+        graph,
+        "Dog",
+        null,
+        "+String breed",
+        "+bark()\n+fetch(String item)",
+    ));
+    try std.testing.expect(editableGraphEdgeMatchesEndStyles(
+        graph,
+        "Animal",
+        "Dog",
+        0,
+        1,
+        0,
+    ));
+    try std.testing.expect(editableGraphEdgeMatchesEndStyles(
+        graph,
+        "Animal",
+        "Cat",
+        0,
+        1,
+        0,
+    ));
 }
 
 test "editable graph conversion fixture saas architecture" {

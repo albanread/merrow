@@ -6,6 +6,67 @@
   </style>
   <rect width="100%" height="100%" fill="white"/>
   <rect x="0.0" y="0.0" width="1482.0" height="1394.0" fill="rgb(255,255,255)" stroke-width="0.0"/>
+  <polyline points="796.0,50.0 796.0,173.0 1292.0,435.0 1292.0,356.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="796.0,50.0 806.0,68.0 786.0,68.0" fill="rgb(255,255,255)" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <polyline points="796.0,50.0 796.0,173.0 458.0,435.0 458.0,356.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="796.0,50.0 806.0,68.0 786.0,68.0" fill="rgb(255,255,255)" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <polyline points="1292.0,356.0 1292.0,435.0 1292.0,686.0 1292.0,585.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="1300.0" y1="599.0" x2="1292.0" y2="585.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="1284.0" y1="599.0" x2="1292.0" y2="585.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="1276.0" y="675.0" width="32.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="1292.0" y="686.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">has</text>
+  <text x="1277.0" y="376.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <text x="1277.0" y="605.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">0..1</text>
+  <polyline points="1292.0,585.0 1292.0,686.0 1292.0,948.0 1292.0,880.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="1292.0,585.0 1302.0,595.0 1292.0,605.0 1282.0,595.0" fill="rgb(51,51,51)" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="1256.0" y="937.0" width="72.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="1292.0" y="948.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">contains</text>
+  <text x="1277.0" y="605.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <text x="1277.0" y="900.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">*</text>
+  <polyline points="1292.0,880.0 1292.0,948.0 1292.0,1221.0 1292.0,1098.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="1300.0" y1="1112.0" x2="1292.0" y2="1098.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="1284.0" y1="1112.0" x2="1292.0" y2="1098.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="1248.0" y="1210.0" width="88.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="1292.0" y="1221.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">references</text>
+  <polyline points="1292.0,356.0 1292.0,435.0 458.0,686.0 458.0,574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="466.0" y1="588.0" x2="458.0" y2="574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="450.0" y1="588.0" x2="458.0" y2="574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="430.0" y="675.0" width="56.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="458.0" y="686.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">places</text>
+  <text x="1277.0" y="376.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <text x="443.0" y="594.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">*</text>
+  <polyline points="458.0,574.0 458.0,686.0 810.0,948.0 810.0,869.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="818.0" y1="883.0" x2="810.0" y2="869.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="802.0" y1="883.0" x2="810.0" y2="869.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="774.0" y="937.0" width="72.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="810.0" y="948.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">paid via</text>
+  <text x="443.0" y="594.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <text x="795.0" y="889.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <polyline points="810.0,869.0 810.0,948.0 652.0,1221.0 652.0,1131.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-dasharray="8,5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="810.0,869.0 820.0,887.0 800.0,887.0" fill="rgb(255,255,255)" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="608.0" y="1210.0" width="88.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="652.0" y="1221.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">implements</text>
+  <polyline points="810.0,869.0 810.0,948.0 968.0,1221.0 968.0,1142.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-dasharray="8,5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="810.0,869.0 820.0,887.0 800.0,887.0" fill="rgb(255,255,255)" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="924.0" y="1210.0" width="88.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="968.0" y="1221.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">implements</text>
+  <polyline points="458.0,574.0 458.0,686.0 142.0,948.0 142.0,858.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="150.0" y1="872.0" x2="142.0" y2="858.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="134.0" y1="872.0" x2="142.0" y2="858.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="102.0" y="937.0" width="80.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="142.0" y="948.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">generates</text>
+  <text x="443.0" y="594.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <text x="127.0" y="878.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(80,80,80)">1</text>
+  <polyline points="458.0,574.0 458.0,686.0 458.0,948.0 458.0,880.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-dasharray="8,5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="466.0" y1="894.0" x2="458.0" y2="880.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="450.0" y1="894.0" x2="458.0" y2="880.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="422.0" y="937.0" width="72.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="458.0" y="948.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">triggers</text>
+  <polyline points="458.0,356.0 458.0,435.0 458.0,686.0 458.0,574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="1.5" stroke-dasharray="8,5" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="466.0" y1="588.0" x2="458.0" y2="574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <line x1="450.0" y1="588.0" x2="458.0" y2="574.0" fill="none" stroke="rgb(51,51,51)" stroke-width="2.0"/>
+  <rect x="426.0" y="675.0" width="64.0" height="22.0" rx="3.0" ry="3.0" fill="rgb(255,255,255)" fill-opacity="0.90" stroke-width="0.0"/>
+  <text x="458.0" y="686.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(80,80,80)">manages</text>
   <rect x="668.0" y="50.0" width="256.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
   <rect x="668.0" y="110.0" width="256.0" height="104.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
   <rect x="668.0" y="214.0" width="256.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>

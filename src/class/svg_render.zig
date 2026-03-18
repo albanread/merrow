@@ -461,21 +461,32 @@ fn drawEdges(
     // We iterate over the diagram's relations in order and match them
     // to graph edges to get layout points.
     for (diagram.relations.items) |rel| {
+        const src_node = graph.getNode(rel.id1);
+        const tgt_node = graph.getNode(rel.id2);
+
         const edge_data = graph.edge(rel.id1, rel.id2, null);
         if (edge_data == null) continue;
         const ed = edge_data.?;
 
-        const points = ed.points.items;
-        if (points.len == 0) continue;
+        var fallback_points = [_]model.Point{
+            .{ .x = 0.0, .y = 0.0 },
+            .{ .x = 0.0, .y = 0.0 },
+        };
+        const points = blk: {
+            if (ed.points.items.len > 0) break :blk ed.points.items;
+            if (src_node == null or tgt_node == null) continue;
+
+            fallback_points = .{
+                .{ .x = src_node.?.x, .y = src_node.?.y },
+                .{ .x = tgt_node.?.x, .y = tgt_node.?.y },
+            };
+            break :blk fallback_points[0..];
+        };
 
         // Determine stroke style.
         const stroke_color = class_model.relation_color;
         const stroke_width: f64 = 1.5;
         const dash_array: ?[]const u8 = if (rel.relation.line_type == .dotted) "8,5" else null;
-
-        // Get source and target node centres for endpoint clipping.
-        const src_node = graph.getNode(rel.id1);
-        const tgt_node = graph.getNode(rel.id2);
 
         // Build the edge path.
         // Start from the source node border, through layout points, to
@@ -827,6 +838,32 @@ test "class svg: two classes with relationship" {
     try testing.expect(std.mem.indexOf(u8, svg, "Dog") != null);
     // Should have polyline or path for the edge.
     try testing.expect(std.mem.indexOf(u8, svg, "<polyline") != null or std.mem.indexOf(u8, svg, "<line") != null or std.mem.indexOf(u8, svg, "<polygon") != null);
+}
+
+test "class svg: sibling relationships render even without dagre waypoints" {
+    const allocator = testing.allocator;
+    var diagram = ClassDiagram.init(allocator);
+    defer diagram.deinit();
+
+    _ = try diagram.ensureClass("Animal");
+    _ = try diagram.ensureClass("Dog");
+    _ = try diagram.ensureClass("Cat");
+
+    try diagram.addRelation(.{
+        .id1 = "Animal",
+        .id2 = "Dog",
+        .relation = .{ .type1 = .extension, .type2 = .none, .line_type = .solid },
+    });
+    try diagram.addRelation(.{
+        .id1 = "Animal",
+        .id2 = "Cat",
+        .relation = .{ .type1 = .extension, .type2 = .none, .line_type = .solid },
+    });
+
+    const svg = try renderClassToSVGString(allocator, &diagram, null);
+    defer allocator.free(svg);
+
+    try testing.expect(std.mem.count(u8, svg, "<polyline") >= 2);
 }
 
 test "class svg: diagram with title" {

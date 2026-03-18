@@ -54,6 +54,26 @@ For an optimised build:
 zig build -Doptimize=ReleaseSafe
 ```
 
+### macOS Studio App
+
+On macOS, you can package the native studio target as an `.app` bundle in `zig-out/`:
+
+```sh
+./scripts/package_studio_app.sh
+```
+
+Build the bundle and launch it:
+
+```sh
+./scripts/build_and_run_studio_app.sh
+```
+
+Run an existing bundle without rebuilding:
+
+```sh
+./scripts/run_studio_app.sh
+```
+
 ## Usage
 
 ### Single File

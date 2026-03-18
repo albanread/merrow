@@ -132,11 +132,30 @@ static NSString *MerrowFreeformArrowPointList(CGPoint from, CGPoint tip) {
     return MerrowFreeformPointList(points, 3);
 }
 
+static NSUInteger MerrowFreeformLineCount(NSString *text) {
+    if (text.length == 0) return 0;
+    return [[text componentsSeparatedByString:@"\n"] count];
+}
+
+static CGFloat MerrowFreeformClassHeaderHeight(NSString *label, NSString *subtitle, CGFloat labelFontSize) {
+    const NSUInteger subtitleLines = MerrowFreeformLineCount(subtitle);
+    const CGFloat subtitleHeight = subtitleLines > 0 ? subtitleLines * 14.0 + 6.0 : 0.0;
+    const CGFloat titleHeight = MAX(labelFontSize, 15.0) + 10.0;
+    return MAX(44.0, subtitleHeight + titleHeight + 12.0);
+}
+
+static NSInteger MerrowFreeformClampEndStyle(NSInteger style) {
+    return MAX(0, MIN(style, 5));
+}
+
 
 
 @interface MerrowFreeformNodeRecord : NSObject
 @property (nonatomic, copy) NSString *nodeId;
 @property (nonatomic, copy) NSString *label;
+@property (nonatomic, copy) NSString *subtitle;
+@property (nonatomic, copy) NSString *attributesText;
+@property (nonatomic, copy) NSString *methodsText;
 @property (nonatomic, copy) NSString *parentSubgraphId;
 @property (nonatomic, assign) uint32_t shape;
 @property (nonatomic, assign) CGFloat x;
@@ -144,6 +163,7 @@ static NSString *MerrowFreeformArrowPointList(CGPoint from, CGPoint tip) {
 @property (nonatomic, assign) CGFloat width;
 @property (nonatomic, assign) CGFloat height;
 @property (nonatomic, strong) NSColor *fillColor;
+@property (nonatomic, strong) NSColor *bodyFillColor;
 @property (nonatomic, strong) NSColor *strokeColor;
 @property (nonatomic, assign) CGFloat strokeWidth;
 @property (nonatomic, strong) NSColor *labelColor;
@@ -162,6 +182,8 @@ static NSString *MerrowFreeformArrowPointList(CGPoint from, CGPoint tip) {
 @property (nonatomic, assign) uint32_t lineStyle;
 @property (nonatomic, assign) BOOL hasArrow;
 @property (nonatomic, assign) BOOL hasSourceArrow;
+@property (nonatomic, assign) uint32_t sourceEndStyle;
+@property (nonatomic, assign) uint32_t targetEndStyle;
 @end
 
 @implementation MerrowFreeformEdgeRecord
@@ -433,6 +455,22 @@ typedef struct {
     return self.selectedNode.fillColor ?: [NSColor whiteColor];
 }
 
+- (NSString *)selectedNodeSubtitle {
+    return self.selectedNode.subtitle ?: @"";
+}
+
+- (NSString *)selectedNodeAttributesText {
+    return self.selectedNode.attributesText ?: @"";
+}
+
+- (NSString *)selectedNodeMethodsText {
+    return self.selectedNode.methodsText ?: @"";
+}
+
+- (NSColor *)selectedNodeBodyFillColor {
+    return self.selectedNode.bodyFillColor ?: self.selectedNode.fillColor ?: [NSColor whiteColor];
+}
+
 - (NSColor *)selectedNodeStrokeColor {
     if (self.selectedSubgraph) {
         return self.selectedSubgraph.strokeColor ?: [NSColor colorWithCalibratedWhite:0.55 alpha:1.0];
@@ -469,6 +507,14 @@ typedef struct {
     if (self.selectedEdge.hasArrow) return 1;
     if (self.selectedEdge.hasSourceArrow) return 2;
     return 0;
+}
+
+- (NSInteger)selectedEdgeSourceEndStyle {
+    return self.selectedEdge ? (NSInteger)self.selectedEdge.sourceEndStyle : 0;
+}
+
+- (NSInteger)selectedEdgeTargetEndStyle {
+    return self.selectedEdge ? (NSInteger)self.selectedEdge.targetEndStyle : 0;
 }
 
 - (void)clearDocument {
@@ -574,6 +620,8 @@ typedef struct {
     edge.lineStyle = 0;
     edge.hasArrow = YES;
     edge.hasSourceArrow = NO;
+    edge.sourceEndStyle = 0;
+    edge.targetEndStyle = self.graphType == MerrowFreeformGraphTypeClass ? 4 : 0;
     [self.edges addObject:edge];
 
     self.insertionKind = MerrowFreeformInsertionKindNone;
@@ -627,7 +675,7 @@ typedef struct {
     self.canvasBackgroundColor = MerrowFreeformNSColor(graph->background);
     self.documentWidth = MAX((CGFloat)graph->width, 600.0);
     self.documentHeight = MAX((CGFloat)graph->height, 400.0);
-    self.graphType = (MerrowFreeformGraphType)graph->graph_type;
+    self.graphType = (MerrowFreeformGraphType)MAX(0, MIN((NSInteger)graph->graph_type, (NSInteger)MerrowFreeformGraphTypeClass));
     [self resetView];
 
     for (size_t idx = 0; idx < graph->subgraph_count; idx += 1) {
@@ -659,6 +707,9 @@ typedef struct {
         MerrowFreeformNodeRecord *node = [[MerrowFreeformNodeRecord alloc] init];
         node.nodeId = snapshot->id ? [NSString stringWithUTF8String:snapshot->id] : @"";
         node.label = snapshot->label ? [NSString stringWithUTF8String:snapshot->label] : @"";
+        node.subtitle = snapshot->subtitle ? [NSString stringWithUTF8String:snapshot->subtitle] : @"";
+        node.attributesText = snapshot->attributes_text ? [NSString stringWithUTF8String:snapshot->attributes_text] : @"";
+        node.methodsText = snapshot->methods_text ? [NSString stringWithUTF8String:snapshot->methods_text] : @"";
         node.parentSubgraphId = snapshot->parent_subgraph_id ? [NSString stringWithUTF8String:snapshot->parent_subgraph_id] : nil;
         node.shape = snapshot->shape;
         node.x = snapshot->x;
@@ -666,6 +717,7 @@ typedef struct {
         node.width = snapshot->width;
         node.height = snapshot->height;
         node.fillColor = MerrowFreeformNSColor(snapshot->fill);
+        node.bodyFillColor = MerrowFreeformNSColor(snapshot->body_fill);
         node.strokeColor = MerrowFreeformNSColor(snapshot->stroke);
         node.strokeWidth = snapshot->stroke_width;
         node.labelColor = MerrowFreeformNSColor(snapshot->label_color);
@@ -687,6 +739,8 @@ typedef struct {
         edge.lineStyle = snapshot->line_style;
         edge.hasArrow = snapshot->has_arrow != 0;
         edge.hasSourceArrow = snapshot->has_source_arrow != 0;
+        edge.sourceEndStyle = snapshot->source_end_style;
+        edge.targetEndStyle = snapshot->target_end_style;
         [self.edges addObject:edge];
     }
 
@@ -722,6 +776,16 @@ typedef struct {
     [self setNeedsDisplay:YES];
 }
 
+- (void)updateSelectedNodeBodyFillColor:(NSColor *)color {
+    if (!self.selectedNode || !color) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedNode.bodyFillColor = color;
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Body Fill Color"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
 - (void)updateSelectedNodeStrokeColor:(NSColor *)color {
     if (!color) return;
     NSData *undoSnapshot = [self snapshotDataForUndo];
@@ -747,6 +811,36 @@ typedef struct {
         self.selectedNode.strokeWidth = clamped;
     }
     [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Stroke Width"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateSelectedNodeSubtitle:(NSString *)subtitle {
+    if (!self.selectedNode) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedNode.subtitle = [subtitle copy] ?: @"";
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Subtitle"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateSelectedNodeAttributesText:(NSString *)text {
+    if (!self.selectedNode) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedNode.attributesText = [text copy] ?: @"";
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Attributes"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateSelectedNodeMethodsText:(NSString *)text {
+    if (!self.selectedNode) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedNode.methodsText = [text copy] ?: @"";
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Methods"];
     [self notifySelectionChanged];
     [self notifyDocumentMutation];
     [self setNeedsDisplay:YES];
@@ -799,21 +893,59 @@ typedef struct {
         case 0:
             self.selectedEdge.hasArrow = NO;
             self.selectedEdge.hasSourceArrow = NO;
+            if (self.graphType == MerrowFreeformGraphTypeClass) {
+                self.selectedEdge.sourceEndStyle = 0;
+                self.selectedEdge.targetEndStyle = 0;
+            }
             break;
         case 1:
             self.selectedEdge.hasArrow = YES;
             self.selectedEdge.hasSourceArrow = NO;
+            if (self.graphType == MerrowFreeformGraphTypeClass) {
+                self.selectedEdge.sourceEndStyle = 0;
+                self.selectedEdge.targetEndStyle = 4;
+            }
             break;
         case 2:
             self.selectedEdge.hasArrow = NO;
             self.selectedEdge.hasSourceArrow = YES;
+            if (self.graphType == MerrowFreeformGraphTypeClass) {
+                self.selectedEdge.sourceEndStyle = 4;
+                self.selectedEdge.targetEndStyle = 0;
+            }
             break;
         default:
             self.selectedEdge.hasArrow = YES;
             self.selectedEdge.hasSourceArrow = YES;
+            if (self.graphType == MerrowFreeformGraphTypeClass) {
+                self.selectedEdge.sourceEndStyle = 4;
+                self.selectedEdge.targetEndStyle = 4;
+            }
             break;
     }
     [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Connector Arrows"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateSelectedEdgeSourceEndStyle:(NSInteger)style {
+    if (!self.selectedEdge) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedEdge.sourceEndStyle = (uint32_t)MerrowFreeformClampEndStyle(style);
+    self.selectedEdge.hasSourceArrow = self.selectedEdge.sourceEndStyle != 0;
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Source Endpoint"];
+    [self notifySelectionChanged];
+    [self notifyDocumentMutation];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateSelectedEdgeTargetEndStyle:(NSInteger)style {
+    if (!self.selectedEdge) return;
+    NSData *undoSnapshot = [self snapshotDataForUndo];
+    self.selectedEdge.targetEndStyle = (uint32_t)MerrowFreeformClampEndStyle(style);
+    self.selectedEdge.hasArrow = self.selectedEdge.targetEndStyle != 0;
+    [self registerUndoSnapshot:undoSnapshot actionName:@"Edit Target Endpoint"];
     [self notifySelectionChanged];
     [self notifyDocumentMutation];
     [self setNeedsDisplay:YES];
@@ -1681,6 +1813,195 @@ typedef struct {
     [text drawWithRect:rect options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading attributes:attrs];
 }
 
+- (void)drawText:(NSString *)text inRect:(NSRect)rect fontSize:(CGFloat)fontSize color:(NSColor *)color alignment:(NSTextAlignment)alignment {
+    if (text.length == 0) return;
+    NSFont *font = [NSFont fontWithName:@"Lato" size:fontSize] ?: [NSFont systemFontOfSize:fontSize weight:NSFontWeightRegular];
+    NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
+    style.alignment = alignment;
+    NSDictionary *attrs = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color ?: [NSColor blackColor], NSParagraphStyleAttributeName: style };
+    [text drawWithRect:rect options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading attributes:attrs];
+}
+
+- (BOOL)isClassNode:(MerrowFreeformNodeRecord *)node {
+    return self.graphType == MerrowFreeformGraphTypeClass && node != nil;
+}
+
+- (NSRect)classHeaderRectForNode:(MerrowFreeformNodeRecord *)node {
+    const CGFloat x = node.x - node.width / 2.0;
+    const CGFloat y = node.y - node.height / 2.0;
+    const CGFloat headerHeight = MIN(node.height, MerrowFreeformClassHeaderHeight(node.label, node.subtitle, node.labelFontSize));
+    return NSMakeRect(x, y, node.width, headerHeight);
+}
+
+- (void)drawClassNode:(MerrowFreeformNodeRecord *)node {
+    const CGFloat x = node.x - node.width / 2.0;
+    const CGFloat y = node.y - node.height / 2.0;
+    const CGFloat w = node.width;
+    const CGFloat h = node.height;
+    const CGFloat dividerWidth = MAX(node.strokeWidth, 1.0);
+    const CGFloat inset = 12.0;
+    const CGFloat sectionGap = 8.0;
+    const CGFloat lineHeight = 17.0;
+    const CGFloat headerHeight = MIN(h, MerrowFreeformClassHeaderHeight(node.label, node.subtitle, node.labelFontSize));
+    const CGFloat bodyHeight = MAX(0.0, h - headerHeight);
+    const NSUInteger attributeLines = MerrowFreeformLineCount(node.attributesText);
+    const NSUInteger methodLines = MerrowFreeformLineCount(node.methodsText);
+    CGFloat attributesHeight = attributeLines > 0 ? attributeLines * lineHeight + 14.0 : 0.0;
+    if (attributesHeight > bodyHeight) attributesHeight = bodyHeight;
+    CGFloat methodsHeight = MAX(0.0, bodyHeight - attributesHeight);
+
+    NSColor *bodyFillColor = node.bodyFillColor ?: node.fillColor ?: [NSColor whiteColor];
+    [bodyFillColor setFill];
+    NSRectFill(NSMakeRect(x, y, w, h));
+    NSColor *headerFillColor = node.fillColor ?: [NSColor whiteColor];
+    [headerFillColor setFill];
+    NSRectFill(NSMakeRect(x, y, w, headerHeight));
+
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSMakeRect(x, y, w, h)];
+    outline.lineWidth = node.strokeWidth;
+    [node.strokeColor setStroke];
+    [outline stroke];
+
+    NSBezierPath *headerDivider = [NSBezierPath bezierPath];
+    [headerDivider moveToPoint:CGPointMake(x, y + headerHeight)];
+    [headerDivider lineToPoint:CGPointMake(x + w, y + headerHeight)];
+    headerDivider.lineWidth = dividerWidth;
+    [headerDivider stroke];
+
+    if (attributeLines > 0 && methodLines > 0) {
+        NSBezierPath *bodyDivider = [NSBezierPath bezierPath];
+        [bodyDivider moveToPoint:CGPointMake(x, y + headerHeight + attributesHeight)];
+        [bodyDivider lineToPoint:CGPointMake(x + w, y + headerHeight + attributesHeight)];
+        bodyDivider.lineWidth = dividerWidth;
+        [bodyDivider stroke];
+    }
+
+    CGFloat subtitleHeight = MerrowFreeformLineCount(node.subtitle) > 0 ? MerrowFreeformLineCount(node.subtitle) * 14.0 + 2.0 : 0.0;
+    CGFloat headerTextY = y + 10.0;
+    if (subtitleHeight > 0.0) {
+        [self drawText:node.subtitle inRect:NSMakeRect(x + inset, headerTextY, w - inset * 2.0, subtitleHeight) fontSize:12.0 color:node.labelColor alignment:NSTextAlignmentCenter];
+        headerTextY += subtitleHeight + 2.0;
+    }
+    [self drawText:node.label inRect:NSMakeRect(x + inset, headerTextY, w - inset * 2.0, MAX(20.0, headerHeight - (headerTextY - y) - 8.0)) fontSize:MAX(node.labelFontSize, 15.0) color:node.labelColor alignment:NSTextAlignmentCenter];
+
+    if (attributeLines > 0) {
+        [self drawText:node.attributesText inRect:NSMakeRect(x + inset, y + headerHeight + sectionGap, w - inset * 2.0, MAX(0.0, attributesHeight - sectionGap)) fontSize:12.0 color:[NSColor colorWithCalibratedRed:0.19 green:0.22 blue:0.27 alpha:1.0] alignment:NSTextAlignmentLeft];
+    }
+    if (methodLines > 0) {
+        const CGFloat methodsY = y + headerHeight + (attributeLines > 0 ? attributesHeight : 0.0) + sectionGap;
+        [self drawText:node.methodsText inRect:NSMakeRect(x + inset, methodsY, w - inset * 2.0, MAX(0.0, methodsHeight - sectionGap)) fontSize:12.0 color:[NSColor colorWithCalibratedRed:0.19 green:0.22 blue:0.27 alpha:1.0] alignment:NSTextAlignmentLeft];
+    }
+}
+
+- (void)drawEdgeEndpointStyle:(uint32_t)style from:(CGPoint)from tip:(CGPoint)tip color:(NSColor *)color {
+    if (style == 0) return;
+    const CGFloat dx = tip.x - from.x;
+    const CGFloat dy = tip.y - from.y;
+    const CGFloat len = hypot(dx, dy);
+    if (len < 0.001) return;
+
+    const CGFloat ux = dx / len;
+    const CGFloat uy = dy / len;
+    const CGFloat px = -uy;
+    const CGFloat py = ux;
+
+    if (style == 1 || style == 4) {
+        const CGFloat size = style == 1 ? 13.0 : 11.0;
+        const CGFloat halfWidth = size * 0.48;
+        CGPoint points[3] = {
+            tip,
+            { tip.x - ux * size + px * halfWidth, tip.y - uy * size + py * halfWidth },
+            { tip.x - ux * size - px * halfWidth, tip.y - uy * size - py * halfWidth },
+        };
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        [path moveToPoint:points[0]];
+        [path lineToPoint:points[1]];
+        [path lineToPoint:points[2]];
+        [path closePath];
+        path.lineWidth = 1.6;
+        [[NSColor whiteColor] setFill];
+        [path fill];
+        [color setStroke];
+        [path stroke];
+        return;
+    }
+
+    if (style == 2 || style == 3) {
+        const CGFloat size = 12.0;
+        const CGFloat halfWidth = size * 0.42;
+        CGPoint points[4] = {
+            tip,
+            { tip.x - ux * (size * 0.5) + px * halfWidth, tip.y - uy * (size * 0.5) + py * halfWidth },
+            { tip.x - ux * size, tip.y - uy * size },
+            { tip.x - ux * (size * 0.5) - px * halfWidth, tip.y - uy * (size * 0.5) - py * halfWidth },
+        };
+        NSBezierPath *path = MerrowFreeformPolygonPath(points, 4);
+        path.lineWidth = 1.6;
+        [(style == 2 ? color : [NSColor whiteColor]) setFill];
+        [path fill];
+        [color setStroke];
+        [path stroke];
+        return;
+    }
+
+    if (style == 5) {
+        const CGFloat radius = 6.0;
+        CGPoint center = CGPointMake(tip.x - ux * radius, tip.y - uy * radius);
+        NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - radius, center.y - radius, radius * 2.0, radius * 2.0)];
+        path.lineWidth = 1.6;
+        [[NSColor whiteColor] setFill];
+        [path fill];
+        [color setStroke];
+        [path stroke];
+    }
+}
+
+- (NSString *)svgElementForEdgeEndpointStyle:(uint32_t)style from:(CGPoint)from tip:(CGPoint)tip color:(NSColor *)color {
+    if (style == 0) return @"";
+    const CGFloat dx = tip.x - from.x;
+    const CGFloat dy = tip.y - from.y;
+    const CGFloat len = hypot(dx, dy);
+    if (len < 0.001) return @"";
+
+    const CGFloat ux = dx / len;
+    const CGFloat uy = dy / len;
+    const CGFloat px = -uy;
+    const CGFloat py = ux;
+    NSString *strokeAttrs = MerrowFreeformSVGPaintAttributes(@"stroke", color);
+
+    if (style == 1 || style == 4) {
+        const CGFloat size = style == 1 ? 13.0 : 11.0;
+        const CGFloat halfWidth = size * 0.48;
+        CGPoint points[3] = {
+            tip,
+            { tip.x - ux * size + px * halfWidth, tip.y - uy * size + py * halfWidth },
+            { tip.x - ux * size - px * halfWidth, tip.y - uy * size - py * halfWidth },
+        };
+        return [NSString stringWithFormat:@"<polygon points=\"%@\" fill=\"#FFFFFF\" %@ stroke-width=\"1.6\" />", MerrowFreeformPointList(points, 3), strokeAttrs];
+    }
+
+    if (style == 2 || style == 3) {
+        const CGFloat size = 12.0;
+        const CGFloat halfWidth = size * 0.42;
+        CGPoint points[4] = {
+            tip,
+            { tip.x - ux * (size * 0.5) + px * halfWidth, tip.y - uy * (size * 0.5) + py * halfWidth },
+            { tip.x - ux * size, tip.y - uy * size },
+            { tip.x - ux * (size * 0.5) - px * halfWidth, tip.y - uy * (size * 0.5) - py * halfWidth },
+        };
+        NSString *fillAttrs = style == 2 ? MerrowFreeformSVGPaintAttributes(@"fill", color) : @"fill=\"#FFFFFF\"";
+        return [NSString stringWithFormat:@"<polygon points=\"%@\" %@ %@ stroke-width=\"1.6\" />", MerrowFreeformPointList(points, 4), fillAttrs, strokeAttrs];
+    }
+
+    if (style == 5) {
+        const CGFloat radius = 6.0;
+        CGPoint center = CGPointMake(tip.x - ux * radius, tip.y - uy * radius);
+        return [NSString stringWithFormat:@"<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"#FFFFFF\" %@ stroke-width=\"1.6\" />", center.x, center.y, radius, strokeAttrs];
+    }
+
+    return @"";
+}
+
 - (CGPoint)clipPointFromNode:(MerrowFreeformNodeRecord *)node toward:(CGPoint)toward {
     const CGFloat dx = toward.x - node.x;
     const CGFloat dy = toward.y - node.y;
@@ -1924,6 +2245,11 @@ typedef struct {
     CGFloat blue = 0;
     CGFloat alpha = 0;
     [[node.fillColor colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]] getRed:&red green:&green blue:&blue alpha:&alpha];
+    CGFloat bodyRed = 0;
+    CGFloat bodyGreen = 0;
+    CGFloat bodyBlue = 0;
+    CGFloat bodyAlpha = 0;
+    [[(node.bodyFillColor ?: node.fillColor) colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]] getRed:&bodyRed green:&bodyGreen blue:&bodyBlue alpha:&bodyAlpha];
     CGFloat strokeRed = 0;
     CGFloat strokeGreen = 0;
     CGFloat strokeBlue = 0;
@@ -1938,6 +2264,9 @@ typedef struct {
     return @{
         @"id": node.nodeId ?: @"",
         @"label": node.label ?: @"",
+        @"subtitle": node.subtitle ?: @"",
+        @"attributesText": node.attributesText ?: @"",
+        @"methodsText": node.methodsText ?: @"",
         @"parentSubgraphId": node.parentSubgraphId ?: @"",
         @"shape": @(node.shape),
         @"x": @(node.x),
@@ -1945,6 +2274,7 @@ typedef struct {
         @"width": @(node.width),
         @"height": @(node.height),
         @"fill": @{ @"r": @(red), @"g": @(green), @"b": @(blue), @"a": @(alpha) },
+        @"bodyFill": @{ @"r": @(bodyRed), @"g": @(bodyGreen), @"b": @(bodyBlue), @"a": @(bodyAlpha) },
         @"stroke": @{ @"r": @(strokeRed), @"g": @(strokeGreen), @"b": @(strokeBlue), @"a": @(strokeAlpha) },
         @"strokeWidth": @(node.strokeWidth),
         @"labelColor": @{ @"r": @(labelRed), @"g": @(labelGreen), @"b": @(labelBlue), @"a": @(labelAlpha) },
@@ -2029,10 +2359,13 @@ typedef struct {
             [self drawEdgeEndpointHandlesForEdge:edge start:start end:end viewport:viewport];
         }
 
-        if (edge.hasArrow) {
+        if (self.graphType == MerrowFreeformGraphTypeClass) {
+            [self drawEdgeEndpointStyle:edge.targetEndStyle from:start tip:end color:edge.strokeColor];
+            [self drawEdgeEndpointStyle:edge.sourceEndStyle from:end tip:start color:edge.strokeColor];
+        } else if (edge.hasArrow) {
             MerrowFreeformDrawArrow(start, end, edge.strokeColor);
         }
-        if (edge.hasSourceArrow) {
+        if (self.graphType != MerrowFreeformGraphTypeClass && edge.hasSourceArrow) {
             MerrowFreeformDrawArrow(end, start, edge.strokeColor);
         }
 
@@ -2046,12 +2379,18 @@ typedef struct {
 
     for (MerrowFreeformNodeRecord *node in self.nodes) {
         if ([self isInvisibleAnchorNode:node]) continue;
-        NSBezierPath *path = [self pathForNode:node];
-        [node.fillColor setFill];
-        [node.strokeColor setStroke];
-        path.lineWidth = node.strokeWidth;
-        [path fill];
-        [path stroke];
+        NSBezierPath *path = nil;
+        if ([self isClassNode:node]) {
+            path = [NSBezierPath bezierPathWithRect:[self frameForNode:node]];
+            [self drawClassNode:node];
+        } else {
+            path = [self pathForNode:node];
+            [node.fillColor setFill];
+            [node.strokeColor setStroke];
+            path.lineWidth = node.strokeWidth;
+            [path fill];
+            [path stroke];
+        }
 
         if (includeEditorChrome && node == self.selectedNode) {
             NSBezierPath *selectionPath = [path copy];
@@ -2063,7 +2402,7 @@ typedef struct {
             [self drawResizeHandlesForRect:[self frameForNode:node] viewport:viewport];
         }
 
-        if (node.shape == 11) {
+        if (![self isClassNode:node] && node.shape == 11) {
             const CGFloat hw = node.width / 2.0;
             const CGFloat hh = node.height / 2.0;
             const CGFloat inset = MAX(hw * 0.15, 6.0);
@@ -2079,7 +2418,9 @@ typedef struct {
             [right stroke];
         }
 
-        [self drawCenteredText:node.label inRect:[self textRectForNode:node] fontSize:node.labelFontSize color:node.labelColor];
+        if (![self isClassNode:node]) {
+            [self drawCenteredText:node.label inRect:[self textRectForNode:node] fontSize:node.labelFontSize color:node.labelColor];
+        }
     }
 
     if (includeEditorChrome) {
@@ -2117,6 +2458,39 @@ typedef struct {
 }
 
 - (NSString *)svgElementForNode:(MerrowFreeformNodeRecord *)node {
+    if ([self isClassNode:node]) {
+        const CGFloat x = node.x - node.width / 2.0;
+        const CGFloat y = node.y - node.height / 2.0;
+        const CGFloat w = node.width;
+        const CGFloat h = node.height;
+        const CGFloat headerHeight = MIN(h, MerrowFreeformClassHeaderHeight(node.label, node.subtitle, node.labelFontSize));
+        const CGFloat bodyHeight = MAX(0.0, h - headerHeight);
+        const NSUInteger attributeLines = MerrowFreeformLineCount(node.attributesText);
+        const NSUInteger methodLines = MerrowFreeformLineCount(node.methodsText);
+        CGFloat attributesHeight = attributeLines > 0 ? attributeLines * 17.0 + 14.0 : 0.0;
+        if (attributesHeight > bodyHeight) attributesHeight = bodyHeight;
+        NSMutableString *svg = [NSMutableString string];
+        [svg appendFormat:@"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" %@ />", x, y, w, h, MerrowFreeformSVGPaintAttributes(@"fill", node.bodyFillColor ?: node.fillColor)];
+        [svg appendFormat:@"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" %@ />", x, y, w, headerHeight, MerrowFreeformSVGPaintAttributes(@"fill", node.fillColor)];
+        [svg appendFormat:@"<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"none\" %@ stroke-width=\"%.2f\" />", x, y, w, h, MerrowFreeformSVGPaintAttributes(@"stroke", node.strokeColor), node.strokeWidth];
+        [svg appendFormat:@"<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" %@ stroke-width=\"%.2f\" />", x, y + headerHeight, x + w, y + headerHeight, MerrowFreeformSVGPaintAttributes(@"stroke", node.strokeColor), MAX(node.strokeWidth, 1.0)];
+        if (attributeLines > 0 && methodLines > 0) {
+            [svg appendFormat:@"<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" %@ stroke-width=\"%.2f\" />", x, y + headerHeight + attributesHeight, x + w, y + headerHeight + attributesHeight, MerrowFreeformSVGPaintAttributes(@"stroke", node.strokeColor), MAX(node.strokeWidth, 1.0)];
+        }
+        CGFloat titleY = y + (node.subtitle.length > 0 ? 30.0 : 22.0);
+        if (node.subtitle.length > 0) {
+            [svg appendString:[self svgTextElementForText:node.subtitle x:node.x y:y + 16.0 fontSize:12.0 color:node.labelColor anchorMid:YES]];
+        }
+        [svg appendString:[self svgTextElementForText:node.label x:node.x y:titleY fontSize:MAX(node.labelFontSize, 15.0) color:node.labelColor anchorMid:YES]];
+        if (attributeLines > 0) {
+            [svg appendString:[self svgTextElementForText:node.attributesText x:x + 12.0 y:y + headerHeight + 18.0 fontSize:12.0 color:[NSColor colorWithCalibratedRed:0.19 green:0.22 blue:0.27 alpha:1.0] anchorMid:NO]];
+        }
+        if (methodLines > 0) {
+            [svg appendString:[self svgTextElementForText:node.methodsText x:x + 12.0 y:y + headerHeight + (attributeLines > 0 ? attributesHeight : 0.0) + 18.0 fontSize:12.0 color:[NSColor colorWithCalibratedRed:0.19 green:0.22 blue:0.27 alpha:1.0] anchorMid:NO]];
+        }
+        return svg;
+    }
+
     const CGFloat x = node.x - node.width / 2.0;
     const CGFloat y = node.y - node.height / 2.0;
     const CGFloat w = node.width;
@@ -2278,16 +2652,23 @@ typedef struct {
         [line appendString:@" />\n"];
         [svg appendString:line];
 
-        if (edge.hasArrow) {
-            NSString *points = MerrowFreeformArrowPointList(start, end);
-            if (points) {
-                [svg appendFormat:@"<polygon points=\"%@\" %@ />\n", points, MerrowFreeformSVGPaintAttributes(@"fill", edge.strokeColor)];
+        if (self.graphType == MerrowFreeformGraphTypeClass) {
+            [svg appendString:[self svgElementForEdgeEndpointStyle:edge.targetEndStyle from:start tip:end color:edge.strokeColor]];
+            [svg appendString:@"\n"];
+            [svg appendString:[self svgElementForEdgeEndpointStyle:edge.sourceEndStyle from:end tip:start color:edge.strokeColor]];
+            [svg appendString:@"\n"];
+        } else {
+            if (edge.hasArrow) {
+                NSString *points = MerrowFreeformArrowPointList(start, end);
+                if (points) {
+                    [svg appendFormat:@"<polygon points=\"%@\" %@ />\n", points, MerrowFreeformSVGPaintAttributes(@"fill", edge.strokeColor)];
+                }
             }
-        }
-        if (edge.hasSourceArrow) {
-            NSString *points = MerrowFreeformArrowPointList(end, start);
-            if (points) {
-                [svg appendFormat:@"<polygon points=\"%@\" %@ />\n", points, MerrowFreeformSVGPaintAttributes(@"fill", edge.strokeColor)];
+            if (edge.hasSourceArrow) {
+                NSString *points = MerrowFreeformArrowPointList(end, start);
+                if (points) {
+                    [svg appendFormat:@"<polygon points=\"%@\" %@ />\n", points, MerrowFreeformSVGPaintAttributes(@"fill", edge.strokeColor)];
+                }
             }
         }
 
@@ -2325,6 +2706,8 @@ typedef struct {
         @"lineStyle": @(edge.lineStyle),
         @"hasArrow": @(edge.hasArrow),
         @"hasSourceArrow": @(edge.hasSourceArrow),
+        @"sourceEndStyle": @(edge.sourceEndStyle),
+        @"targetEndStyle": @(edge.targetEndStyle),
     };
 }
 
@@ -2443,7 +2826,7 @@ typedef struct {
     }
 
     [self clearDocument];
-    self.graphType = (MerrowFreeformGraphType)MAX(0, MIN([dict[@"graphType"] integerValue], 1));
+    self.graphType = (MerrowFreeformGraphType)MAX(0, MIN([dict[@"graphType"] integerValue], (NSInteger)MerrowFreeformGraphTypeClass));
     self.canvasBackgroundColor = [self colorFromDictionary:dict[@"background"] fallback:[NSColor whiteColor]];
     self.documentWidth = MAX([dict[@"width"] doubleValue], 600.0);
     self.documentHeight = MAX([dict[@"height"] doubleValue], 400.0);
@@ -2482,6 +2865,9 @@ typedef struct {
         MerrowFreeformNodeRecord *node = [[MerrowFreeformNodeRecord alloc] init];
         node.nodeId = [[nodeDict[@"id"] description] copy] ?: @"";
         node.label = [[nodeDict[@"label"] description] copy] ?: @"";
+        node.subtitle = [[nodeDict[@"subtitle"] description] copy] ?: @"";
+        node.attributesText = [[nodeDict[@"attributesText"] description] copy] ?: @"";
+        node.methodsText = [[nodeDict[@"methodsText"] description] copy] ?: @"";
         node.parentSubgraphId = [[nodeDict[@"parentSubgraphId"] description] copy];
         if ([node.parentSubgraphId isEqualToString:@""]) {
             node.parentSubgraphId = nil;
@@ -2492,6 +2878,7 @@ typedef struct {
         node.width = MAX([nodeDict[@"width"] doubleValue], 20.0);
         node.height = MAX([nodeDict[@"height"] doubleValue], 20.0);
         node.fillColor = [self colorFromDictionary:nodeDict[@"fill"] fallback:[NSColor whiteColor]];
+        node.bodyFillColor = [self colorFromDictionary:nodeDict[@"bodyFill"] fallback:node.fillColor];
         node.strokeColor = [self colorFromDictionary:nodeDict[@"stroke"] fallback:[NSColor blackColor]];
         node.strokeWidth = MAX([nodeDict[@"strokeWidth"] doubleValue], 1.0);
         node.labelColor = [self colorFromDictionary:nodeDict[@"labelColor"] fallback:[NSColor blackColor]];
@@ -2514,6 +2901,10 @@ typedef struct {
         edge.lineStyle = (uint32_t)MAX(0, MIN([edgeDict[@"lineStyle"] integerValue], 3));
         edge.hasArrow = [edgeDict[@"hasArrow"] boolValue];
         edge.hasSourceArrow = [edgeDict[@"hasSourceArrow"] boolValue];
+        edge.sourceEndStyle = (uint32_t)MerrowFreeformClampEndStyle([edgeDict[@"sourceEndStyle"] integerValue]);
+        edge.targetEndStyle = (uint32_t)MerrowFreeformClampEndStyle([edgeDict[@"targetEndStyle"] integerValue]);
+        if (edge.sourceEndStyle > 0) edge.hasSourceArrow = YES;
+        if (edge.targetEndStyle > 0) edge.hasArrow = YES;
         [self.edges addObject:edge];
     }
 

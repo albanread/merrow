@@ -10,6 +10,9 @@ typedef struct {
 typedef struct {
     const char * _Nullable id;
     const char * _Nullable label;
+    const char * _Nullable subtitle;
+    const char * _Nullable attributes_text;
+    const char * _Nullable methods_text;
     const char * _Nullable parent_subgraph_id;
     uint32_t shape;
     double x;
@@ -17,6 +20,7 @@ typedef struct {
     double width;
     double height;
     MerrowFreeformColor fill;
+    MerrowFreeformColor body_fill;
     MerrowFreeformColor stroke;
     float stroke_width;
     MerrowFreeformColor label_color;
@@ -32,6 +36,8 @@ typedef struct {
     uint32_t line_style;
     uint8_t has_arrow;
     uint8_t has_source_arrow;
+    uint32_t source_end_style;
+    uint32_t target_end_style;
 } MerrowFreeformEdgeSnapshot;
 
 typedef struct {
@@ -68,6 +74,7 @@ typedef struct {
 typedef NS_ENUM(NSInteger, MerrowFreeformGraphType) {
     MerrowFreeformGraphTypeFlowchart = 0,
     MerrowFreeformGraphTypeSequence = 1,
+    MerrowFreeformGraphTypeClass = 2,
 };
 
 typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
@@ -101,6 +108,10 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 @property (nonatomic, readonly, strong) NSColor * _Nonnull selectedNodeFillColor;
 @property (nonatomic, readonly, strong) NSColor * _Nonnull selectedNodeStrokeColor;
 @property (nonatomic, readonly, assign) CGFloat selectedNodeStrokeWidth;
+@property (nonatomic, readonly, copy) NSString * _Nonnull selectedNodeSubtitle;
+@property (nonatomic, readonly, copy) NSString * _Nonnull selectedNodeAttributesText;
+@property (nonatomic, readonly, copy) NSString * _Nonnull selectedNodeMethodsText;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull selectedNodeBodyFillColor;
 @property (nonatomic, readonly, assign) CGFloat selectedObjectWidth;
 @property (nonatomic, readonly, assign) CGFloat selectedObjectHeight;
 @property (nonatomic, readonly, copy) NSString * _Nonnull selectedEdgeLabel;
@@ -108,6 +119,8 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 @property (nonatomic, readonly, assign) CGFloat selectedEdgeThickness;
 @property (nonatomic, readonly, assign) NSInteger selectedEdgeLineStyle;
 @property (nonatomic, readonly, assign) NSInteger selectedEdgeArrowMode;
+@property (nonatomic, readonly, assign) NSInteger selectedEdgeSourceEndStyle;
+@property (nonatomic, readonly, assign) NSInteger selectedEdgeTargetEndStyle;
 
 - (void)loadEditableGraph:(const MerrowFreeformGraphSnapshot * _Nullable)graph;
 - (void)clearDocument;
@@ -124,8 +137,12 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 - (void)updateCanvasBackgroundOpacity:(CGFloat)opacity;
 - (void)updateSelectedNodeLabel:(NSString * _Nonnull)label;
 - (void)updateSelectedNodeFillColor:(NSColor * _Nonnull)color;
+- (void)updateSelectedNodeBodyFillColor:(NSColor * _Nonnull)color;
 - (void)updateSelectedNodeStrokeColor:(NSColor * _Nonnull)color;
 - (void)updateSelectedNodeStrokeWidth:(CGFloat)strokeWidth;
+- (void)updateSelectedNodeSubtitle:(NSString * _Nonnull)subtitle;
+- (void)updateSelectedNodeAttributesText:(NSString * _Nonnull)text;
+- (void)updateSelectedNodeMethodsText:(NSString * _Nonnull)text;
 - (void)updateSelectedObjectWidth:(CGFloat)width;
 - (void)updateSelectedObjectHeight:(CGFloat)height;
 - (void)updateSelectedEdgeLabel:(NSString * _Nonnull)label;
@@ -133,6 +150,8 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 - (void)updateSelectedEdgeThickness:(CGFloat)thickness;
 - (void)updateSelectedEdgeLineStyle:(NSInteger)lineStyle;
 - (void)updateSelectedEdgeArrowMode:(NSInteger)arrowMode;
+- (void)updateSelectedEdgeSourceEndStyle:(NSInteger)style;
+- (void)updateSelectedEdgeTargetEndStyle:(NSInteger)style;
 - (nullable NSData *)serializedDocumentDataWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)loadSerializedDocumentData:(NSData * _Nonnull)data error:(NSError * _Nullable * _Nullable)error;
 @end
