@@ -13,6 +13,8 @@ const model = @import("../../model.zig");
 const NodeData = model.NodeData;
 const EdgeData = model.EdgeData;
 const GraphData = model.GraphData;
+const NormalizedEdgeChain = model.NormalizedEdgeChain;
+const Point = model.Point;
 
 const LineStyle = model.LineStyle;
 const Graph = Digraph(NodeData, EdgeData, GraphData);
@@ -27,16 +29,7 @@ const LongEdge = struct {
     name_duped: bool = false,
     v_rank: i32,
     w_rank: i32,
-    weight: i32,
-    /// Preserved from the original edge so we can transfer it to the chain.
-    label: ?[]const u8 = null,
-    label_owned: bool = false,
-    arrowhead: ?[]const u8 = null,
-    arrowtail: ?[]const u8 = null,
-    style: ?[]const u8 = null,
-    line_style: LineStyle = .solid,
-    color: ?[4]u8 = null,
-    thickness: ?i32 = null,
+    edge_data: EdgeData,
 };
 
 /// Normalize edges: replace every edge that spans more than one rank with a
@@ -54,39 +47,42 @@ pub fn normalizeEdges(
     //    We must snapshot first because we mutate the graph below.
     // ------------------------------------------------------------------
     var long_edges = std.ArrayListUnmanaged(LongEdge){};
-    defer long_edges.deinit(allocator);
+    defer {
+        for (long_edges.items) |*edge| {
+            if (edge.name_duped) {
+                if (edge.name) |name| allocator.free(name);
+            }
+            edge.edge_data.deinit(allocator);
+        }
+        long_edges.deinit(allocator);
+    }
 
-    var edge_iter = graph.edgeIterator();
-    while (edge_iter.next()) |entry| {
-        const v_rank = (graph.getNode(entry.v) orelse continue).rank orelse continue;
-        const w_rank = (graph.getNode(entry.w) orelse continue).rank orelse continue;
+    const node_ids = try graph.allNodes(allocator);
+    defer {
+        for (node_ids) |id| allocator.free(id);
+        allocator.free(node_ids);
+    }
 
-        if (w_rank != v_rank + 1) {
-            // Duplicate the edge name (if any) so we hold a stable copy.
-            // `removeEdge` frees the graph's owned name, which is the same
-            // pointer the iterator returned — without this dupe we'd have a
-            // use-after-free on named edges.
-            const duped_name: ?[]const u8 = if (entry.name) |n|
-                try allocator.dupe(u8, n)
+    for (node_ids) |node_id| {
+        const v_rank = (graph.getNode(node_id) orelse continue).rank orelse continue;
+        const out_edges = graph.outEdges(node_id) orelse continue;
+        for (out_edges) |edge_key| {
+            const w_rank = (graph.getNode(edge_key.w) orelse continue).rank orelse continue;
+            if (w_rank == v_rank + 1) continue;
+
+            const duped_name: ?[]const u8 = if (edge_key.name) |name|
+                try allocator.dupe(u8, name)
             else
                 null;
 
             try long_edges.append(allocator, .{
-                .v = entry.v,
-                .w = entry.w,
+                .v = edge_key.v,
+                .w = edge_key.w,
                 .name = duped_name,
                 .name_duped = duped_name != null,
                 .v_rank = v_rank,
                 .w_rank = w_rank,
-                .weight = entry.data.weight,
-                .label = entry.data.label,
-                .label_owned = entry.data.label_owned,
-                .arrowhead = entry.data.arrowhead,
-                .arrowtail = entry.data.arrowtail,
-                .style = entry.data.style,
-                .line_style = entry.data.line_style,
-                .color = entry.data.color,
-                .thickness = entry.data.thickness,
+                .edge_data = graph.edge(edge_key.v, edge_key.w, edge_key.name) orelse continue,
             });
         }
     }
@@ -96,20 +92,15 @@ pub fn normalizeEdges(
     // ------------------------------------------------------------------
     var dummy_counter: usize = 0;
 
-    for (long_edges.items) |le| {
+    for (long_edges.items) |*le| {
         // Remove the original long edge.  The edge data (including any
         // owned label) has been snapshotted into `le` above.  removeEdge
         // does NOT free the EdgeData's owned resources — we take over
         // ownership here and either transfer or explicitly free them.
         graph.removeEdge(le.v, le.w, le.name);
 
-        // Free the duplicated name now that removeEdge is done with it.
-        if (le.name_duped) {
-            if (le.name) |n| allocator.free(n);
-        }
-
         var prev_node: []const u8 = le.v;
-        var is_first_segment = true;
+        var first_dummy: ?[]const u8 = null;
 
         // Insert a dummy node for every intermediate rank.
         var rank: i32 = le.v_rank + 1;
@@ -124,62 +115,121 @@ pub fn normalizeEdges(
             try graph.setNode(dummy_id, .{
                 .rank = rank,
                 .dummy = true,
+                .dummy_kind = .edge,
             });
 
-            // Transfer original edge's label to the first segment of the
-            // chain so it can still be rendered near the source node.
-            var seg_data = EdgeData{
-                .weight = le.weight,
-                .line_style = le.line_style,
-                .color = le.color,
-                .thickness = le.thickness,
-            };
-            if (is_first_segment) {
-                seg_data.label = le.label;
-                seg_data.label_owned = le.label_owned;
-                seg_data.arrowhead = le.arrowhead;
-                seg_data.arrowtail = le.arrowtail;
-                seg_data.style = le.style;
-                is_first_segment = false;
-            }
+            if (first_dummy == null) first_dummy = dummy_id;
 
-            try graph.setEdge(prev_node, dummy_id, seg_data, null);
+            try graph.setEdge(prev_node, dummy_id, .{
+                .weight = le.edge_data.weight,
+                .compound_redirect_id = le.edge_data.compound_redirect_id,
+            }, null);
 
             prev_node = dummy_id;
         }
 
-        // Final edge from last dummy (or original source) to target.
-        // If the chain had no intermediate dummies (shouldn't happen for
-        // long edges, but be safe), transfer label here.
-        var final_data = EdgeData{
-            .weight = le.weight,
-            .line_style = le.line_style,
-            .color = le.color,
-            .thickness = le.thickness,
-        };
-        if (is_first_segment) {
-            // Single-segment chain: both arrowhead and arrowtail stay here.
-            final_data.label = le.label;
-            final_data.label_owned = le.label_owned;
-            final_data.arrowhead = le.arrowhead;
-            final_data.arrowtail = le.arrowtail;
-            final_data.style = le.style;
+        if (first_dummy) |start_dummy| {
+            try graph.setEdge(prev_node, le.w, .{
+                .weight = le.edge_data.weight,
+                .compound_redirect_id = le.edge_data.compound_redirect_id,
+            }, null);
+
+            try graph.graph_label.normalized_edge_chains.append(allocator, .{
+                .original_v = le.v,
+                .original_w = le.w,
+                .original_name = le.name,
+                .original_name_owned = le.name_duped,
+                .first_dummy = start_dummy,
+                .edge_data = le.edge_data,
+            });
+
+            le.name = null;
+            le.name_duped = false;
+            le.edge_data = .{};
         } else {
-            // Multi-segment chain: arrowhead goes on the last segment so
-            // it renders at the target.  arrowtail was already placed on
-            // the first segment above so it renders at the source.
-            final_data.arrowhead = le.arrowhead;
+            try graph.setEdge(le.v, le.w, le.edge_data, le.name);
+            if (le.name_duped) {
+                if (le.name) |name| allocator.free(name);
+            }
+            le.name = null;
+            le.name_duped = false;
+            le.edge_data = .{};
         }
-        try graph.setEdge(prev_node, le.w, final_data, null);
     }
+}
+
+/// Undo normalization by collecting dummy-node positions into the original edge,
+/// removing the dummy chain, and restoring the original edge metadata.
+pub fn undo(allocator: std.mem.Allocator, graph: *Graph) !void {
+    for (graph.graph_label.normalized_edge_chains.items) |*chain| {
+        if (!graph.hasNode(chain.first_dummy)) continue;
+
+        var points = std.ArrayListUnmanaged(Point){};
+        errdefer points.deinit(allocator);
+
+        const original_src = graph.getNode(chain.original_v) orelse continue;
+        const original_tgt = graph.getNode(chain.original_w) orelse continue;
+
+        try points.append(allocator, .{ .x = original_src.x, .y = original_src.y });
+
+        var current = chain.first_dummy;
+        while (true) {
+            const node = graph.getNode(current) orelse break;
+            if (!node.dummy or node.dummy_kind == null or node.dummy_kind.? != .edge) break;
+
+            try points.append(allocator, .{ .x = node.x, .y = node.y });
+
+            const next = blk: {
+                const out_edges = graph.outEdges(current) orelse break :blk null;
+                if (out_edges.len == 0) break :blk null;
+                break :blk out_edges[0].w;
+            };
+
+            if (graph.inEdges(current)) |in_edges| {
+                if (in_edges.len > 0) {
+                    graph.removeEdge(in_edges[0].v, in_edges[0].w, in_edges[0].name);
+                }
+            }
+            if (graph.outEdges(current)) |out_edges| {
+                if (out_edges.len > 0) {
+                    graph.removeEdge(out_edges[0].v, out_edges[0].w, out_edges[0].name);
+                }
+            }
+            graph.removeNode(current);
+
+            current = next orelse break;
+        }
+
+        try points.append(allocator, .{ .x = original_tgt.x, .y = original_tgt.y });
+
+        chain.edge_data.points = points;
+        try graph.setEdge(chain.original_v, chain.original_w, chain.edge_data, chain.original_name);
+
+        if (chain.original_name_owned) {
+            if (chain.original_name) |name| allocator.free(name);
+        }
+        chain.original_name = null;
+        chain.original_name_owned = false;
+        chain.edge_data = .{};
+    }
+
+    graph.graph_label.normalized_edge_chains.clearRetainingCapacity();
 }
 
 /// Free all dummy node ID strings tracked in graph_label.dummy_chains,
 /// remove dummy nodes from the graph, and restore original long edges.
 /// (Placeholder — will be fully implemented with the denormalize phase.)
 pub fn freeDummyIds(allocator: std.mem.Allocator, graph: *Graph) void {
+    for (graph.graph_label.normalized_edge_chains.items) |*chain| {
+        chain.deinit(allocator);
+    }
+    graph.graph_label.normalized_edge_chains.deinit(allocator);
+    graph.graph_label.normalized_edge_chains = .{};
+
     for (graph.graph_label.dummy_chains.items) |id| {
-        graph.removeNode(id);
+        if (graph.hasNode(id)) {
+            graph.removeNode(id);
+        }
         allocator.free(id);
     }
     graph.graph_label.dummy_chains.deinit(allocator);
@@ -293,6 +343,64 @@ test "mixed long and short edges" {
     // A + B + C + 2 dummies = 5
     try testing.expectEqual(@as(usize, 5), g.nodeCount());
     try testing.expectEqual(@as(usize, 2), g.graph_label.dummy_chains.items.len);
+}
+
+test "normalize preserves compound redirect metadata on split edges" {
+    var g = Graph.init(testing.allocator);
+    defer {
+        freeDummyIds(testing.allocator, &g);
+        g.deinitDeep();
+    }
+
+    try g.setNode("A", .{ .rank = 0 });
+    try g.setNode("B", .{ .rank = 3 });
+    try g.setEdge("A", "B", .{ .compound_redirect_id = 7 }, null);
+
+    try normalizeEdges(testing.allocator, &g);
+
+    const first_dummy = g.graph_label.dummy_chains.items[0];
+    try testing.expectEqual(@as(?usize, 7), g.edge("A", first_dummy, null).?.compound_redirect_id);
+}
+
+test "undo restores long edge with collected points and metadata" {
+    var g = Graph.init(testing.allocator);
+    defer {
+        freeDummyIds(testing.allocator, &g);
+        g.deinitDeep();
+    }
+
+    try g.setNode("A", .{ .rank = 0, .x = 10, .y = 10 });
+    try g.setNode("B", .{ .rank = 3, .x = 10, .y = 130 });
+    try g.setEdge("A", "B", .{ .label = "edge", .reversed = true, .compound_redirect_id = 9 }, null);
+
+    try normalizeEdges(testing.allocator, &g);
+
+    const d0 = g.graph_label.dummy_chains.items[0];
+    const d1 = g.graph_label.dummy_chains.items[1];
+    if (g.getNodePtr(d0)) |node| {
+        node.x = 20;
+        node.y = 40;
+    }
+    if (g.getNodePtr(d1)) |node| {
+        node.x = 30;
+        node.y = 90;
+    }
+
+    try undo(testing.allocator, &g);
+
+    try testing.expect(g.hasEdge("A", "B", null));
+    const edge = g.edge("A", "B", null).?;
+    try testing.expectEqual(@as(usize, 4), edge.points.items.len);
+    try testing.expectEqual(@as(f64, 10), edge.points.items[0].x);
+    try testing.expectEqual(@as(f64, 10), edge.points.items[0].y);
+    try testing.expectEqual(@as(f64, 20), edge.points.items[1].x);
+    try testing.expectEqual(@as(f64, 90), edge.points.items[2].y);
+    try testing.expectEqual(@as(f64, 10), edge.points.items[3].x);
+    try testing.expectEqual(@as(f64, 130), edge.points.items[3].y);
+    try testing.expectEqual(@as(?usize, 9), edge.compound_redirect_id);
+    try testing.expect(edge.reversed);
+    try testing.expect(!g.hasNode(d0));
+    try testing.expect(!g.hasNode(d1));
 }
 
 test "freeDummyIds cleans up" {

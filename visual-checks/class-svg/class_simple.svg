@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="454" viewBox="0 0 480 454">
+  <style>
+    text { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; }
+    .edge-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <rect width="100%" height="100%" fill="white"/>
+  <rect x="0.0" y="0.0" width="480.0" height="454.0" fill="rgb(255,255,255)" stroke-width="0.0"/>
+  <rect x="136.0" y="50.0" width="184.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="136.0" y="88.0" width="184.0" height="60.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="136.0" y="148.0" width="184.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="136.0" y="84.0" width="184.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="136.0" y1="88.0" x2="320.0" y2="88.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="136.0" y="146.0" width="184.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="136.0" y1="148.0" x2="320.0" y2="148.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="228.0" y="73.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Animal</text>
+  <text x="152.0" y="111.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String name</text>
+  <text x="152.0" y="133.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int age</text>
+  <text x="152.0" y="171.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+makeSound()</text>
+  <text x="152.0" y="193.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+move(int distance)</text>
+  <rect x="246.0" y="268.0" width="184.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="246.0" y="306.0" width="184.0" height="38.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="246.0" y="344.0" width="184.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="246.0" y="302.0" width="184.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="246.0" y1="306.0" x2="430.0" y2="306.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="246.0" y="342.0" width="184.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="246.0" y1="344.0" x2="430.0" y2="344.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="338.0" y="291.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Dog</text>
+  <text x="262.0" y="329.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String breed</text>
+  <text x="262.0" y="367.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+bark()</text>
+  <text x="262.0" y="389.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+fetch(String item)</text>
+  <rect x="50.0" y="268.0" width="136.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="306.0" width="136.0" height="38.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="344.0" width="136.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="302.0" width="136.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="50.0" y1="306.0" x2="186.0" y2="306.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="342.0" width="136.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="50.0" y1="344.0" x2="186.0" y2="344.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="118.0" y="291.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Cat</text>
+  <text x="66.0" y="329.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String color</text>
+  <text x="66.0" y="367.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+purr()</text>
+  <text x="66.0" y="389.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+scratch()</text>
+</svg>

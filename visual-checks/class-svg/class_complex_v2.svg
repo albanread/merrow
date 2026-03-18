@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1482" height="1394" viewBox="0 0 1482 1394">
+  <style>
+    text { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; }
+    .edge-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <rect width="100%" height="100%" fill="white"/>
+  <rect x="0.0" y="0.0" width="1482.0" height="1394.0" fill="rgb(255,255,255)" stroke-width="0.0"/>
+  <rect x="668.0" y="50.0" width="256.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="668.0" y="110.0" width="256.0" height="104.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="668.0" y="214.0" width="256.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="668.0" y="106.0" width="256.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="668.0" y1="110.0" x2="924.0" y2="110.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="668.0" y="212.0" width="256.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="668.0" y1="214.0" x2="924.0" y2="214.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="796.0" y="73.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(255,255,255)">«abstract»</text>
+  <text x="796.0" y="95.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">User</text>
+  <text x="684.0" y="133.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int id</text>
+  <text x="684.0" y="155.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String username</text>
+  <text x="684.0" y="177.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String email</text>
+  <text x="684.0" y="199.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-String passwordHash</text>
+  <text x="684.0" y="237.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+login(String password) bool</text>
+  <text x="684.0" y="259.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+logout()</text>
+  <text x="684.0" y="281.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getProfile() Profile</text>
+  <rect x="1152.0" y="356.0" width="280.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1152.0" y="394.0" width="280.0" height="60.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1152.0" y="454.0" width="280.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1152.0" y="390.0" width="280.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="1152.0" y1="394.0" x2="1432.0" y2="394.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1152.0" y="452.0" width="280.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="1152.0" y1="454.0" x2="1432.0" y2="454.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="1292.0" y="379.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Customer</text>
+  <text x="1168.0" y="417.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String shippingAddress</text>
+  <text x="1168.0" y="439.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String billingAddress</text>
+  <text x="1168.0" y="477.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+placeOrder(Cart cart) Order</text>
+  <text x="1168.0" y="499.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+viewOrderHistory() List~Order~</text>
+  <rect x="346.0" y="356.0" width="224.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="346.0" y="394.0" width="224.0" height="38.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="346.0" y="432.0" width="224.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="346.0" y="390.0" width="224.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="346.0" y1="394.0" x2="570.0" y2="394.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="346.0" y="430.0" width="224.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="346.0" y1="432.0" x2="570.0" y2="432.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="458.0" y="379.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Admin</text>
+  <text x="362.0" y="417.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String role</text>
+  <text x="362.0" y="455.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+manageUsers()</text>
+  <text x="362.0" y="477.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+generateReport() Report</text>
+  <text x="362.0" y="499.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+banUser(User user)</text>
+  <rect x="1156.0" y="1098.0" width="272.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1156.0" y="1136.0" width="272.0" height="148.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1156.0" y="1284.0" width="272.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1156.0" y="1132.0" width="272.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="1156.0" y1="1136.0" x2="1428.0" y2="1136.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1156.0" y="1282.0" width="272.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="1156.0" y1="1284.0" x2="1428.0" y2="1284.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="1292.0" y="1121.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Product</text>
+  <text x="1172.0" y="1159.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int id</text>
+  <text x="1172.0" y="1181.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String name</text>
+  <text x="1172.0" y="1203.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String description</text>
+  <text x="1172.0" y="1225.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-double cost</text>
+  <text x="1172.0" y="1247.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+double price</text>
+  <text x="1172.0" y="1269.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int stockCount</text>
+  <text x="1172.0" y="1307.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+isAvailable() bool</text>
+  <text x="1172.0" y="1329.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+applyDiscount(double percent)</text>
+  <rect x="1164.0" y="585.0" width="256.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1164.0" y="623.0" width="256.0" height="38.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1164.0" y="661.0" width="256.0" height="126.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1164.0" y="619.0" width="256.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="1164.0" y1="623.0" x2="1420.0" y2="623.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1164.0" y="659.0" width="256.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="1164.0" y1="661.0" x2="1420.0" y2="661.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="1292.0" y="608.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Cart</text>
+  <text x="1180.0" y="646.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-List~CartItem~ items</text>
+  <text x="1180.0" y="684.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+addItem(Product p, int qty)</text>
+  <text x="1180.0" y="706.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+removeItem(int productId)</text>
+  <text x="1180.0" y="728.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getTotal() double</text>
+  <text x="1180.0" y="750.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+clear()</text>
+  <text x="1180.0" y="772.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+itemCount() int</text>
+  <rect x="1192.0" y="880.0" width="200.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1192.0" y="918.0" width="200.0" height="60.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1192.0" y="978.0" width="200.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1192.0" y="914.0" width="200.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="1192.0" y1="918.0" x2="1392.0" y2="918.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="1192.0" y="976.0" width="200.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="1192.0" y1="978.0" x2="1392.0" y2="978.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="1292.0" y="903.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">CartItem</text>
+  <text x="1208.0" y="941.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+Product product</text>
+  <text x="1208.0" y="963.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int quantity</text>
+  <text x="1208.0" y="1001.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getSubtotal() double</text>
+  <rect x="358.0" y="574.0" width="200.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="358.0" y="612.0" width="200.0" height="104.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="358.0" y="716.0" width="200.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="358.0" y="608.0" width="200.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="358.0" y1="612.0" x2="558.0" y2="612.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="358.0" y="714.0" width="200.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="358.0" y1="716.0" x2="558.0" y2="716.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="458.0" y="597.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Order</text>
+  <text x="374.0" y="635.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int id</text>
+  <text x="374.0" y="657.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+Date createdAt</text>
+  <text x="374.0" y="679.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+String status</text>
+  <text x="374.0" y="701.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+double totalAmount</text>
+  <text x="374.0" y="739.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+confirm()</text>
+  <text x="374.0" y="761.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+cancel()</text>
+  <text x="374.0" y="783.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getInvoice() Invoice</text>
+  <rect x="682.0" y="869.0" width="256.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="682.0" y="929.0" width="256.0" height="16.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="682.0" y="945.0" width="256.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="682.0" y="925.0" width="256.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="682.0" y1="929.0" x2="938.0" y2="929.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="682.0" y="943.0" width="256.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="682.0" y1="945.0" x2="938.0" y2="945.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="810.0" y="892.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(255,255,255)">«interface»</text>
+  <text x="810.0" y="914.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Payment</text>
+  <text x="698.0" y="968.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+process(double amount) bool</text>
+  <text x="698.0" y="990.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+refund(double amount) bool</text>
+  <text x="698.0" y="1012.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getTransactionId() String</text>
+  <rect x="524.0" y="1131.0" width="256.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="524.0" y="1169.0" width="256.0" height="60.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="524.0" y="1229.0" width="256.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="524.0" y="1165.0" width="256.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="524.0" y1="1169.0" x2="780.0" y2="1169.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="524.0" y="1227.0" width="256.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="524.0" y1="1229.0" x2="780.0" y2="1229.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="652.0" y="1154.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">CreditCardPayment</text>
+  <text x="540.0" y="1192.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-String cardNumber</text>
+  <text x="540.0" y="1214.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-String expiry</text>
+  <text x="540.0" y="1252.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+process(double amount) bool</text>
+  <text x="540.0" y="1274.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+refund(double amount) bool</text>
+  <text x="540.0" y="1296.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getTransactionId() String</text>
+  <rect x="840.0" y="1142.0" width="256.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="840.0" y="1180.0" width="256.0" height="38.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="840.0" y="1218.0" width="256.0" height="82.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="840.0" y="1176.0" width="256.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="840.0" y1="1180.0" x2="1096.0" y2="1180.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="840.0" y="1216.0" width="256.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="840.0" y1="1218.0" x2="1096.0" y2="1218.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="968.0" y="1165.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">PayPalPayment</text>
+  <text x="856.0" y="1203.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">-String accountEmail</text>
+  <text x="856.0" y="1241.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+process(double amount) bool</text>
+  <text x="856.0" y="1263.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+refund(double amount) bool</text>
+  <text x="856.0" y="1285.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+getTransactionId() String</text>
+  <rect x="50.0" y="858.0" width="184.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="896.0" width="184.0" height="104.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="1000.0" width="184.0" height="38.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="892.0" width="184.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="50.0" y1="896.0" x2="234.0" y2="896.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="50.0" y="998.0" width="184.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="50.0" y1="1000.0" x2="234.0" y2="1000.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="142.0" y="881.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Invoice</text>
+  <text x="66.0" y="919.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+int id</text>
+  <text x="66.0" y="941.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+Date issuedAt</text>
+  <text x="66.0" y="963.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+double total</text>
+  <text x="66.0" y="985.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+double taxAmount</text>
+  <text x="66.0" y="1023.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+generatePDF() Blob</text>
+  <rect x="294.0" y="880.0" width="328.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(38,94,151)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="294.0" y="940.0" width="328.0" height="16.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="294.0" y="956.0" width="328.0" height="60.0" rx="4.0" ry="4.0" fill="rgb(240,244,248)" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="294.0" y="936.0" width="328.0" height="6.0" fill="rgb(38,94,151)" stroke-width="0.0"/>
+  <line x1="294.0" y1="940.0" x2="622.0" y2="940.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <rect x="294.0" y="954.0" width="328.0" height="4.0" fill="rgb(240,244,248)" stroke-width="0.0"/>
+  <line x1="294.0" y1="956.0" x2="622.0" y2="956.0" fill="none" stroke="rgb(38,94,151)" stroke-width="2.0"/>
+  <text x="458.0" y="903.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="rgb(255,255,255)">«service»</text>
+  <text x="458.0" y="925.4" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="15.0" fill="rgb(255,255,255)">Notification</text>
+  <text x="310.0" y="979.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+sendEmail(String to, String subject)</text>
+  <text x="310.0" y="1001.4" text-anchor="start" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(51,51,51)">+sendSMS(String phone, String msg)</text>
+</svg>

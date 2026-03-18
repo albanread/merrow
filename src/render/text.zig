@@ -159,8 +159,12 @@ pub const Font = struct {
     }
 
     /// Quantise a scale factor to an integer for cache lookup.
+    /// stb_truetype scales are tiny (typically 0.005–0.03), so we need a
+    /// large multiplier to distinguish nearby font sizes.  4096 gives ~40
+    /// distinct buckets across the common range, preventing different sizes
+    /// from colliding to the same cache key.
     inline fn quantiseScale(scale: f32) u32 {
-        return @intFromFloat(@max(0.0, scale * 64.0));
+        return @intFromFloat(@max(0.0, scale * 4096.0));
     }
 
     /// Look up a cached glyph.  Returns the entry or null if not cached.

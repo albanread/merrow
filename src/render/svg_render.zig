@@ -352,7 +352,7 @@ fn drawNodes(
             const font_size: f64 = @floatCast(config.text_size);
 
             // Check if wrapping is needed
-            const inner_pad: f64 = 16.0;
+            const inner_pad: f64 = 28.0;
             const shape_shrink: f64 = switch (node.shape) {
                 .diamond => 0.55,
                 .hexagon => 0.65,
@@ -598,10 +598,18 @@ fn drawEdges(
         }
 
         // ---------------------------------------------------------------
-        // Tessellate into smooth spline
+        // Preserve explicit routed waypoints as-is. Smoothing them back
+        // into Catmull-Rom splines can bow valid obstacle routes into
+        // container boxes again.
         // ---------------------------------------------------------------
-        var smooth = try graph_mod.tessellateSpline(allocator, waypoints.items);
+        const has_explicit_route = if (edge_data) |ed| ed.points.items.len >= 2 else false;
+        var smooth = std.ArrayListUnmanaged(graph_mod.Vec2){};
         defer smooth.deinit(allocator);
+        if (has_explicit_route) {
+            try smooth.appendSlice(allocator, waypoints.items);
+        } else {
+            smooth = try graph_mod.tessellateSpline(allocator, waypoints.items);
+        }
 
         // ---------------------------------------------------------------
         // Save arrowhead anchor points before shortening

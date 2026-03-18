@@ -1,0 +1,17 @@
+flowchart LR
+    U[User]
+
+    subgraph LNE[BIGCO Edge]
+        UI[Web App]
+        PROXY[LLM Proxy]
+    end
+
+    subgraph FP[Foundation Platform]
+        LLM[Hosted Model]
+        STORE[Knowledge Store]
+    end
+
+    U --> UI
+    UI --> PROXY
+    PROXY --> LLM
+    PROXY --> STORE

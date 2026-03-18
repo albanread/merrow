@@ -15,6 +15,10 @@ pub const GraphData = struct {
     width: f64 = 0.0,
     height: f64 = 0.0,
     dummy_chains: std.ArrayListUnmanaged([]const u8) = .{},
+    normalized_edge_chains: std.ArrayListUnmanaged(NormalizedEdgeChain) = .{},
+    nesting_root: ?[]const u8 = null,
+    node_rank_factor: ?i32 = null,
+    max_rank: ?i32 = null,
 };
 
 pub const NodeShape = enum {
@@ -38,6 +42,20 @@ pub const LineStyle = enum {
     dashed,
     dotted,
     thick,
+};
+
+pub const DummyKind = enum {
+    edge,
+    border,
+    label,
+    nesting,
+};
+
+pub const BorderKind = enum {
+    top,
+    bottom,
+    left,
+    right,
 };
 
 /// Node data for Dagre layout
@@ -76,6 +94,8 @@ pub const NodeData = struct {
     // Compound graph support
     min_rank: ?i32 = null,
     max_rank: ?i32 = null,
+    border_top: ?[]const u8 = null,
+    border_bottom: ?[]const u8 = null,
     border_left: std.ArrayListUnmanaged(?[]const u8) = .{},
     border_right: std.ArrayListUnmanaged(?[]const u8) = .{},
 
@@ -87,6 +107,8 @@ pub const NodeData = struct {
 
     // For dummy nodes
     dummy: bool = false,
+    dummy_kind: ?DummyKind = null,
+    border_kind: ?BorderKind = null,
     dummy_edge: ?struct { v: []const u8, w: []const u8, name: ?[]const u8 } = null,
     label_pos: ?[]const u8 = null, // "l", "r", "c"
 
@@ -138,12 +160,30 @@ pub const EdgeData = struct {
     cutvalue: ?i32 = null, // For network simplex
     label_rank: ?i32 = null, // Rank where label should be placed
     nesting_edge: bool = false, // Is this a nesting edge (compound graph support)
+    compound_redirect_id: ?usize = null,
 
     pub fn deinit(self: *EdgeData, allocator: std.mem.Allocator) void {
         if (self.label_owned) {
             if (self.label) |l| allocator.free(l);
         }
         self.points.deinit(allocator);
+    }
+};
+
+pub const NormalizedEdgeChain = struct {
+    original_v: []const u8,
+    original_w: []const u8,
+    original_name: ?[]const u8 = null,
+    original_name_owned: bool = false,
+    first_dummy: []const u8,
+    edge_data: EdgeData,
+
+    pub fn deinit(self: *NormalizedEdgeChain, allocator: std.mem.Allocator) void {
+        if (self.original_name_owned) {
+            if (self.original_name) |name| allocator.free(name);
+        }
+        self.edge_data.deinit(allocator);
+        self.* = undefined;
     }
 };
 

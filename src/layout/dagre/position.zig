@@ -456,12 +456,12 @@ fn findType1Conflicts(
 /// If v is a dummy node, find a dummy predecessor (= the other end of an inner segment).
 fn findOtherInnerSegmentNode(graph: *const Graph, v: []const u8) ?[]const u8 {
     const node = graph.getNode(v) orelse return null;
-    if (!node.dummy) return null;
+    if (!isInnerSegmentDummy(node)) return null;
 
     const in_edges = graph.inEdges(v) orelse return null;
     for (in_edges) |ek| {
         if (graph.getNode(ek.v)) |pred_node| {
-            if (pred_node.dummy) return ek.v;
+            if (isInnerSegmentDummy(pred_node)) return ek.v;
         }
     }
     return null;
@@ -491,12 +491,8 @@ fn findType2Conflicts(
         var south_pos: usize = 0;
 
         for (south, 0..) |v, south_lookahead| {
-            // Check if v is a border dummy node.
-            // In the current model, border dummies are identified by checking
-            // whether any subgraph's border_left/border_right lists contain this node.
-            // For now we use a heuristic: a dummy node whose id starts with "_border".
             const v_node = graph.getNode(v) orelse continue;
-            const v_is_border = v_node.dummy and isBorderNode(v);
+            const v_is_border = isBorderDummy(v_node);
 
             if (v_is_border) {
                 // Find predecessor in north layer
@@ -551,9 +547,12 @@ fn findType2Conflicts(
     return conflicts;
 }
 
-/// Check if a node id looks like a border node (used by compound graph support).
-fn isBorderNode(id: []const u8) bool {
-    return std.mem.startsWith(u8, id, "_border");
+fn isBorderDummy(node: NodeData) bool {
+    return node.dummy and node.dummy_kind != null and node.dummy_kind.? == .border and node.border_kind != null;
+}
+
+fn isInnerSegmentDummy(node: NodeData) bool {
+    return node.dummy and (node.dummy_kind == null or node.dummy_kind.? != .border);
 }
 
 // ============================================================================
@@ -1310,10 +1309,7 @@ test "bk: merge conflicts combines both maps" {
     try testing.expect(a_cs.has("c", "d"));
 }
 
-test "bk: type-2 conflict detection runs without crash" {
-    // Type-2 conflicts apply to border dummy nodes. Since the current
-    // codebase doesn't create border dummies, this just verifies
-    // the function doesn't crash on a simple graph.
+test "bk: type-2 conflict detection ignores graphs without border metadata" {
     var graph = Graph.init(testing.allocator);
     defer graph.deinit();
 
@@ -1331,6 +1327,26 @@ test "bk: type-2 conflict detection runs without crash" {
 
     // No border nodes, so no type-2 conflicts expected
     try testing.expect(!conflicts.has("a", "b"));
+}
+
+test "bk: explicit border metadata identifies border dummies" {
+    try testing.expect(isBorderDummy(.{
+        .dummy = true,
+        .dummy_kind = .border,
+        .border_kind = .left,
+    }));
+    try testing.expect(!isBorderDummy(.{
+        .dummy = true,
+        .dummy_kind = .edge,
+    }));
+    try testing.expect(!isBorderDummy(.{
+        .dummy = true,
+    }));
+    try testing.expect(!isBorderDummy(.{
+        .dummy = false,
+        .dummy_kind = .border,
+        .border_kind = .right,
+    }));
 }
 
 test "bk: vertical alignment with single-neighbor median" {
@@ -1763,9 +1779,12 @@ test "bk: single-layer layering has no conflicts" {
     try testing.expect(!conflicts.has("a", "b"));
 }
 
-test "bk: isBorderNode recognizes _border prefix" {
-    try testing.expect(isBorderNode("_border_left_0"));
-    try testing.expect(isBorderNode("_borderRight1"));
-    try testing.expect(!isBorderNode("normal_node"));
-    try testing.expect(!isBorderNode("border")); // no underscore prefix
+test "bk: edge dummies remain inner-segment eligible" {
+    try testing.expect(isInnerSegmentDummy(.{ .dummy = true }));
+    try testing.expect(isInnerSegmentDummy(.{ .dummy = true, .dummy_kind = .edge }));
+    try testing.expect(!isInnerSegmentDummy(.{
+        .dummy = true,
+        .dummy_kind = .border,
+        .border_kind = .top,
+    }));
 }

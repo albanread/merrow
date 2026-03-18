@@ -82,6 +82,83 @@ test "subgraph parsing" {
     try std.testing.expect(graph.getParent("C") == null);
 }
 
+test "quoted subgraph title without explicit id parses" {
+    const source =
+        \\graph TB
+        \\
+        \\    subgraph "LexisCreate+ US Services"
+        \\        US[LexisCreate+ US]
+        \\    end
+        \\
+        \\    subgraph "AWS Sonnet Models – On-Demand"
+        \\        direction LR
+        \\        USEAST1[Virginia]
+        \\        USWEST2[Oregon]
+        \\    end
+        \\
+        \\    US --> USEAST1
+        \\    US --> USWEST2
+    ;
+    var parser = try Parser.init(std.testing.allocator, source);
+    defer parser.deinit();
+
+    var graph = try parser.parse();
+    defer graph.deinitDeep();
+
+    try std.testing.expect(graph.hasNode("LexisCreate+ US Services"));
+    try std.testing.expect(graph.hasNode("AWS Sonnet Models – On-Demand"));
+    try std.testing.expect(graph.hasNode("US"));
+    try std.testing.expect(graph.hasNode("USEAST1"));
+    try std.testing.expect(graph.hasNode("USWEST2"));
+
+    try std.testing.expectEqualStrings("LexisCreate+ US Services", graph.getParent("US").?);
+    try std.testing.expectEqualStrings("AWS Sonnet Models – On-Demand", graph.getParent("USEAST1").?);
+    try std.testing.expectEqualStrings("AWS Sonnet Models – On-Demand", graph.getParent("USWEST2").?);
+    try std.testing.expect(!graph.hasNode("direction"));
+    try std.testing.expect(graph.edge("US", "USEAST1", null) != null);
+    try std.testing.expect(graph.edge("US", "USWEST2", null) != null);
+}
+
+test "top-level direction statement updates rankdir" {
+    const source =
+        \\graph TD
+        \\  direction LR
+        \\  A --> B
+    ;
+    var parser = try Parser.init(std.testing.allocator, source);
+    defer parser.deinit();
+
+    var graph = try parser.parse();
+    defer graph.deinitDeep();
+
+    try std.testing.expectEqualStrings("LR", graph.getGraphLabel().rankdir);
+    try std.testing.expect(!graph.hasNode("direction"));
+    try std.testing.expect(graph.hasNode("A"));
+    try std.testing.expect(graph.hasNode("B"));
+}
+
+test "subgraph direction statement is not parsed as node" {
+    const source =
+        \\graph TB
+        \\  subgraph SG
+        \\    direction LR
+        \\    A --> B
+        \\  end
+    ;
+    var parser = try Parser.init(std.testing.allocator, source);
+    defer parser.deinit();
+
+    var graph = try parser.parse();
+    defer graph.deinitDeep();
+
+    try std.testing.expect(graph.hasNode("SG"));
+    try std.testing.expect(graph.hasNode("A"));
+    try std.testing.expect(graph.hasNode("B"));
+    try std.testing.expect(!graph.hasNode("direction"));
+    try std.testing.expectEqualStrings("SG", graph.getParent("A").?);
+    try std.testing.expectEqualStrings("SG", graph.getParent("B").?);
+}
+
 // ---------------------------------------------------------------------------
 // Style class tests
 // ---------------------------------------------------------------------------

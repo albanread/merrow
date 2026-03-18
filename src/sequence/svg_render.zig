@@ -183,7 +183,7 @@ pub fn renderToSVGString(
     try drawMessages(allocator, &svg, diag, layout_config, render_config);
 
     // 6. Notes
-    try drawNotes(&svg, diag, render_config);
+    try drawNotes(allocator, &svg, diag, layout_config, render_config);
 
     // 7. Participant boxes (header + footer)
     try drawParticipantBoxes(allocator, &svg, diag, layout_result, layout_config, render_config);
@@ -230,6 +230,11 @@ fn drawFragments(
 
     for (diag.fragments.items) |frag| {
         // Main fragment box.
+        const fragment_fill = if (frag.kind == .rect_block and frag.bg_color != null)
+            frag.bg_color.?
+        else
+            config.fragment_fill;
+
         try svg.rect(
             frag.x,
             frag.y,
@@ -237,7 +242,7 @@ fn drawFragments(
             frag.height,
             3.0,
             3.0,
-            config.fragment_fill,
+            fragment_fill,
             config.fragment_stroke,
             config.fragment_stroke_width,
         );
@@ -590,8 +595,10 @@ fn drawCross(
 // -----------------------------------------------------------------------
 
 fn drawNotes(
+    allocator: Allocator,
     svg: *SvgWriter,
     diag: *const SequenceDiagram,
+    layout_config: LayoutConfig,
     config: SeqRenderConfig,
 ) !void {
     if (diag.notes.items.len == 0) return;
@@ -651,27 +658,101 @@ fn drawNotes(
 
         // Note text.
         if (note.text) |text| {
-            // Strip <br/> tags and show as single line for now.
-            const clean = stripBrTags(text);
-            try svg.textCentered(
-                note_x + note_w / 2.0,
-                note_y + note_h / 2.0,
-                clean,
-                config.note_font_size,
-                config.note_text_color,
-                config.font_family,
-            );
+            var wrapped = try wrapExplicitLines(allocator, text);
+            defer wrapped.deinit();
+
+            if (wrapped.lines.len <= 1) {
+                const single_line = if (wrapped.lines.len == 1) wrapped.lines[0] else "";
+                try svg.textCentered(
+                    note_x + note_w / 2.0,
+                    note_y + note_h / 2.0,
+                    single_line,
+                    config.note_font_size,
+                    config.note_text_color,
+                    config.font_family,
+                );
+            } else {
+                try svg.textWrapped(
+                    note_x + note_w / 2.0,
+                    note_y + note_h / 2.0,
+                    wrapped.lines,
+                    config.note_font_size,
+                    layout_config.note_line_height,
+                    config.note_text_color,
+                    config.font_family,
+                );
+            }
         }
     }
 
     try svg.closeGroup();
 }
 
-/// Strip `<br/>` tags from text, replacing them with spaces.
-/// Currently returns the text as-is — a future improvement would
-/// split on `<br/>` and use `<tspan>` elements for multi-line notes.
-fn stripBrTags(text: []const u8) []const u8 {
-    return text;
+const WrappedNoteLines = struct {
+    allocator: Allocator,
+    normalized: []u8,
+    lines: [][]const u8,
+
+    fn deinit(self: *WrappedNoteLines) void {
+        self.allocator.free(self.lines);
+        self.allocator.free(self.normalized);
+    }
+};
+
+fn wrapExplicitLines(allocator: Allocator, text: []const u8) !WrappedNoteLines {
+    const normalized = try normalizeNoteText(allocator, text);
+
+    var line_count: usize = 1;
+    for (normalized) |ch| {
+        if (ch == '\n') line_count += 1;
+    }
+
+    var lines = try allocator.alloc([]const u8, line_count);
+    var line_start: usize = 0;
+    var line_index: usize = 0;
+
+    for (normalized, 0..) |ch, idx| {
+        if (ch != '\n') continue;
+        lines[line_index] = normalized[line_start..idx];
+        line_index += 1;
+        line_start = idx + 1;
+    }
+    lines[line_index] = normalized[line_start..normalized.len];
+
+    return .{
+        .allocator = allocator,
+        .normalized = normalized,
+        .lines = lines,
+    };
+}
+
+fn normalizeNoteText(allocator: Allocator, text: []const u8) ![]u8 {
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < text.len) {
+        if (matchesBreakTag(text, i)) |tag_len| {
+            try buffer.append(allocator, '\n');
+            i += tag_len;
+            continue;
+        }
+
+        try buffer.append(allocator, text[i]);
+        i += 1;
+    }
+
+    return buffer.toOwnedSlice(allocator);
+}
+
+fn matchesBreakTag(text: []const u8, start: usize) ?usize {
+    const tags = [_][]const u8{ "<br/>", "<br />", "<br>" };
+    for (tags) |tag| {
+        if (start + tag.len <= text.len and std.ascii.eqlIgnoreCase(text[start .. start + tag.len], tag)) {
+            return tag.len;
+        }
+    }
+    return null;
 }
 
 // -----------------------------------------------------------------------
@@ -903,6 +984,46 @@ test "svg_seq_render: title renders" {
 
     try testing.expect(std.mem.indexOf(u8, svg_data, "class=\"title\"") != null);
     try testing.expect(std.mem.indexOf(u8, svg_data, "My Diagram") != null);
+}
+
+test "svg_seq_render: rect fragment uses custom background color" {
+    var diag = SequenceDiagram.init(testing.allocator);
+    defer diag.deinit();
+
+    _ = try diag.ensureParticipant("A");
+    _ = try diag.ensureParticipant("B");
+    _ = try diag.addMessage(.{ .from = 0, .to = 1, .text = "inside" });
+
+    var frag = Fragment{ .kind = .rect_block, .bg_color = .{ 230, 245, 255, 128 } };
+    try frag.sections.append(testing.allocator, .{ .label = "Custom rect", .start_event = 0, .end_event = 0 });
+    frag.start_event = 0;
+    frag.end_event = 0;
+    frag.left_participant = 0;
+    frag.right_participant = 1;
+    try diag.fragments.append(testing.allocator, frag);
+
+    const lr = seq_layout.layout(&diag, .{});
+    const svg_data = try renderToSVGString(testing.allocator, &diag, lr, .{}, .{});
+    defer testing.allocator.free(svg_data);
+
+    try testing.expect(std.mem.indexOf(u8, svg_data, "rgb(230,245,255)") != null);
+    try testing.expect(std.mem.indexOf(u8, svg_data, "fill-opacity=\"0.50\"") != null);
+}
+
+test "svg_seq_render: multiline note emits tspans" {
+    var diag = SequenceDiagram.init(testing.allocator);
+    defer diag.deinit();
+
+    _ = try diag.ensureParticipant("A");
+    _ = try diag.addNote(.{ .position = .right_of, .participant1 = 0, .participant2 = 0, .text = "Line one<br/>Line two" });
+
+    const lr = seq_layout.layout(&diag, .{});
+    const svg_data = try renderToSVGString(testing.allocator, &diag, lr, .{}, .{});
+    defer testing.allocator.free(svg_data);
+
+    try testing.expect(std.mem.indexOf(u8, svg_data, "<tspan") != null);
+    try testing.expect(std.mem.indexOf(u8, svg_data, "Line one") != null);
+    try testing.expect(std.mem.indexOf(u8, svg_data, "Line two") != null);
 }
 
 test "svg_seq_render: dashed arrow" {

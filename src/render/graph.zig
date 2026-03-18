@@ -136,15 +136,27 @@ fn resolveLabelsForceDirected(
                 const depth = overlapDepth(labels[i], labels[j]);
                 if (depth.x <= 0 or depth.y <= 0) continue;
 
-                // Push apart along the axis of minimum penetration so the
-                // labels separate with the smallest movement.
                 var push_x: f64 = 0;
                 var push_y: f64 = 0;
-                if (depth.x < depth.y) {
-                    // Separate along X
+
+                const avg_tan_x_raw = labels[i].tangent_x + labels[j].tangent_x;
+                const avg_tan_y_raw = labels[i].tangent_y + labels[j].tangent_y;
+                const avg_tan_len = @sqrt(avg_tan_x_raw * avg_tan_x_raw + avg_tan_y_raw * avg_tan_y_raw);
+
+                if (avg_tan_len > 0.001) {
+                    const avg_tan_x = avg_tan_x_raw / avg_tan_len;
+                    const avg_tan_y = avg_tan_y_raw / avg_tan_len;
+
+                    if (@abs(avg_tan_x) >= @abs(avg_tan_y)) {
+                        const dir: f64 = if (labels[i].x <= labels[j].x) -1.0 else 1.0;
+                        push_x = dir * depth.x;
+                    } else {
+                        const dir: f64 = if (labels[i].y <= labels[j].y) -1.0 else 1.0;
+                        push_y = dir * depth.y;
+                    }
+                } else if (depth.x < depth.y) {
                     push_x = if (labels[i].x < labels[j].x) -depth.x else depth.x;
                 } else {
-                    // Separate along Y
                     push_y = if (labels[i].y < labels[j].y) -depth.y else depth.y;
                 }
 
@@ -207,6 +219,68 @@ fn resolveLabelsForceDirected(
         // --- Decay step size ------------------------------------------
         step *= damping;
     }
+
+    if (node_rects.len == 0) return;
+
+    var min_x = node_rects[0].cx - node_rects[0].hw;
+    var max_x = node_rects[0].cx + node_rects[0].hw;
+    for (node_rects[1..]) |nr| {
+        min_x = @min(min_x, nr.cx - nr.hw);
+        max_x = @max(max_x, nr.cx + nr.hw);
+    }
+
+    for (labels) |*lbl| {
+        lbl.x = std.math.clamp(lbl.x, min_x + lbl.half_w, max_x - lbl.half_w);
+    }
+
+    applyHorizontalNodeClearance(labels, node_rects, min_x, max_x);
+}
+
+fn applyHorizontalNodeClearance(
+    labels: []LabelPlacement,
+    node_rects: []const NodeRect,
+    min_x: f64,
+    max_x: f64,
+) void {
+    const clearance: f64 = 10.0;
+
+    var pass: usize = 0;
+    while (pass < 6) : (pass += 1) {
+        var moved = false;
+
+        for (labels) |*lbl| {
+            for (node_rects) |nr| {
+                const vertical_gap = @abs(lbl.y - nr.cy) - (lbl.half_h + nr.hh);
+                if (vertical_gap > 6.0) continue;
+
+                const node_left = nr.cx - nr.hw;
+                const node_right = nr.cx + nr.hw;
+                const label_left = lbl.x - lbl.half_w;
+                const label_right = lbl.x + lbl.half_w;
+
+                const target_left_x = node_left - clearance - lbl.half_w;
+                const target_right_x = node_right + clearance + lbl.half_w;
+
+                const overlaps_horizontally = label_right > node_left and label_left < node_right;
+                const too_close_left = label_right <= node_left and (node_left - label_right) < clearance;
+                const too_close_right = label_left >= node_right and (label_left - node_right) < clearance;
+
+                if (overlaps_horizontally or too_close_left or too_close_right) {
+                    const dist_left = @abs(lbl.orig_x - target_left_x);
+                    const dist_right = @abs(lbl.orig_x - target_right_x);
+                    const target_x = if (dist_left <= dist_right) target_left_x else target_right_x;
+                    const clamped_x = std.math.clamp(target_x, min_x + lbl.half_w, max_x - lbl.half_w);
+
+                    if (@abs(clamped_x - lbl.x) > 0.1) {
+                        lbl.x = clamped_x;
+                        moved = true;
+                    }
+                }
+            }
+        }
+
+        if (!moved) break;
+    }
 }
 
 /// Build the node-rect list and run the force-directed solver.
@@ -238,6 +312,7 @@ pub fn resolveLabelPlacements(
     for (node_ids) |id| {
         const node = graph.getNode(id) orelse continue;
         if (node.dummy) continue;
+        if (node.is_subgraph) continue;
         try rects.append(allocator, .{
             .cx = node.x + offset_x,
             .cy = node.y + offset_y,
@@ -1469,7 +1544,7 @@ fn drawNodes(
                 // Use the node's inner width (minus padding) as the max
                 // text width for wrapping.  For non-rectangular shapes the
                 // usable area is smaller, so we shrink further.
-                const inner_pad: f64 = 16.0; // left+right padding inside node
+                const inner_pad: f64 = 28.0; // left+right padding inside node
                 const shape_shrink: f64 = switch (node.shape) {
                     .diamond => 0.55,
                     .hexagon => 0.65,
@@ -1726,12 +1801,18 @@ fn drawEdges(
         }
 
         // -----------------------------------------------------------------
-        // Tessellate waypoints into a smooth spline (for 3+ waypoints)
-        // or keep the straight segment (for 2 waypoints).
-        // Subdivision count is chosen adaptively per span based on curvature.
+        // Preserve explicit routed waypoints as-is. Smoothing them back
+        // into Catmull-Rom splines can bow valid obstacle routes into
+        // container boxes again.
         // -----------------------------------------------------------------
-        var smooth = try tessellateSpline(allocator, waypoints.items);
+        const has_explicit_route = if (edge_data) |ed| ed.points.items.len >= 2 else false;
+        var smooth = std.ArrayListUnmanaged(Vec2){};
         defer smooth.deinit(allocator);
+        if (has_explicit_route) {
+            try smooth.appendSlice(allocator, waypoints.items);
+        } else {
+            smooth = try tessellateSpline(allocator, waypoints.items);
+        }
 
         // -----------------------------------------------------------------
         // Save arrowhead anchor points before shortening the polyline

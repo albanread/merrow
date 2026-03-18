@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="330" viewBox="0 0 380 330">
+  <style>
+    text { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; }
+    .edge-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <rect width="100%" height="100%" fill="white"/>
+  <g class="lifelines">
+    <line x1="90.0" y1="70.0" x2="90.0" y2="260.0" fill="none" stroke="rgb(140,140,140)" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <line x1="290.0" y1="70.0" x2="290.0" y2="260.0" fill="none" stroke="rgb(140,140,140)" stroke-width="1.5" stroke-dasharray="6,4"/>
+  </g>
+  <g class="messages">
+    <line x1="90.0" y1="90.0" x2="290.0" y2="90.0" fill="none" stroke="rgb(60,60,60)" stroke-width="1.5"/>
+    <polygon points="290.0,90.0 282.0,93.6 282.0,86.4" fill="rgb(60,60,60)" stroke-width="0.0"/>
+    <text x="190.0" y="82.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(40,40,40)">Hello Bob</text>
+    <line x1="290.0" y1="140.0" x2="90.0" y2="140.0" fill="none" stroke="rgb(60,60,60)" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <polygon points="90.0,140.0 98.0,136.4 98.0,143.6" fill="rgb(60,60,60)" stroke-width="0.0"/>
+    <text x="190.0" y="132.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(40,40,40)">Hi Alice</text>
+    <line x1="90.0" y1="190.0" x2="290.0" y2="190.0" fill="none" stroke="rgb(60,60,60)" stroke-width="1.5"/>
+    <polygon points="290.0,190.0 282.0,193.6 282.0,186.4" fill="rgb(60,60,60)" stroke-width="0.0"/>
+    <text x="190.0" y="182.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(40,40,40)">How are you?</text>
+    <line x1="290.0" y1="240.0" x2="90.0" y2="240.0" fill="none" stroke="rgb(60,60,60)" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <polygon points="90.0,240.0 98.0,236.4 98.0,243.6" fill="rgb(60,60,60)" stroke-width="0.0"/>
+    <text x="190.0" y="232.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="13.0" fill="rgb(40,40,40)">I&#39;m good thanks!</text>
+  </g>
+  <g class="participants">
+    <rect x="40.0" y="30.0" width="100.0" height="40.0" rx="5.0" ry="5.0" fill="rgb(173,216,230)" stroke="rgb(70,130,180)" stroke-width="2.0"/>
+    <text x="90.0" y="50.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(30,30,30)">Alice</text>
+    <rect x="40.0" y="260.0" width="100.0" height="40.0" rx="5.0" ry="5.0" fill="rgb(173,216,230)" stroke="rgb(70,130,180)" stroke-width="2.0"/>
+    <text x="90.0" y="280.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(30,30,30)">Alice</text>
+    <rect x="240.0" y="30.0" width="100.0" height="40.0" rx="5.0" ry="5.0" fill="rgb(173,216,230)" stroke="rgb(70,130,180)" stroke-width="2.0"/>
+    <text x="290.0" y="50.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(30,30,30)">Bob</text>
+    <rect x="240.0" y="260.0" width="100.0" height="40.0" rx="5.0" ry="5.0" fill="rgb(173,216,230)" stroke="rgb(70,130,180)" stroke-width="2.0"/>
+    <text x="290.0" y="280.0" text-anchor="middle" dominant-baseline="central" font-family="Lato, 'Helvetica Neue', Arial, sans-serif" font-size="14.0" fill="rgb(30,30,30)">Bob</text>
+  </g>
+</svg>

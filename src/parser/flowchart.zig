@@ -440,11 +440,35 @@ pub const Parser = struct {
         } else if (self.curr.type == .keyword_click) {
             try self.parseClick();
         } else if (self.curr.type == .identifier) {
-            try self.parseNodeStatement();
+            if (std.mem.eql(u8, self.curr.text, "direction")) {
+                try self.parseDirectionDirective();
+            } else {
+                try self.parseNodeStatement();
+            }
         } else {
             // Skip unknown or error
             self.advance();
         }
+    }
+
+    fn parseDirectionDirective(self: *Parser) !void {
+        self.advance(); // consume 'direction'
+
+        if (self.curr.type == .whitespace) self.advance();
+
+        if (self.isDirection(self.curr.type)) {
+            // Mermaid supports `direction LR` inside subgraphs, but merrow
+            // currently has only one graph-level rankdir. For now, honour the
+            // directive only at the top level and otherwise treat it as a
+            // recognized no-op instead of accidentally creating a node.
+            if (self.current_subgraph == null) {
+                var gd = self.graph.getGraphLabel();
+                gd.rankdir = self.curr.text;
+            }
+            self.advance();
+        }
+
+        self.skipToEndOfLine();
     }
 
     fn parseSubgraph(self: *Parser) !void {
@@ -452,34 +476,50 @@ pub const Parser = struct {
 
         if (self.curr.type == .whitespace) self.advance();
 
-        const id_token = try self.expect(.identifier);
-        const subgraph_id = id_token.text;
-
-        // Skip optional whitespace between ID and title bracket
-        if (self.curr.type == .whitespace) self.advance();
-
-        // Parse optional [Title] for the subgraph display label
+        var subgraph_id: []const u8 = undefined;
         var title: ?[]const u8 = null;
         var title_owned: bool = false;
-        if (self.curr.type == .l_bracket) {
-            self.advance(); // consume '['
 
-            var title_buf = std.ArrayListUnmanaged(u8){};
-            defer title_buf.deinit(self.allocator);
-
-            while (self.curr.type != .r_bracket and self.curr.type != .eof and self.curr.type != .newline) {
-                try title_buf.appendSlice(self.allocator, self.curr.text);
+        switch (self.curr.type) {
+            .identifier => {
+                subgraph_id = self.curr.text;
                 self.advance();
-            }
 
-            if (self.curr.type == .r_bracket) {
-                self.advance(); // consume ']'
-            }
+                // Skip optional whitespace between ID and title bracket.
+                if (self.curr.type == .whitespace) self.advance();
 
-            if (title_buf.items.len > 0) {
-                title = try self.allocator.dupe(u8, title_buf.items);
-                title_owned = true;
-            }
+                // Parse optional [Title] for the subgraph display label.
+                if (self.curr.type == .l_bracket) {
+                    self.advance(); // consume '['
+
+                    var title_buf = std.ArrayListUnmanaged(u8){};
+                    defer title_buf.deinit(self.allocator);
+
+                    while (self.curr.type != .r_bracket and self.curr.type != .eof and self.curr.type != .newline) {
+                        try title_buf.appendSlice(self.allocator, self.curr.text);
+                        self.advance();
+                    }
+
+                    if (self.curr.type == .r_bracket) {
+                        self.advance(); // consume ']'
+                    }
+
+                    if (title_buf.items.len > 0) {
+                        title = try self.allocator.dupe(u8, title_buf.items);
+                        title_owned = true;
+                    }
+                }
+            },
+            .string_literal => {
+                // Mermaid accepts title-only subgraph declarations like:
+                //   subgraph "LexisCreate+ US Services"
+                // In that form, use the quoted title as both the display title
+                // and the internal subgraph id.
+                subgraph_id = self.curr.text;
+                title = self.curr.text;
+                self.advance();
+            },
+            else => return ParserError.UnexpectedToken,
         }
 
         // If setNode or setParent fails below, free the duped title so it

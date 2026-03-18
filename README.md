@@ -2,7 +2,9 @@
 
 > ⚠️ **DO NOT USE (YET)**
 
-Under development: A fast, self-contained Mermaid diagram renderer.
+Under development: A fast, self-contained Mermaid diagram renderer, with freeform editing for export.
+
+e.g. those merm
 
 Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). 
 
@@ -247,6 +249,10 @@ Selkie's architecture, layout engine, and rendering approach served as the prima
 Huge thanks to the Selkie team for sharing their excellent work.
 
 Selkie has a wider and more comprehensive scope than merrow, Merrow is mainly interested in creating small diagrams for documents.
+
+Honestly we would have got nowhere fast without Selkie.
+Our flow charts were terrible.
+
 
 Both projects stand on the shoulders of these foundational efforts:
 

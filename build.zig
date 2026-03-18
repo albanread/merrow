@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const target_query = target.result;
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -96,6 +97,43 @@ pub fn build(b: *std.Build) void {
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
+
+    if (target_query.os.tag == .macos) {
+        const macos_app_exe = b.addExecutable(.{
+            .name = "merrow-studio",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("app/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "merrow", .module = mod },
+                },
+            }),
+        });
+        macos_app_exe.addCSourceFile(.{
+            .file = b.path("app/platform/macos_app.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        macos_app_exe.addCSourceFile(.{
+            .file = b.path("app/platform/merrow_freeform_canvas.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        macos_app_exe.linkLibC();
+        macos_app_exe.linkFramework("AppKit");
+        macos_app_exe.linkFramework("Foundation");
+        macos_app_exe.linkFramework("Metal");
+        macos_app_exe.linkFramework("MetalKit");
+        macos_app_exe.linkFramework("QuartzCore");
+        b.installArtifact(macos_app_exe);
+
+        const macos_app_step = b.step("studio", "Run the macOS Mermaid viewer/editor scaffold");
+        const macos_app_cmd = b.addRunArtifact(macos_app_exe);
+        macos_app_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            macos_app_cmd.addArgs(args);
+        }
+        macos_app_step.dependOn(&macos_app_cmd.step);
+    }
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
@@ -225,12 +263,29 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    const preview_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("app/preview.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "merrow", .module = mod },
+            },
+        }),
+        .filters = &.{"editable graph conversion"},
+    });
+
+    const run_preview_tests = b.addRunArtifact(preview_tests);
+    const preview_test_step = b.step("preview-test", "Run filtered preview freeform conversion tests");
+    preview_test_step.dependOn(&run_preview_tests.step);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_preview_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

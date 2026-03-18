@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const seq_model = @import("model.zig");
+const flowchart = @import("../parser/flowchart.zig");
 
 const SequenceDiagram = seq_model.SequenceDiagram;
 const Participant = seq_model.Participant;
@@ -369,14 +370,24 @@ pub const Parser = struct {
 
     fn parseFragmentStart(self: *Parser, kind: FragmentKind) !void {
         self.skipInlineWhitespace();
-        const label = self.readRestOfLine();
+        const raw = self.readRestOfLine();
+
+        var label: ?[]const u8 = if (raw.len > 0) raw else null;
+        var bg_color: ?[4]u8 = null;
+
+        if (kind == .rect_block and raw.len > 0) {
+            const parsed = parseRectColorPrefix(raw);
+            bg_color = parsed.color;
+            label = if (parsed.label.len > 0) parsed.label else null;
+        }
 
         const frag_idx = self.diagram.fragments.items.len;
         var frag = Fragment{ .kind = kind };
+        frag.bg_color = bg_color;
 
         // First section.
         try frag.sections.append(self.allocator, .{
-            .label = if (label.len > 0) label else null,
+            .label = label,
             .start_event = self.diagram.events.items.len,
         });
 
@@ -443,7 +454,8 @@ pub const Parser = struct {
         // event range to find left/right-most participants.
         var left: usize = self.diagram.participants.items.len;
         var right: usize = 0;
-        for (self.diagram.events.items) |ev| {
+        const range_end = @min(frag.end_event + 1, self.diagram.events.items.len);
+        for (self.diagram.events.items[frag.start_event..range_end]) |ev| {
             switch (ev.kind) {
                 .message => {
                     if (ev.index < self.diagram.messages.items.len) {
@@ -719,6 +731,168 @@ fn isIdentChar(c: u8) bool {
         c == '_';
 }
 
+const RectColorPrefix = struct {
+    color: ?[4]u8,
+    label: []const u8,
+};
+
+fn parseRectColorPrefix(raw: []const u8) RectColorPrefix {
+    const text = trimAsciiWhitespace(raw);
+    if (text.len == 0) return .{ .color = null, .label = "" };
+
+    if (parseFunctionColorPrefix(text)) |parsed| {
+        return parsed;
+    }
+
+    const token_end = firstWhitespace(text) orelse text.len;
+    const token = text[0..token_end];
+    if (parseSequenceColor(token)) |color| {
+        const label = trimAsciiWhitespace(text[token_end..]);
+        return .{ .color = color, .label = label };
+    }
+
+    return .{ .color = null, .label = text };
+}
+
+fn parseFunctionColorPrefix(text: []const u8) ?RectColorPrefix {
+    if (!(std.mem.startsWith(u8, text, "rgb(") or std.mem.startsWith(u8, text, "rgba(") or
+        std.mem.startsWith(u8, text, "RGB(") or std.mem.startsWith(u8, text, "RGBA(")))
+    {
+        return null;
+    }
+
+    const close_idx = std.mem.indexOfScalar(u8, text, ')') orelse return null;
+    const token = text[0 .. close_idx + 1];
+    const color = parseSequenceColor(token) orelse return null;
+    const label = trimAsciiWhitespace(text[close_idx + 1 ..]);
+    return .{ .color = color, .label = label };
+}
+
+fn parseSequenceColor(raw: []const u8) ?[4]u8 {
+    const text = trimAsciiWhitespace(raw);
+    if (text.len == 0) return null;
+
+    if (parseRgbFunction(text)) |color| return color;
+    if (flowchart.parseHexColor(text)) |color| return color;
+
+    return null;
+}
+
+fn parseRgbFunction(raw: []const u8) ?[4]u8 {
+    const text = trimAsciiWhitespace(raw);
+    if (text.len < 5) return null;
+
+    if (startsWithNoCase(text, "rgb(") and text[text.len - 1] == ')') {
+        const inner = text[4 .. text.len - 1];
+        const parts = splitComma3(inner) orelse return null;
+        return .{
+            parseRgbByte(parts[0]) orelse return null,
+            parseRgbByte(parts[1]) orelse return null,
+            parseRgbByte(parts[2]) orelse return null,
+            255,
+        };
+    }
+
+    if (startsWithNoCase(text, "rgba(") and text[text.len - 1] == ')') {
+        const parts = splitComma4(text[5 .. text.len - 1]) orelse return null;
+        return .{
+            parseRgbByte(parts[0]) orelse return null,
+            parseRgbByte(parts[1]) orelse return null,
+            parseRgbByte(parts[2]) orelse return null,
+            parseAlpha(parts[3]) orelse return null,
+        };
+    }
+
+    return null;
+}
+
+fn splitComma3(text: []const u8) ?[3][]const u8 {
+    var parts: [3][]const u8 = undefined;
+    var start: usize = 0;
+    var count: usize = 0;
+
+    var i: usize = 0;
+    while (i <= text.len) : (i += 1) {
+        if (i == text.len or text[i] == ',') {
+            if (count >= 3) return null;
+            parts[count] = trimAsciiWhitespace(text[start..i]);
+            count += 1;
+            start = i + 1;
+        }
+    }
+
+    if (count != 3) return null;
+    return parts;
+}
+
+fn splitComma4(text: []const u8) ?[4][]const u8 {
+    var parts: [4][]const u8 = undefined;
+    var start: usize = 0;
+    var count: usize = 0;
+
+    var i: usize = 0;
+    while (i <= text.len) : (i += 1) {
+        if (i == text.len or text[i] == ',') {
+            if (count >= 4) return null;
+            parts[count] = trimAsciiWhitespace(text[start..i]);
+            count += 1;
+            start = i + 1;
+        }
+    }
+
+    if (count != 4) return null;
+    return parts;
+}
+
+fn parseRgbByte(text: []const u8) ?u8 {
+    const value = std.fmt.parseInt(u16, trimAsciiWhitespace(text), 10) catch return null;
+    if (value > 255) return null;
+    return @intCast(value);
+}
+
+fn parseAlpha(text: []const u8) ?u8 {
+    const trimmed = trimAsciiWhitespace(text);
+    if (trimmed.len == 0) return null;
+
+    if (std.mem.indexOfScalar(u8, trimmed, '.')) |_| {
+        const value = std.fmt.parseFloat(f64, trimmed) catch return null;
+        if (value < 0.0 or value > 1.0) return null;
+        return @intFromFloat(@round(value * 255.0));
+    }
+
+    const int_value = std.fmt.parseInt(u16, trimmed, 10) catch return null;
+    if (int_value <= 1) {
+        return @intFromFloat(@round(@as(f64, @floatFromInt(int_value)) * 255.0));
+    }
+    if (int_value > 255) return null;
+    return @intCast(int_value);
+}
+
+fn trimAsciiWhitespace(text: []const u8) []const u8 {
+    var start: usize = 0;
+    var end: usize = text.len;
+
+    while (start < end and std.ascii.isWhitespace(text[start])) : (start += 1) {}
+    while (end > start and std.ascii.isWhitespace(text[end - 1])) : (end -= 1) {}
+
+    return text[start..end];
+}
+
+fn firstWhitespace(text: []const u8) ?usize {
+    for (text, 0..) |ch, idx| {
+        if (std.ascii.isWhitespace(ch)) return idx;
+    }
+    return null;
+}
+
+fn startsWithNoCase(text: []const u8, prefix: []const u8) bool {
+    if (prefix.len > text.len) return false;
+    for (prefix, 0..) |ch, idx| {
+        if (std.ascii.toLower(text[idx]) != std.ascii.toLower(ch)) return false;
+    }
+    return true;
+}
+
 // =======================================================================
 // Tests
 // =======================================================================
@@ -937,6 +1111,67 @@ test "parser: par/and fragment" {
     try testing.expectEqual(@as(usize, 1), diag.fragments.items.len);
     try testing.expectEqual(FragmentKind.par_block, diag.fragments.items[0].kind);
     try testing.expectEqual(@as(usize, 2), diag.fragments.items[0].sections.items.len);
+}
+
+test "parser: fragment participant span uses enclosed events only" {
+    const src =
+        \\sequenceDiagram
+        \\    participant A
+        \\    participant B
+        \\    participant C
+        \\    C->>C: Outside before
+        \\    alt Scoped branch
+        \\        A->>B: Inside fragment
+        \\    end
+        \\    C->>C: Outside after
+    ;
+    var parser = Parser.init(testing.allocator, src);
+    var diag = try parser.parse();
+    defer diag.deinit();
+
+    try testing.expectEqual(@as(usize, 1), diag.fragments.items.len);
+    try testing.expectEqual(@as(usize, 0), diag.fragments.items[0].left_participant);
+    try testing.expectEqual(@as(usize, 1), diag.fragments.items[0].right_participant);
+}
+
+test "parser: rect fragment parses rgba color and label" {
+    const src =
+        \\sequenceDiagram
+        \\    participant A
+        \\    participant B
+        \\    rect rgba(230, 245, 255, 0.5) Highlight response window
+        \\        A->>B: Hello
+        \\    end
+    ;
+    var parser = Parser.init(testing.allocator, src);
+    var diag = try parser.parse();
+    defer diag.deinit();
+
+    try testing.expectEqual(@as(usize, 1), diag.fragments.items.len);
+    try testing.expect(diag.fragments.items[0].bg_color != null);
+    try testing.expectEqual(@as(u8, 230), diag.fragments.items[0].bg_color.?[0]);
+    try testing.expectEqual(@as(u8, 245), diag.fragments.items[0].bg_color.?[1]);
+    try testing.expectEqual(@as(u8, 255), diag.fragments.items[0].bg_color.?[2]);
+    try testing.expectEqual(@as(u8, 128), diag.fragments.items[0].bg_color.?[3]);
+    try testing.expectEqualStrings("Highlight response window", diag.fragments.items[0].sections.items[0].label.?);
+}
+
+test "parser: rect fragment parses hex color without label" {
+    const src =
+        \\sequenceDiagram
+        \\    participant A
+        \\    rect #AABBCC
+        \\        A->>A: ping
+        \\    end
+    ;
+    var parser = Parser.init(testing.allocator, src);
+    var diag = try parser.parse();
+    defer diag.deinit();
+
+    try testing.expectEqual(@as(usize, 1), diag.fragments.items.len);
+    try testing.expectEqual(FragmentKind.rect_block, diag.fragments.items[0].kind);
+    try testing.expect(diag.fragments.items[0].bg_color != null);
+    try testing.expect(diag.fragments.items[0].sections.items[0].label == null);
 }
 
 test "parser: autonumber" {

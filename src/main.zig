@@ -60,13 +60,14 @@ const GanttPngRender = merrow.gantt.png_render;
 const Graph = Digraph(NodeData, EdgeData, GraphData);
 
 /// Padding around text inside a node box.
-const node_padding_h: f64 = 24.0; // horizontal (left + right total)
+const node_padding_h: f64 = 40.0; // horizontal (left + right total)
 const node_padding_v: f64 = 16.0; // vertical  (top + bottom total)
 const min_node_width: f64 = 60.0;
 const min_node_height: f64 = 36.0;
 const font_size: f32 = 16.0;
 /// Maximum label width (logical pixels) before text wraps to the next line.
-const max_label_width: f32 = 180.0;
+const max_label_width: f32 = 220.0;
+const wrapped_text_safety_w: f64 = 12.0;
 
 const NodeSize = struct { w: f64, h: f64 };
 
@@ -102,7 +103,7 @@ fn measureNodeSize(font: *Font, label: []const u8, shape: NodeShape) NodeSize {
             applyShapeScaling(&w, &h, shape);
             return .{ .w = w, .h = h };
         };
-        text_w = @floatCast(wrapped.width);
+        text_w = @floatCast(wrapped.width + @as(f32, @floatCast(wrapped_text_safety_w)));
         text_h = @floatCast(wrapped.height);
     } else {
         text_w = @floatCast(single_line_w);
@@ -481,7 +482,7 @@ pub fn main() !void {
                                 c_top >= top - 1.0 and c_bottom <= bottom + 1.0;
                             if (!inside) all_inside = false;
                             std.debug.print("      {s}: ({d:.1}, {d:.1}) [{d:.0}x{d:.0}] {s}\n", .{
-                                clabel, child.x, child.y, child.width, child.height,
+                                clabel,                                       child.x, child.y, child.width, child.height,
                                 if (inside) "✓ inside" else "✗ OUTSIDE!",
                             });
                         }

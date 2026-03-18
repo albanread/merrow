@@ -1,0 +1,27 @@
+sequenceDiagram
+    title Sequence Feature Coverage
+    actor U as User
+    participant API as Public API
+    participant W as Worker Service
+    participant DB as Database
+
+    Note right of U: User starts the workflow<br/>from the published UI
+    U->>+API: Submit job request
+    API->>+W: Start processing
+    Note over API,W: Request and worker stay active<br/>while the job is running
+
+    alt Job can be processed
+        W->>DB: Insert pending record
+        DB-->>W: Record stored
+        loop Poll until complete
+            W->>W: Check job state
+        end
+        rect rgba(230, 245, 255, 0.5) Highlight response window
+            W-->>-API: Job completed
+        end
+        API-->>-U: Success response
+    else Validation failed
+        API-->>U: Validation error
+    end
+
+    Note left of DB: Storage note<br/>kept outside the fragment

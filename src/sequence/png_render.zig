@@ -145,7 +145,7 @@ pub fn renderToPNGFile(
     try drawMessages(allocator, &canvas, diag, layout_config, render_config, font);
 
     // 6. Notes
-    drawNotes(&canvas, diag, render_config, font);
+    try drawNotes(allocator, &canvas, diag, layout_config, render_config, font);
 
     // 7. Participant boxes (header + footer)
     drawParticipantBoxes(&canvas, diag, layout_result, layout_config, render_config, font);
@@ -190,7 +190,10 @@ fn drawFragments(
 
     for (diag.fragments.items) |frag| {
         // Main fragment box
-        const ff = config.fragment_fill;
+        const ff = if (frag.kind == .rect_block and frag.bg_color != null)
+            frag.bg_color.?
+        else
+            config.fragment_fill;
         const fs = config.fragment_stroke;
         canvas.fillRect(frag.x, frag.y, frag.width, frag.height, ff[0], ff[1], ff[2], ff[3]);
         canvas.strokeRect(frag.x, frag.y, frag.width, frag.height, config.fragment_stroke_width, fs[0], fs[1], fs[2], fs[3]);
@@ -607,11 +610,13 @@ fn drawCross(
 // -----------------------------------------------------------------------
 
 fn drawNotes(
+    allocator: Allocator,
     canvas: *Canvas,
     diag: *const SequenceDiagram,
+    layout_config: LayoutConfig,
     config: SeqPngRenderConfig,
     font: ?*Font,
-) void {
+) !void {
     if (diag.notes.items.len == 0) return;
 
     for (diag.notes.items) |note| {
@@ -666,15 +671,17 @@ fn drawNotes(
         // Note text
         if (note.text) |text| {
             if (font) |f| {
+                const normalized = try normalizeNoteText(allocator, text);
+                defer allocator.free(normalized);
+
                 const nt = config.note_text_color;
-                const tw = f.measureText(text, config.note_font_size);
-                const cx: f32 = @floatCast(note_x + note_w / 2.0);
-                f.drawText(
+                f.drawWrappedText(
                     canvas,
-                    text,
-                    cx - tw / 2.0,
+                    normalized,
+                    @floatCast(note_x + note_w / 2.0),
                     @floatCast(note_y + note_h / 2.0),
                     config.note_font_size,
+                    @floatCast(@max(1.0, note_w - layout_config.note_padding_h * 2.0)),
                     nt[0],
                     nt[1],
                     nt[2],
@@ -683,6 +690,35 @@ fn drawNotes(
             }
         }
     }
+}
+
+fn normalizeNoteText(allocator: Allocator, text: []const u8) ![]u8 {
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < text.len) {
+        if (matchesBreakTag(text, i)) |tag_len| {
+            try buffer.append(allocator, '\n');
+            i += tag_len;
+            continue;
+        }
+
+        try buffer.append(allocator, text[i]);
+        i += 1;
+    }
+
+    return buffer.toOwnedSlice(allocator);
+}
+
+fn matchesBreakTag(text: []const u8, start: usize) ?usize {
+    const tags = [_][]const u8{ "<br/>", "<br />", "<br>" };
+    for (tags) |tag| {
+        if (start + tag.len <= text.len and std.ascii.eqlIgnoreCase(text[start .. start + tag.len], tag)) {
+            return tag.len;
+        }
+    }
+    return null;
 }
 
 // -----------------------------------------------------------------------

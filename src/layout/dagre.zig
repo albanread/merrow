@@ -24,8 +24,21 @@ const SelfEdgeInfo = struct {
     edge_name_owned: bool,
 };
 
+const CompoundEndpointRedirect = struct {
+    original_v: []const u8,
+    original_w: []const u8,
+    original_name: ?[]const u8,
+    original_name_owned: bool,
+    temp_v: []const u8,
+    temp_w: []const u8,
+    redirect_id: usize,
+    edge_data: EdgeData,
+};
+
 // Import layout phases
 const acyclic = @import("dagre/acyclic.zig");
+pub const compound = @import("dagre/compound.zig");
+const nesting = @import("dagre/nesting.zig");
 const rank = @import("dagre/rank.zig");
 const normalize = @import("dagre/normalize.zig");
 const order_mod = @import("dagre/order.zig");
@@ -49,6 +62,8 @@ pub const DagreConfig = struct {
     acyclicer: Acyclicer = .greedy,
     /// Algorithm for assigning ranks
     ranker: Ranker = .network_simplex,
+    /// Temporary escape hatch to force the old hierarchical workaround.
+    use_legacy_hierarchical_subgraphs: bool = false,
 };
 
 pub const RankDir = enum {
@@ -96,17 +111,24 @@ pub fn layout(
         config.ranksep,
     });
 
+    const use_compound_subgraphs = hasSubgraphs(graph) and !config.use_legacy_hierarchical_subgraphs;
+
     // Phase 0: Adjust coordinate system for LR/RL
     try adjustCoordinateSystem(allocator, graph, config.rankdir);
 
     if (hasSubgraphs(graph)) {
-        // Hierarchical container-first layout.
-        // We are already in adjusted (TB) coordinate space, so pass TB
-        // to children to prevent double-flipping during recursion.
-        std.debug.print("[dagre] Graph has subgraphs — using hierarchical layout\n", .{});
-        var child_config = config;
-        child_config.rankdir = .TB;
-        try layoutHierarchical(allocator, graph, child_config);
+        if (config.use_legacy_hierarchical_subgraphs) {
+            // Hierarchical container-first layout.
+            // We are already in adjusted (TB) coordinate space, so pass TB
+            // to children to prevent double-flipping during recursion.
+            std.debug.print("[dagre] Graph has subgraphs — using legacy hierarchical layout\n", .{});
+            var child_config = config;
+            child_config.rankdir = .TB;
+            try layoutHierarchical(allocator, graph, child_config);
+        } else {
+            std.debug.print("[dagre] Graph has subgraphs — using compound layout\n", .{});
+            try layoutFlatCompound(allocator, graph, config);
+        }
     } else {
         try layoutFlat(allocator, graph, config);
     }
@@ -114,6 +136,13 @@ pub fn layout(
     // Phase 20: Undo coordinate system transformation.
     std.debug.print("[dagre] Undoing coordinate system adjustment (rankdir={s})...\n", .{@tagName(config.rankdir)});
     try undoCoordinateSystem(allocator, graph, config.rankdir);
+
+    if (use_compound_subgraphs and (config.rankdir == .LR or config.rankdir == .RL)) {
+        var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+        defer inter_edges.deinit(allocator);
+        try collectCompoundInterEdges(allocator, graph, &inter_edges);
+        try routeInterContainerEdges(allocator, graph, inter_edges.items);
+    }
 
     std.debug.print("[dagre] Layout complete\n", .{});
 }
@@ -170,6 +199,15 @@ fn layoutFlat(
     std.debug.print("[dagre] Phase 13: Assigning coordinates...\n", .{});
     try position_mod.position(allocator, graph, config);
 
+    // Phase 14: Denormalize long edges back into original edges with points.
+    std.debug.print("[dagre] Phase 14: Restoring normalized edges...\n", .{});
+    try normalize.undo(allocator, graph);
+
+    // Reverse point order for edges that are still in reversed acyclic form,
+    // so acyclic.undo can restore the original endpoints without inverting
+    // the routed path.
+    reverse_points_for_reversed_edges(graph);
+
     // Undo acyclic transformation
     std.debug.print("[dagre] Undoing acyclic transformation...\n", .{});
     try acyclic.undo(allocator, graph);
@@ -188,6 +226,313 @@ fn layoutFlat(
 
     std.debug.print("[dagre] Separating sibling subgraphs...\n", .{});
     try separateSiblingSubgraphs(allocator, graph);
+}
+
+/// Compound-aware flat Dagre layout for graphs with subgraphs.
+///
+/// This runs the nesting and compound graph phases in a single flat graph,
+/// without using the container-first hierarchical workaround.
+fn layoutFlatCompound(
+    allocator: std.mem.Allocator,
+    graph: *Digraph(NodeData, EdgeData, GraphData),
+    config: DagreConfig,
+) !void {
+    std.debug.print("[dagre-compound] Compound layout starting...\n", .{});
+
+    var self_edges = std.ArrayListUnmanaged(SelfEdgeInfo){};
+    var redirected_edges = std.ArrayListUnmanaged(CompoundEndpointRedirect){};
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer {
+        for (self_edges.items) |*se| {
+            if (se.edge_name_owned) {
+                if (se.edge_name) |n| allocator.free(n);
+            }
+            se.edge_data.deinit(allocator);
+        }
+        self_edges.deinit(allocator);
+
+        for (redirected_edges.items) |*redir| {
+            if (redir.original_name_owned) {
+                if (redir.original_name) |n| allocator.free(n);
+            }
+            redir.edge_data.deinit(allocator);
+        }
+        redirected_edges.deinit(allocator);
+        inter_edges.deinit(allocator);
+    }
+
+    try removeSelfEdges(allocator, graph, &self_edges);
+    try acyclic.run(allocator, graph, config.acyclicer);
+    try nesting.run(allocator, graph);
+    try redirectCompoundEndpointEdges(allocator, graph, &redirected_edges);
+    try rank.assignRanks(allocator, graph, config.ranker);
+    removeEmptyRanks(graph);
+    nesting.cleanup(graph);
+    compound.assignRankMinMax(graph);
+    try compound.addBorderSegments(allocator, graph);
+    try normalize.normalizeEdges(allocator, graph);
+    try order_mod.order(allocator, graph);
+    try position_mod.position(allocator, graph, config);
+    try normalize.undo(allocator, graph);
+    try computeSubgraphBounds(allocator, graph);
+    try separateSiblingSubgraphs(allocator, graph);
+    try restoreCompoundEndpointEdges(allocator, graph, &redirected_edges);
+    reverse_points_for_reversed_edges(graph);
+    try acyclic.undo(allocator, graph);
+    try restoreSelfEdges(allocator, graph, &self_edges);
+    try collectCompoundInterEdges(allocator, graph, &inter_edges);
+    try routeInterContainerEdges(allocator, graph, inter_edges.items);
+
+    std.debug.print("[dagre-compound] Compound layout complete\n", .{});
+}
+
+fn collectCompoundInterEdges(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    out: *std.ArrayListUnmanaged(InterEdge),
+) !void {
+    var edge_it = graph.edgeIterator();
+    while (edge_it.next()) |entry| {
+        if (entry.data.nesting_edge) continue;
+
+        const src = graph.getNode(entry.v) orelse continue;
+        const tgt = graph.getNode(entry.w) orelse continue;
+        if (src.dummy or tgt.dummy) continue;
+        if (src.is_subgraph or tgt.is_subgraph) continue;
+
+        const src_boundary = findImmediateContainer(graph, entry.v);
+        const tgt_boundary = findImmediateContainer(graph, entry.w);
+
+        const same_boundary = blk: {
+            if (src_boundary == null and tgt_boundary == null) break :blk true;
+            if (src_boundary) |src_id| {
+                if (tgt_boundary) |tgt_id| {
+                    break :blk std.mem.eql(u8, src_id, tgt_id);
+                }
+            }
+            break :blk false;
+        };
+
+        if (same_boundary) continue;
+
+        try out.append(allocator, .{
+            .src_node = entry.v,
+            .tgt_node = entry.w,
+            .src_container = findRootContainer(graph, entry.v),
+            .tgt_container = findRootContainer(graph, entry.w),
+            .src_boundary_container = src_boundary,
+            .tgt_boundary_container = tgt_boundary,
+            .edge_name = entry.name,
+        });
+    }
+}
+
+fn redirectCompoundEndpointEdges(
+    allocator: Allocator,
+    graph: *Graph,
+    out: *std.ArrayListUnmanaged(CompoundEndpointRedirect),
+) !void {
+    const RedirectKey = struct {
+        v: []const u8,
+        w: []const u8,
+        name: ?[]const u8,
+        temp_v: []const u8,
+        temp_w: []const u8,
+    };
+
+    var keys_to_redirect = std.ArrayListUnmanaged(RedirectKey){};
+    defer keys_to_redirect.deinit(allocator);
+
+    var edge_iter = graph.edgeIterator();
+    while (edge_iter.next()) |entry| {
+        if (entry.data.nesting_edge) continue;
+
+        const src = graph.getNode(entry.v) orelse continue;
+        const tgt = graph.getNode(entry.w) orelse continue;
+        if (src.dummy or tgt.dummy) continue;
+        if (!src.is_subgraph and !tgt.is_subgraph) continue;
+
+        const temp_v = if (src.is_subgraph) src.border_bottom orelse continue else entry.v;
+        const temp_w = if (tgt.is_subgraph) tgt.border_top orelse continue else entry.w;
+        try keys_to_redirect.append(allocator, .{
+            .v = entry.v,
+            .w = entry.w,
+            .name = entry.name,
+            .temp_v = temp_v,
+            .temp_w = temp_w,
+        });
+    }
+
+    for (keys_to_redirect.items, 0..) |key, idx| {
+        const edge_data = graph.edge(key.v, key.w, key.name) orelse continue;
+
+        const original_name_copy: ?[]const u8 = if (key.name) |name|
+            try allocator.dupe(u8, name)
+        else
+            null;
+
+        const edge_data_copy = edge_data;
+        if (edge_data.label_owned) {
+            if (graph.getEdgePtr(key.v, key.w, key.name)) |graph_edge| {
+                graph_edge.label_owned = false;
+            }
+        }
+
+        try out.append(allocator, .{
+            .original_v = key.v,
+            .original_w = key.w,
+            .original_name = original_name_copy,
+            .original_name_owned = original_name_copy != null,
+            .temp_v = key.temp_v,
+            .temp_w = key.temp_w,
+            .redirect_id = idx,
+            .edge_data = edge_data_copy,
+        });
+
+        graph.removeEdge(key.v, key.w, key.name);
+        try graph.setEdge(key.temp_v, key.temp_w, .{
+            .minlen = edge_data.minlen,
+            .weight = edge_data.weight,
+            .compound_redirect_id = idx,
+        }, null);
+    }
+}
+
+fn restoreCompoundEndpointEdges(
+    allocator: Allocator,
+    graph: *Graph,
+    redirects: *std.ArrayListUnmanaged(CompoundEndpointRedirect),
+) !void {
+    for (redirects.items) |*redirect| {
+        var points = try collectRedirectedEdgePoints(allocator, graph, redirect.*);
+        try simplifyCompoundRedirectPoints(
+            allocator,
+            &points,
+            !std.mem.eql(u8, redirect.temp_v, redirect.original_v),
+            !std.mem.eql(u8, redirect.temp_w, redirect.original_w),
+        );
+        redirect.edge_data.points = points;
+        try graph.setEdge(redirect.original_v, redirect.original_w, redirect.edge_data, redirect.original_name);
+
+        if (redirect.original_name_owned) {
+            if (redirect.original_name) |name| allocator.free(name);
+        }
+
+        redirect.original_name = null;
+        redirect.original_name_owned = false;
+        redirect.edge_data = .{};
+    }
+
+    redirects.clearRetainingCapacity();
+}
+
+fn collectRedirectedEdgePoints(
+    allocator: Allocator,
+    graph: *Graph,
+    redirect: CompoundEndpointRedirect,
+) !std.ArrayListUnmanaged(Point) {
+    var points = std.ArrayListUnmanaged(Point){};
+    errdefer points.deinit(allocator);
+
+    if (graph.edge(redirect.temp_v, redirect.temp_w, null)) |existing_edge_data| {
+        var edge_data = existing_edge_data;
+        defer edge_data.points.deinit(allocator);
+
+        const original_src = graph.getNode(redirect.original_v) orelse return error.MissingCompoundRedirectSource;
+        const original_tgt = graph.getNode(redirect.original_w) orelse return error.MissingCompoundRedirectTarget;
+
+        try appendPointIfDistinct(allocator, &points, .{ .x = original_src.x, .y = original_src.y });
+
+        if (!std.mem.eql(u8, redirect.temp_v, redirect.original_v)) {
+            const temp_src = graph.getNode(redirect.temp_v) orelse return error.MissingCompoundRedirectSource;
+            try appendPointIfDistinct(allocator, &points, .{ .x = temp_src.x, .y = temp_src.y });
+        }
+
+        for (edge_data.points.items) |pt| {
+            try appendPointIfDistinct(allocator, &points, pt);
+        }
+
+        if (!std.mem.eql(u8, redirect.temp_w, redirect.original_w)) {
+            const temp_tgt = graph.getNode(redirect.temp_w) orelse return error.MissingCompoundRedirectTarget;
+            try appendPointIfDistinct(allocator, &points, .{ .x = temp_tgt.x, .y = temp_tgt.y });
+        }
+
+        try appendPointIfDistinct(allocator, &points, .{ .x = original_tgt.x, .y = original_tgt.y });
+        graph.removeEdge(redirect.temp_v, redirect.temp_w, null);
+        return points;
+    }
+
+    var edges_to_remove = std.ArrayListUnmanaged(EdgeRef){};
+    defer edges_to_remove.deinit(allocator);
+
+    var dummy_nodes_to_remove = std.ArrayListUnmanaged([]const u8){};
+    defer dummy_nodes_to_remove.deinit(allocator);
+
+    const original_src = graph.getNode(redirect.original_v) orelse return error.MissingCompoundRedirectSource;
+    const original_tgt = graph.getNode(redirect.original_w) orelse return error.MissingCompoundRedirectTarget;
+
+    try appendPointIfDistinct(allocator, &points, .{ .x = original_src.x, .y = original_src.y });
+
+    if (!std.mem.eql(u8, redirect.temp_v, redirect.original_v)) {
+        const temp_src = graph.getNode(redirect.temp_v) orelse return error.MissingCompoundRedirectSource;
+        try appendPointIfDistinct(allocator, &points, .{ .x = temp_src.x, .y = temp_src.y });
+    }
+
+    var current = redirect.temp_v;
+    while (!std.mem.eql(u8, current, redirect.temp_w)) {
+        const next_edge = if (std.mem.eql(u8, current, redirect.temp_v))
+            findRedirectOutEdge(graph, current, redirect.redirect_id) orelse return error.MissingCompoundRedirectPath
+        else
+            findChainOutEdge(graph, current) orelse return error.MissingCompoundRedirectPath;
+
+        try edges_to_remove.append(allocator, next_edge);
+        current = next_edge.w;
+
+        if (!std.mem.eql(u8, current, redirect.temp_w)) {
+            const node = graph.getNode(current) orelse return error.MissingCompoundRedirectPath;
+            try appendPointIfDistinct(allocator, &points, .{ .x = node.x, .y = node.y });
+            if (node.dummy and node.dummy_kind != null and node.dummy_kind.? == .edge) {
+                try dummy_nodes_to_remove.append(allocator, current);
+            }
+        }
+    }
+
+    if (!std.mem.eql(u8, redirect.temp_w, redirect.original_w)) {
+        const temp_tgt = graph.getNode(redirect.temp_w) orelse return error.MissingCompoundRedirectTarget;
+        try appendPointIfDistinct(allocator, &points, .{ .x = temp_tgt.x, .y = temp_tgt.y });
+    }
+
+    try appendPointIfDistinct(allocator, &points, .{ .x = original_tgt.x, .y = original_tgt.y });
+
+    for (edges_to_remove.items) |edge| {
+        if (graph.hasEdge(edge.v, edge.w, edge.name)) {
+            graph.removeEdge(edge.v, edge.w, edge.name);
+        }
+    }
+    for (dummy_nodes_to_remove.items) |dummy_id| {
+        if (graph.hasNode(dummy_id)) {
+            graph.removeNode(dummy_id);
+        }
+    }
+
+    return points;
+}
+
+fn findRedirectOutEdge(graph: *Graph, node_id: []const u8, redirect_id: usize) ?EdgeRef {
+    const out_edges = graph.outEdges(node_id) orelse return null;
+    for (out_edges) |edge| {
+        const edge_data = graph.edge(edge.v, edge.w, edge.name) orelse continue;
+        if (edge_data.compound_redirect_id == redirect_id) {
+            return .{ .v = edge.v, .w = edge.w, .name = edge.name };
+        }
+    }
+    return null;
+}
+
+fn findChainOutEdge(graph: *Graph, node_id: []const u8) ?EdgeRef {
+    const out_edges = graph.outEdges(node_id) orelse return null;
+    if (out_edges.len != 1) return null;
+    return .{ .v = out_edges[0].v, .w = out_edges[0].w, .name = out_edges[0].name };
 }
 
 // ===========================================================================
@@ -243,8 +588,12 @@ const ContainerInfo = struct {
 const InterEdge = struct {
     src_node: []const u8,
     tgt_node: []const u8,
+    // Root-level container membership used by the meta-graph.
     src_container: ?[]const u8, // null = free node
     tgt_container: ?[]const u8, // null = free node
+    // Immediate container boundary used by the obstacle router.
+    src_boundary_container: ?[]const u8,
+    tgt_boundary_container: ?[]const u8,
     edge_name: ?[]const u8,
 };
 
@@ -400,11 +749,15 @@ fn classifyNodesAndEdges(
                     .tgt_node = w,
                     .src_container = null,
                     .tgt_container = null,
+                    .src_boundary_container = null,
+                    .tgt_boundary_container = null,
                     .edge_name = name,
                 });
             }
         } else {
-            // Cross-container edge.  Use ROOT containers for meta-graph routing.
+            // Cross-container edge. Keep the root container for the meta-graph,
+            // but also preserve the immediate boundary container so the routing
+            // pass can respect the closest group walls instead of only root boxes.
             const src_root = findRootContainer(graph, v);
             const tgt_root = findRootContainer(graph, w);
             try inter_edges.append(allocator, .{
@@ -412,6 +765,8 @@ fn classifyNodesAndEdges(
                 .tgt_node = w,
                 .src_container = src_root,
                 .tgt_container = tgt_root,
+                .src_boundary_container = v_imm,
+                .tgt_boundary_container = w_imm,
                 .edge_name = name,
             });
         }
@@ -642,6 +997,599 @@ const ObstacleRect = struct {
     cy: f64,
 };
 
+const ObstacleBounds = struct {
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+
+    fn approximatelyEquals(a: ObstacleBounds, b: ObstacleBounds) bool {
+        return std.math.approxEqAbs(f64, a.left, b.left, 0.001) and
+            std.math.approxEqAbs(f64, a.right, b.right, 0.001) and
+            std.math.approxEqAbs(f64, a.top, b.top, 0.001) and
+            std.math.approxEqAbs(f64, a.bottom, b.bottom, 0.001);
+    }
+};
+
+const CorridorLaneState = struct {
+    is_vertical: bool,
+    bounds: ObstacleBounds,
+    right_lane: usize = 0,
+    left_lane: usize = 0,
+
+    fn matches(self: CorridorLaneState, is_vertical: bool, bounds: ObstacleBounds) bool {
+        return self.is_vertical == is_vertical and self.bounds.approximatelyEquals(bounds);
+    }
+};
+
+fn computeMergedObstacleBounds(blockers: []const ObstacleRect) ObstacleBounds {
+    var bounds = ObstacleBounds{
+        .left = std.math.floatMax(f64),
+        .right = -std.math.floatMax(f64),
+        .top = std.math.floatMax(f64),
+        .bottom = -std.math.floatMax(f64),
+    };
+
+    for (blockers) |b| {
+        if (b.left < bounds.left) bounds.left = b.left;
+        if (b.right > bounds.right) bounds.right = b.right;
+        if (b.top < bounds.top) bounds.top = b.top;
+        if (b.bottom > bounds.bottom) bounds.bottom = b.bottom;
+    }
+
+    return bounds;
+}
+
+fn getCorridorLaneState(
+    allocator: std.mem.Allocator,
+    corridor_lanes: *std.ArrayListUnmanaged(CorridorLaneState),
+    is_vertical: bool,
+    bounds: ObstacleBounds,
+) !*CorridorLaneState {
+    for (corridor_lanes.items) |*lane_state| {
+        if (lane_state.matches(is_vertical, bounds)) return lane_state;
+    }
+
+    try corridor_lanes.append(allocator, .{
+        .is_vertical = is_vertical,
+        .bounds = bounds,
+    });
+    return &corridor_lanes.items[corridor_lanes.items.len - 1];
+}
+
+fn findObstacleRectById(rects: []const ObstacleRect, id: []const u8) ?ObstacleRect {
+    for (rects) |rect| {
+        if (std.mem.eql(u8, rect.id, id)) return rect;
+    }
+    return null;
+}
+
+fn pointApproximatelyEquals(a: Point, b: Point) bool {
+    return std.math.approxEqAbs(f64, a.x, b.x, 0.001) and
+        std.math.approxEqAbs(f64, a.y, b.y, 0.001);
+}
+
+fn appendPointIfDistinct(
+    allocator: std.mem.Allocator,
+    points: *std.ArrayListUnmanaged(Point),
+    point: Point,
+) !void {
+    if (points.items.len > 0 and pointApproximatelyEquals(points.items[points.items.len - 1], point)) return;
+    try points.append(allocator, point);
+}
+
+fn simplifyCompoundRedirectPoints(
+    allocator: Allocator,
+    points: *std.ArrayListUnmanaged(Point),
+    preserve_src_boundary: bool,
+    preserve_tgt_boundary: bool,
+) !void {
+    if (points.items.len <= 4) return;
+
+    var protected = std.ArrayListUnmanaged(usize){};
+    defer protected.deinit(allocator);
+
+    try protected.append(allocator, 0);
+
+    if (preserve_src_boundary and points.items.len > 2) {
+        try protected.append(allocator, 1);
+    }
+
+    const last_index = points.items.len - 1;
+    const tgt_boundary_index = if (preserve_tgt_boundary and points.items.len > 2) last_index - 1 else last_index;
+
+    if (tgt_boundary_index > protected.items[protected.items.len - 1]) {
+        try protected.append(allocator, tgt_boundary_index);
+    }
+    if (last_index > protected.items[protected.items.len - 1]) {
+        try protected.append(allocator, last_index);
+    }
+
+    var simplified = std.ArrayListUnmanaged(Point){};
+    errdefer simplified.deinit(allocator);
+
+    var segment_start: usize = 0;
+    while (segment_start + 1 < protected.items.len) : (segment_start += 1) {
+        const start_idx = protected.items[segment_start];
+        const end_idx = protected.items[segment_start + 1];
+        try appendSimplifiedPointRange(allocator, &simplified, points.items[start_idx .. end_idx + 1]);
+    }
+
+    if (simplified.items.len >= 2) {
+        points.deinit(allocator);
+        points.* = simplified;
+    } else {
+        simplified.deinit(allocator);
+    }
+}
+
+fn appendSimplifiedPointRange(
+    allocator: Allocator,
+    out: *std.ArrayListUnmanaged(Point),
+    segment: []const Point,
+) !void {
+    if (segment.len == 0) return;
+    if (segment.len <= 2) {
+        for (segment) |point| try appendPointIfDistinct(allocator, out, point);
+        return;
+    }
+
+    var keep = try allocator.alloc(bool, segment.len);
+    defer allocator.free(keep);
+    @memset(keep, false);
+    keep[0] = true;
+    keep[segment.len - 1] = true;
+
+    simplifyPointRangeRecursive(segment, 0, segment.len - 1, keep);
+
+    for (segment, 0..) |point, idx| {
+        if (!keep[idx]) continue;
+        try appendPointIfDistinct(allocator, out, point);
+    }
+}
+
+fn simplifyPointRangeRecursive(
+    points: []const Point,
+    start_idx: usize,
+    end_idx: usize,
+    keep: []bool,
+) void {
+    if (end_idx <= start_idx + 1) return;
+
+    var max_distance: f64 = 0.0;
+    var max_index: ?usize = null;
+
+    const start = points[start_idx];
+    const end = points[end_idx];
+
+    var idx = start_idx + 1;
+    while (idx < end_idx) : (idx += 1) {
+        const distance = perpendicularDistanceToSegment(points[idx], start, end);
+        if (distance > max_distance) {
+            max_distance = distance;
+            max_index = idx;
+        }
+    }
+
+    if (max_index) |split_idx| {
+        if (max_distance <= 12.0) return;
+        keep[split_idx] = true;
+        simplifyPointRangeRecursive(points, start_idx, split_idx, keep);
+        simplifyPointRangeRecursive(points, split_idx, end_idx, keep);
+    }
+}
+
+fn perpendicularDistanceToSegment(point: Point, start: Point, end: Point) f64 {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+
+    if (std.math.approxEqAbs(f64, dx, 0.0, 0.001) and std.math.approxEqAbs(f64, dy, 0.0, 0.001)) {
+        const px = point.x - start.x;
+        const py = point.y - start.y;
+        return @sqrt(px * px + py * py);
+    }
+
+    const numerator = @abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x);
+    const denominator = @sqrt(dx * dx + dy * dy);
+    return numerator / denominator;
+}
+
+fn segmentParameter(point: Point, start: Point, end: Point) f64 {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const denom = dx * dx + dy * dy;
+    if (std.math.approxEqAbs(f64, denom, 0.0, 0.000001)) return 0.0;
+    return ((point.x - start.x) * dx + (point.y - start.y) * dy) / denom;
+}
+
+fn collectContainerAncestors(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    node_id: []const u8,
+) !std.ArrayListUnmanaged([]const u8) {
+    var ancestors = std.ArrayListUnmanaged([]const u8){};
+    errdefer ancestors.deinit(allocator);
+
+    var cursor: ?[]const u8 = graph.getParent(node_id);
+    while (cursor) |pid| {
+        const parent = graph.getNode(pid) orelse break;
+        if (parent.is_subgraph) {
+            try ancestors.append(allocator, pid);
+        }
+        cursor = graph.getParent(pid);
+    }
+
+    return ancestors;
+}
+
+fn findLowestCommonAncestorDepth(
+    src_ancestors: []const []const u8,
+    tgt_ancestors: []const []const u8,
+) struct { src_stop: usize, tgt_stop: usize } {
+    var src_stop = src_ancestors.len;
+    var tgt_stop = tgt_ancestors.len;
+
+    while (src_stop > 0 and tgt_stop > 0) {
+        const src_id = src_ancestors[src_stop - 1];
+        const tgt_id = tgt_ancestors[tgt_stop - 1];
+        if (!std.mem.eql(u8, src_id, tgt_id)) break;
+        src_stop -= 1;
+        tgt_stop -= 1;
+    }
+
+    return .{ .src_stop = src_stop, .tgt_stop = tgt_stop };
+}
+
+fn segmentRectBoundaryIntersection(from: Point, toward: Point, rect: ObstacleRect) ?Point {
+    const dx = toward.x - from.x;
+    const dy = toward.y - from.y;
+    var best_t = std.math.floatMax(f64);
+    var best: ?Point = null;
+
+    const tryVertical = struct {
+        fn apply(x_edge: f64, min_y: f64, max_y: f64, from_pt: Point, dxv: f64, dyv: f64, best_t_ptr: *f64, best_ptr: *?Point) void {
+            if (std.math.approxEqAbs(f64, dxv, 0.0, 0.000001)) return;
+            const t = (x_edge - from_pt.x) / dxv;
+            if (t <= 0.0 or t >= 1.0 or t >= best_t_ptr.*) return;
+            const y = from_pt.y + t * dyv;
+            if (y < min_y - 0.001 or y > max_y + 0.001) return;
+            best_t_ptr.* = t;
+            best_ptr.* = .{ .x = x_edge, .y = y };
+        }
+    }.apply;
+
+    const tryHorizontal = struct {
+        fn apply(y_edge: f64, min_x: f64, max_x: f64, from_pt: Point, dxv: f64, dyv: f64, best_t_ptr: *f64, best_ptr: *?Point) void {
+            if (std.math.approxEqAbs(f64, dyv, 0.0, 0.000001)) return;
+            const t = (y_edge - from_pt.y) / dyv;
+            if (t <= 0.0 or t >= 1.0 or t >= best_t_ptr.*) return;
+            const x = from_pt.x + t * dxv;
+            if (x < min_x - 0.001 or x > max_x + 0.001) return;
+            best_t_ptr.* = t;
+            best_ptr.* = .{ .x = x, .y = y_edge };
+        }
+    }.apply;
+
+    tryVertical(rect.left, rect.top, rect.bottom, from, dx, dy, &best_t, &best);
+    tryVertical(rect.right, rect.top, rect.bottom, from, dx, dy, &best_t, &best);
+    tryHorizontal(rect.top, rect.left, rect.right, from, dx, dy, &best_t, &best);
+    tryHorizontal(rect.bottom, rect.left, rect.right, from, dx, dy, &best_t, &best);
+
+    return best;
+}
+
+fn addBoundaryAnchorsToEdgePoints(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+    ed_ptr: *model.EdgeData,
+    all_rects: []const ObstacleRect,
+    src_node_id: []const u8,
+    tgt_node_id: []const u8,
+) !void {
+    if (ed_ptr.points.items.len < 2) return;
+
+    const AnchorCandidate = struct {
+        point: Point,
+        t: f64,
+    };
+
+    var src_ancestors = try collectContainerAncestors(allocator, graph, src_node_id);
+    defer src_ancestors.deinit(allocator);
+    var tgt_ancestors = try collectContainerAncestors(allocator, graph, tgt_node_id);
+    defer tgt_ancestors.deinit(allocator);
+
+    const lca_depth = findLowestCommonAncestorDepth(src_ancestors.items, tgt_ancestors.items);
+    if (lca_depth.src_stop == 0 and lca_depth.tgt_stop == 0) return;
+
+    var adjusted = std.ArrayListUnmanaged(Point){};
+    errdefer adjusted.deinit(allocator);
+
+    var source_anchors = std.ArrayListUnmanaged(AnchorCandidate){};
+    defer source_anchors.deinit(allocator);
+    var target_anchors = std.ArrayListUnmanaged(AnchorCandidate){};
+    defer target_anchors.deinit(allocator);
+
+    const pts = ed_ptr.points.items;
+    try appendPointIfDistinct(allocator, &adjusted, pts[0]);
+
+    for (src_ancestors.items[0..lca_depth.src_stop]) |ancestor_id| {
+        if (findObstacleRectById(all_rects, ancestor_id)) |rect| {
+            if (segmentRectBoundaryIntersection(pts[0], pts[1], rect)) |anchor| {
+                if (!pointApproximatelyEquals(anchor, pts[0]) and !pointApproximatelyEquals(anchor, pts[1])) {
+                    try source_anchors.append(allocator, .{
+                        .point = anchor,
+                        .t = segmentParameter(anchor, pts[0], pts[pts.len - 1]),
+                    });
+                }
+            }
+        }
+    }
+
+    var ti = lca_depth.tgt_stop;
+    while (ti > 0) {
+        ti -= 1;
+        const ancestor_id = tgt_ancestors.items[ti];
+        if (findObstacleRectById(all_rects, ancestor_id)) |rect| {
+            if (segmentRectBoundaryIntersection(pts[pts.len - 1], pts[pts.len - 2], rect)) |anchor| {
+                if (!pointApproximatelyEquals(anchor, pts[pts.len - 1]) and !pointApproximatelyEquals(anchor, pts[pts.len - 2])) {
+                    try target_anchors.append(allocator, .{
+                        .point = anchor,
+                        .t = segmentParameter(anchor, pts[0], pts[pts.len - 1]),
+                    });
+                }
+            }
+        }
+    }
+
+    if (pts.len == 2) {
+        var combined = std.ArrayListUnmanaged(AnchorCandidate){};
+        defer combined.deinit(allocator);
+
+        for (source_anchors.items) |anchor| try combined.append(allocator, anchor);
+        for (target_anchors.items) |anchor| try combined.append(allocator, anchor);
+
+        std.mem.sort(AnchorCandidate, combined.items, {}, struct {
+            fn lessThan(_: void, a: AnchorCandidate, b: AnchorCandidate) bool {
+                return a.t < b.t;
+            }
+        }.lessThan);
+
+        for (combined.items) |anchor| {
+            try appendPointIfDistinct(allocator, &adjusted, anchor.point);
+        }
+
+        try appendPointIfDistinct(allocator, &adjusted, pts[pts.len - 1]);
+
+        var old_points = ed_ptr.points;
+        ed_ptr.points = adjusted;
+        old_points.deinit(allocator);
+        return;
+    }
+
+    for (source_anchors.items) |anchor| {
+        try appendPointIfDistinct(allocator, &adjusted, anchor.point);
+    }
+
+    for (pts[1 .. pts.len - 1]) |pt| {
+        try appendPointIfDistinct(allocator, &adjusted, pt);
+    }
+
+    for (target_anchors.items) |anchor| {
+        try appendPointIfDistinct(allocator, &adjusted, anchor.point);
+    }
+
+    try appendPointIfDistinct(allocator, &adjusted, pts[pts.len - 1]);
+
+    var old_points = ed_ptr.points;
+    ed_ptr.points = adjusted;
+    old_points.deinit(allocator);
+}
+
+fn segmentCrossesAnyObstacle(
+    from: Point,
+    to: Point,
+    obstacles: []const ObstacleRect,
+) bool {
+    for (obstacles) |obs| {
+        if (lineIntersectsRect(from.x, from.y, to.x, to.y, obs.left, obs.top, obs.right, obs.bottom)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn addOrthogonalTargetDockIfClear(
+    allocator: std.mem.Allocator,
+    ed_ptr: *model.EdgeData,
+    obstacles: []const ObstacleRect,
+) !void {
+    if (ed_ptr.points.items.len < 2) return;
+
+    const pts = ed_ptr.points.items;
+    const start = pts[0];
+    const prev = pts[pts.len - 2];
+    const target = pts[pts.len - 1];
+
+    if (@abs(prev.x - target.x) < 0.001 or @abs(prev.y - target.y) < 0.001) return;
+
+    const vertical_entry = Point{ .x = target.x, .y = prev.y };
+    const horizontal_entry = Point{ .x = prev.x, .y = target.y };
+
+    const prefer_horizontal = @abs(target.x - start.x) >= @abs(target.y - start.y);
+    const preferred = if (prefer_horizontal) horizontal_entry else vertical_entry;
+    const fallback = if (prefer_horizontal) vertical_entry else horizontal_entry;
+
+    const dock = blk: {
+        if (!pointApproximatelyEquals(preferred, prev) and
+            !pointApproximatelyEquals(preferred, target) and
+            !segmentCrossesAnyObstacle(prev, preferred, obstacles) and
+            !segmentCrossesAnyObstacle(preferred, target, obstacles))
+        {
+            break :blk preferred;
+        }
+
+        if (!pointApproximatelyEquals(fallback, prev) and
+            !pointApproximatelyEquals(fallback, target) and
+            !segmentCrossesAnyObstacle(prev, fallback, obstacles) and
+            !segmentCrossesAnyObstacle(fallback, target, obstacles))
+        {
+            break :blk fallback;
+        }
+
+        return;
+    };
+
+    var adjusted = std.ArrayListUnmanaged(Point){};
+    errdefer adjusted.deinit(allocator);
+
+    for (pts[0 .. pts.len - 1]) |pt| {
+        try appendPointIfDistinct(allocator, &adjusted, pt);
+    }
+    try appendPointIfDistinct(allocator, &adjusted, dock);
+    try appendPointIfDistinct(allocator, &adjusted, target);
+
+    var old_points = ed_ptr.points;
+    ed_ptr.points = adjusted;
+    old_points.deinit(allocator);
+}
+
+fn addOrthogonalSourceDockIfClear(
+    allocator: std.mem.Allocator,
+    ed_ptr: *model.EdgeData,
+    obstacles: []const ObstacleRect,
+) !void {
+    if (ed_ptr.points.items.len < 2) return;
+
+    const pts = ed_ptr.points.items;
+    const start = pts[0];
+    const next = pts[1];
+    const target = pts[pts.len - 1];
+
+    if (@abs(start.x - next.x) < 0.001 or @abs(start.y - next.y) < 0.001) return;
+
+    const horizontal_first = Point{ .x = next.x, .y = start.y };
+    const vertical_first = Point{ .x = start.x, .y = next.y };
+
+    const prefer_horizontal = @abs(target.x - start.x) >= @abs(target.y - start.y);
+    const preferred = if (prefer_horizontal) horizontal_first else vertical_first;
+    const fallback = if (prefer_horizontal) vertical_first else horizontal_first;
+
+    const dock = blk: {
+        if (!pointApproximatelyEquals(preferred, start) and
+            !pointApproximatelyEquals(preferred, next) and
+            !segmentCrossesAnyObstacle(start, preferred, obstacles) and
+            !segmentCrossesAnyObstacle(preferred, next, obstacles))
+        {
+            break :blk preferred;
+        }
+
+        if (!pointApproximatelyEquals(fallback, start) and
+            !pointApproximatelyEquals(fallback, next) and
+            !segmentCrossesAnyObstacle(start, fallback, obstacles) and
+            !segmentCrossesAnyObstacle(fallback, next, obstacles))
+        {
+            break :blk fallback;
+        }
+
+        return;
+    };
+
+    var adjusted = std.ArrayListUnmanaged(Point){};
+    errdefer adjusted.deinit(allocator);
+
+    try appendPointIfDistinct(allocator, &adjusted, start);
+    try appendPointIfDistinct(allocator, &adjusted, dock);
+    for (pts[1..]) |pt| {
+        try appendPointIfDistinct(allocator, &adjusted, pt);
+    }
+
+    var old_points = ed_ptr.points;
+    ed_ptr.points = adjusted;
+    old_points.deinit(allocator);
+}
+
+fn sameOptionalContainer(a: ?[]const u8, b: ?[]const u8) bool {
+    if (a == null and b == null) return true;
+    if (a) |left| {
+        if (b) |right| {
+            return std.mem.eql(u8, left, right);
+        }
+    }
+    return false;
+}
+
+fn destinationBoundaryId(edge: InterEdge) ?[]const u8 {
+    return edge.tgt_boundary_container orelse edge.tgt_container;
+}
+
+fn hasSharedDestinationFanout(inter_edges_list: []const InterEdge, current: InterEdge) bool {
+    const current_destination = destinationBoundaryId(current);
+
+    for (inter_edges_list) |candidate| {
+        if (std.mem.eql(u8, candidate.src_node, current.src_node) and
+            !std.mem.eql(u8, candidate.tgt_node, current.tgt_node) and
+            sameOptionalContainer(destinationBoundaryId(candidate), current_destination))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+fn collectAllSubgraphRects(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+) !std.ArrayListUnmanaged(ObstacleRect) {
+    var all_rects = std.ArrayListUnmanaged(ObstacleRect){};
+    errdefer all_rects.deinit(allocator);
+
+    var node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const node = entry.value_ptr.*;
+        if (!node.is_subgraph) continue;
+        if (node.width < 1.0 or node.height < 1.0) continue;
+        try all_rects.append(allocator, .{
+            .id = entry.key_ptr.*,
+            .left = node.x - node.width / 2.0,
+            .right = node.x + node.width / 2.0,
+            .top = node.y - node.height / 2.0,
+            .bottom = node.y + node.height / 2.0,
+            .cx = node.x,
+            .cy = node.y,
+        });
+    }
+
+    return all_rects;
+}
+
+fn collectAllNodeRects(
+    allocator: std.mem.Allocator,
+    graph: *Graph,
+) !std.ArrayListUnmanaged(ObstacleRect) {
+    var all_rects = std.ArrayListUnmanaged(ObstacleRect){};
+    errdefer all_rects.deinit(allocator);
+
+    var node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const node = entry.value_ptr.*;
+        if (node.dummy or node.is_subgraph) continue;
+        if (node.width < 1.0 or node.height < 1.0) continue;
+
+        try all_rects.append(allocator, .{
+            .id = entry.key_ptr.*,
+            .left = node.x - node.width / 2.0,
+            .right = node.x + node.width / 2.0,
+            .top = node.y - node.height / 2.0,
+            .bottom = node.y + node.height / 2.0,
+            .cx = node.x,
+            .cy = node.y,
+        });
+    }
+
+    return all_rects;
+}
+
 /// Phase 5: Compute waypoints for inter-container edges that avoid
 /// crossing through foreign container boxes.
 ///
@@ -662,30 +1610,16 @@ fn routeInterContainerEdges(
     const lane_spacing: f64 = 12.0;
 
     // Collect ALL container (subgraph) rectangles from the graph.
-    var all_rects = std.ArrayListUnmanaged(ObstacleRect){};
+    var all_rects = try collectAllSubgraphRects(allocator, graph);
     defer all_rects.deinit(allocator);
 
-    var node_it = graph.nodes.iterator();
-    while (node_it.next()) |entry| {
-        const node = entry.value_ptr.*;
-        if (!node.is_subgraph) continue;
-        if (node.width < 1.0) continue;
-        try all_rects.append(allocator, .{
-            .id = entry.key_ptr.*,
-            .left = node.x - node.width / 2.0,
-            .right = node.x + node.width / 2.0,
-            .top = node.y - node.height / 2.0,
-            .bottom = node.y + node.height / 2.0,
-            .cx = node.x,
-            .cy = node.y,
-        });
-    }
+    var all_node_rects = try collectAllNodeRects(allocator, graph);
+    defer all_node_rects.deinit(allocator);
 
-    // Track how many edges have been routed to each side so we can
-    // spread parallel routes apart.  We use simple counters for
-    // right-side and left-side bypasses.
-    var right_lane: usize = 0;
-    var left_lane: usize = 0;
+    // Track lane spacing per routing corridor so unrelated obstacle sets do
+    // not accumulate offsets from earlier edges elsewhere in the diagram.
+    var corridor_lanes = std.ArrayListUnmanaged(CorridorLaneState){};
+    defer corridor_lanes.deinit(allocator);
 
     for (inter_edges_list) |ie| {
         const ed_ptr = graph.getEdgePtr(ie.src_node, ie.tgt_node, ie.edge_name) orelse continue;
@@ -694,6 +1628,9 @@ fn routeInterContainerEdges(
         const tgt = graph.getNode(ie.tgt_node) orelse continue;
 
         ed_ptr.points.clearRetainingCapacity();
+        const src_boundary = ie.src_boundary_container orelse ie.src_container;
+        const tgt_boundary = ie.tgt_boundary_container orelse ie.tgt_container;
+        const allow_vertical_target_dock = !hasSharedDestinationFanout(inter_edges_list, ie);
 
         // Collect obstacle rectangles: containers that do NOT own either
         // endpoint.
@@ -704,13 +1641,21 @@ fn routeInterContainerEdges(
             if (isAncestor(graph, r.id, ie.src_node) or
                 isAncestor(graph, r.id, ie.tgt_node))
                 continue;
-            if (ie.src_container) |sc| {
+
+            if (src_boundary) |sc| {
                 if (std.mem.eql(u8, r.id, sc) or isAncestor(graph, sc, r.id))
                     continue;
             }
-            if (ie.tgt_container) |tc| {
+            if (tgt_boundary) |tc| {
                 if (std.mem.eql(u8, r.id, tc) or isAncestor(graph, tc, r.id))
                     continue;
+            }
+            try obstacles.append(allocator, r);
+        }
+
+        for (all_node_rects.items) |r| {
+            if (std.mem.eql(u8, r.id, ie.src_node) or std.mem.eql(u8, r.id, ie.tgt_node)) {
+                continue;
             }
             try obstacles.append(allocator, r);
         }
@@ -719,6 +1664,11 @@ fn routeInterContainerEdges(
         if (obstacles.items.len == 0) {
             try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
             try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+            try addOrthogonalSourceDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+            if (allow_vertical_target_dock) {
+                try addOrthogonalTargetDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+            }
+            try addBoundaryAnchorsToEdgePoints(graph.allocator, graph, ed_ptr, all_rects.items, ie.src_node, ie.tgt_node);
             continue;
         }
 
@@ -735,8 +1685,22 @@ fn routeInterContainerEdges(
         if (blocking.items.len == 0) {
             try ed_ptr.points.append(graph.allocator, .{ .x = src.x, .y = src.y });
             try ed_ptr.points.append(graph.allocator, .{ .x = tgt.x, .y = tgt.y });
+            try addOrthogonalSourceDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+            if (allow_vertical_target_dock) {
+                try addOrthogonalTargetDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+            }
+            try addBoundaryAnchorsToEdgePoints(graph.allocator, graph, ed_ptr, all_rects.items, ie.src_node, ie.tgt_node);
             continue;
         }
+
+        const is_vertical = @abs(tgt.y - src.y) >= @abs(tgt.x - src.x);
+        const corridor_bounds = computeMergedObstacleBounds(blocking.items);
+        const lane_state = try getCorridorLaneState(
+            allocator,
+            &corridor_lanes,
+            is_vertical,
+            corridor_bounds,
+        );
 
         // Route around blocking obstacles, passing lane counters for
         // parallel edge spreading.
@@ -751,17 +1715,23 @@ fn routeInterContainerEdges(
             blocking.items,
             obstacles.items,
             margin,
-            right_lane,
-            left_lane,
+            lane_state.right_lane,
+            lane_state.left_lane,
             lane_spacing,
         );
 
         // Increment the appropriate lane counter.
         switch (chosen_side) {
-            .right => right_lane += 1,
-            .left => left_lane += 1,
+            .right => lane_state.right_lane += 1,
+            .left => lane_state.left_lane += 1,
             .fallback => {},
         }
+
+        try addOrthogonalSourceDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+        if (allow_vertical_target_dock) {
+            try addOrthogonalTargetDockIfClear(graph.allocator, ed_ptr, obstacles.items);
+        }
+        try addBoundaryAnchorsToEdgePoints(graph.allocator, graph, ed_ptr, all_rects.items, ie.src_node, ie.tgt_node);
     }
 }
 
@@ -882,17 +1852,11 @@ fn routeAroundObstacles(
     _ = all_obstacles;
 
     // Compute the merged bounding box of all blocking obstacles.
-    var bb_left: f64 = std.math.floatMax(f64);
-    var bb_right: f64 = -std.math.floatMax(f64);
-    var bb_top: f64 = std.math.floatMax(f64);
-    var bb_bottom: f64 = -std.math.floatMax(f64);
-
-    for (blockers) |b| {
-        if (b.left < bb_left) bb_left = b.left;
-        if (b.right > bb_right) bb_right = b.right;
-        if (b.top < bb_top) bb_top = b.top;
-        if (b.bottom > bb_bottom) bb_bottom = b.bottom;
-    }
+    const bounds = computeMergedObstacleBounds(blockers);
+    const bb_left = bounds.left;
+    const bb_right = bounds.right;
+    const bb_top = bounds.top;
+    const bb_bottom = bounds.bottom;
 
     // The Catmull-Rom spline sags inward from control points.  For the
     // diagonal segments (src→corner, corner→tgt), the sag can push the
@@ -1352,16 +2316,10 @@ fn respaceRanks(allocator: Allocator, graph: *Graph, config: DagreConfig) !void 
     // Find max rank.
     var max_rank: i32 = 0;
     {
-        const nodes = try graph.allNodes(allocator);
-        defer {
-            for (nodes) |id| allocator.free(id);
-            allocator.free(nodes);
-        }
-        for (nodes) |id| {
-            if (graph.getNode(id)) |node| {
-                if (node.rank) |r| {
-                    if (r > max_rank) max_rank = r;
-                }
+        var node_it = graph.nodes.iterator();
+        while (node_it.next()) |entry| {
+            if (entry.value_ptr.rank) |r| {
+                if (r > max_rank) max_rank = r;
             }
         }
     }
@@ -1378,14 +2336,11 @@ fn respaceRanks(allocator: Allocator, graph: *Graph, config: DagreConfig) !void 
     for (rank_lists) |*rl| rl.* = .{};
 
     {
-        const nodes = try graph.allNodes(allocator);
-        defer {
-            for (nodes) |id| allocator.free(id);
-            allocator.free(nodes);
-        }
-        for (nodes) |id| {
-            const node = graph.getNode(id) orelse continue;
-            if (node.is_subgraph) continue;
+        var node_it = graph.nodes.iterator();
+        while (node_it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const node = entry.value_ptr.*;
+            if (node.is_subgraph or node.dummy) continue;
             const r = node.rank orelse continue;
             if (r < 0) continue;
             const ri = @as(usize, @intCast(r));
@@ -1415,6 +2370,62 @@ fn respaceRanks(allocator: Allocator, graph: *Graph, config: DagreConfig) !void 
             const min_right_x = left.x + left.width / 2.0 + config.nodesep + right_ptr.width / 2.0;
             if (right_ptr.x < min_right_x) {
                 right_ptr.x = min_right_x;
+            }
+        }
+    }
+}
+
+/// Collapse empty ranks introduced by nesting's node_rank_factor multiplier.
+///
+/// The nesting pass expands edge minlen to reserve room for compound border
+/// dummies. After ranking, many intermediate layers are empty. Dagre removes
+/// those sparse ranks before adding border segments so the final layout does
+/// not inherit unnecessary vertical whitespace.
+fn removeEmptyRanks(graph: *Graph) void {
+    var min_rank: ?i32 = null;
+    var max_rank: ?i32 = null;
+
+    var node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const node_rank = entry.value_ptr.rank orelse continue;
+        min_rank = if (min_rank) |current| @min(current, node_rank) else node_rank;
+        max_rank = if (max_rank) |current| @max(current, node_rank) else node_rank;
+    }
+
+    if (min_rank == null or max_rank == null) return;
+
+    const offset = min_rank.?;
+    const layer_count = @as(usize, @intCast(max_rank.? - offset + 1));
+    if (layer_count == 0) return;
+
+    var layers = std.heap.page_allocator.alloc(bool, layer_count) catch return;
+    defer std.heap.page_allocator.free(layers);
+    @memset(layers, false);
+
+    node_it = graph.nodes.iterator();
+    while (node_it.next()) |entry| {
+        const node_rank = entry.value_ptr.rank orelse continue;
+        const index = @as(usize, @intCast(node_rank - offset));
+        layers[index] = true;
+    }
+
+    const node_rank_factor = @as(usize, @intCast(graph.graph_label.node_rank_factor orelse 1));
+    var delta: i32 = 0;
+
+    for (layers, 0..) |has_nodes, index| {
+        if (!has_nodes and (node_rank_factor == 0 or index % node_rank_factor != 0)) {
+            delta -= 1;
+            continue;
+        }
+
+        if (!has_nodes or delta == 0) continue;
+
+        var adjust_it = graph.nodes.iterator();
+        while (adjust_it.next()) |entry| {
+            if (entry.value_ptr.rank) |node_rank| {
+                if (node_rank - offset == @as(i32, @intCast(index))) {
+                    entry.value_ptr.rank = node_rank + delta;
+                }
             }
         }
     }
@@ -1600,6 +2611,11 @@ fn collectDescendants(allocator: Allocator, graph: *Graph, root_id: []const u8) 
 
 /// Shift a node and all its descendants by (dx, dy).
 fn shiftSubtree(allocator: Allocator, graph: *Graph, sg_id: []const u8, dx: f64, dy: f64) !void {
+    var moved_ids = std.StringHashMapUnmanaged(void){};
+    defer moved_ids.deinit(allocator);
+
+    try moved_ids.put(allocator, sg_id, {});
+
     // Shift the subgraph node itself.
     if (graph.getNodePtr(sg_id)) |ptr| {
         ptr.x += dx;
@@ -1614,9 +2630,22 @@ fn shiftSubtree(allocator: Allocator, graph: *Graph, sg_id: []const u8, dx: f64,
     }
 
     for (descendants) |id| {
+        try moved_ids.put(allocator, id, {});
         if (graph.getNodePtr(id)) |ptr| {
             ptr.x += dx;
             ptr.y += dy;
+        }
+    }
+
+    var edge_it = graph.edgeIterator();
+    while (edge_it.next()) |entry| {
+        if (!moved_ids.contains(entry.v) or !moved_ids.contains(entry.w)) continue;
+        const edge_ptr = graph.getEdgePtr(entry.v, entry.w, entry.name) orelse continue;
+        if (edge_ptr.points.items.len < 2) continue;
+
+        for (edge_ptr.points.items) |*pt| {
+            pt.x += dx;
+            pt.y += dy;
         }
     }
 }
@@ -1911,6 +2940,11 @@ fn undoCoordinateSystem(allocator: Allocator, graph: *Graph, rankdir: RankDir) !
                     node.y = -node.y;
                 }
             }
+
+            var edge_iter = graph.edges.iterator();
+            while (edge_iter.next()) |entry| {
+                transformEdgeGeometry(entry.value_ptr, rankdir);
+            }
         },
         .LR => {
             const nodes = try graph.allNodes(allocator);
@@ -1929,6 +2963,11 @@ fn undoCoordinateSystem(allocator: Allocator, graph: *Graph, rankdir: RankDir) !
                     node.width = node.height;
                     node.height = tmp_wh;
                 }
+            }
+
+            var edge_iter = graph.edges.iterator();
+            while (edge_iter.next()) |entry| {
+                transformEdgeGeometry(entry.value_ptr, rankdir);
             }
         },
         .RL => {
@@ -1949,14 +2988,54 @@ fn undoCoordinateSystem(allocator: Allocator, graph: *Graph, rankdir: RankDir) !
                     node.height = tmp_wh;
                 }
             }
+
+            var edge_iter = graph.edges.iterator();
+            while (edge_iter.next()) |entry| {
+                transformEdgeGeometry(entry.value_ptr, rankdir);
+            }
+        },
+    }
+}
+
+fn transformEdgeGeometry(edge: *EdgeData, rankdir: RankDir) void {
+    switch (rankdir) {
+        .TB => {},
+        .BT => {
+            edge.y = -edge.y;
+            for (edge.points.items) |*pt| {
+                pt.y = -pt.y;
+            }
+        },
+        .LR => {
+            const tmp_xy = edge.x;
+            edge.x = edge.y;
+            edge.y = tmp_xy;
+            for (edge.points.items) |*pt| {
+                const tmp = pt.x;
+                pt.x = pt.y;
+                pt.y = tmp;
+            }
+        },
+        .RL => {
+            const tmp_xy = edge.x;
+            edge.x = -edge.y;
+            edge.y = tmp_xy;
+            for (edge.points.items) |*pt| {
+                const tmp = pt.x;
+                pt.x = -pt.y;
+                pt.y = tmp;
+            }
         },
     }
 }
 
 /// Reverse edge points for edges that were reversed during acyclic phase
 fn reverse_points_for_reversed_edges(graph: *Digraph(NodeData, EdgeData, GraphData)) void {
-    _ = graph;
-    // TODO: Implement
+    var edge_iter = graph.edges.iterator();
+    while (edge_iter.next()) |entry| {
+        if (!entry.value_ptr.reversed) continue;
+        std.mem.reverse(Point, entry.value_ptr.points.items);
+    }
 }
 
 /// Compute graph dimensions and translate to origin
@@ -1970,6 +3049,39 @@ test "dagre config default" {
     try std.testing.expectEqual(RankDir.TB, config.rankdir);
     try std.testing.expectEqual(50.0, config.nodesep);
     try std.testing.expectEqual(50.0, config.ranksep);
+}
+
+test "undoCoordinateSystem rotates explicit edge points for LR layouts" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer graph.deinitDeep();
+
+    try graph.setNode("A", .{ .x = 10, .y = 20, .width = 30, .height = 40 });
+    try graph.setNode("B", .{ .x = 110, .y = 220, .width = 50, .height = 60 });
+    try graph.setEdge("A", "B", .{}, null);
+
+    if (graph.getEdgePtr("A", "B", null)) |edge| {
+        edge.x = 70;
+        edge.y = 90;
+        try edge.points.append(std.testing.allocator, .{ .x = 1, .y = 2 });
+        try edge.points.append(std.testing.allocator, .{ .x = 3, .y = 4 });
+    }
+
+    try undoCoordinateSystem(std.testing.allocator, &graph, .LR);
+
+    const node_a = graph.getNode("A").?;
+    try std.testing.expectApproxEqAbs(@as(f64, 20), node_a.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 10), node_a.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 40), node_a.width, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 30), node_a.height, 0.001);
+
+    const edge = graph.edge("A", "B", null).?;
+    try std.testing.expectApproxEqAbs(@as(f64, 90), edge.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 70), edge.y, 0.001);
+    try std.testing.expectEqual(@as(usize, 2), edge.points.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 2), edge.points.items[0].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 1), edge.points.items[0].y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 4), edge.points.items[1].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 3), edge.points.items[1].y, 0.001);
 }
 
 test "dagre layout with acyclic and ranking" {
@@ -2187,6 +3299,601 @@ test "dagre network simplex: larger graph produces valid layout" {
         const tgt = graph.getNode(edge.w).?;
         try std.testing.expect(src.y < tgt.y);
     }
+}
+
+test "dagre routing: lane counters are scoped per corridor" {
+    var corridors = std.ArrayListUnmanaged(CorridorLaneState){};
+    defer corridors.deinit(std.testing.allocator);
+
+    const blockers_a = [_]ObstacleRect{
+        .{ .id = "A", .left = 10, .right = 20, .top = 10, .bottom = 20, .cx = 15, .cy = 15 },
+    };
+    const blockers_b = [_]ObstacleRect{
+        .{ .id = "B", .left = 100, .right = 120, .top = 10, .bottom = 20, .cx = 110, .cy = 15 },
+    };
+
+    const bounds_a = computeMergedObstacleBounds(&blockers_a);
+    const first_a = try getCorridorLaneState(std.testing.allocator, &corridors, true, bounds_a);
+    first_a.right_lane = 2;
+
+    const second_a = try getCorridorLaneState(std.testing.allocator, &corridors, true, bounds_a);
+    try std.testing.expectEqual(@as(usize, 2), second_a.right_lane);
+
+    const bounds_b = computeMergedObstacleBounds(&blockers_b);
+    const first_b = try getCorridorLaneState(std.testing.allocator, &corridors, true, bounds_b);
+    try std.testing.expectEqual(@as(usize, 0), first_b.right_lane);
+    try std.testing.expectEqual(@as(usize, 0), first_b.left_lane);
+}
+
+test "dagre hierarchical classification preserves immediate boundary containers" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Root", .{ .is_subgraph = true, .width = 200, .height = 120 });
+    try graph.setNode("Left", .{ .is_subgraph = true, .width = 120, .height = 80 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .width = 120, .height = 80 });
+    try graph.setNode("A", .{ .width = 60, .height = 30 });
+    try graph.setNode("B", .{ .width = 60, .height = 30 });
+
+    try graph.setParent("Left", "Root");
+    try graph.setParent("Right", "Root");
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Right");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var containers = std.StringHashMap(ContainerInfo).init(std.testing.allocator);
+    defer {
+        var it = containers.iterator();
+        while (it.next()) |entry| entry.value_ptr.deinit(std.testing.allocator);
+        containers.deinit();
+    }
+
+    var free_nodes = std.ArrayListUnmanaged([]const u8){};
+    defer free_nodes.deinit(std.testing.allocator);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+
+    try classifyNodesAndEdges(std.testing.allocator, &graph, &containers, &free_nodes, &inter_edges);
+
+    try std.testing.expectEqual(@as(usize, 1), inter_edges.items.len);
+    const inter = inter_edges.items[0];
+    try std.testing.expectEqualStrings("Root", inter.src_container.?);
+    try std.testing.expectEqualStrings("Root", inter.tgt_container.?);
+    try std.testing.expectEqualStrings("Left", inter.src_boundary_container.?);
+    try std.testing.expectEqualStrings("Right", inter.tgt_boundary_container.?);
+}
+
+test "dagre routing adds boundary anchor waypoints for grouped edges" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Left", .{ .is_subgraph = true, .x = 50, .y = 50, .width = 80, .height = 80 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .x = 250, .y = 50, .width = 80, .height = 80 });
+    try graph.setNode("A", .{ .x = 50, .y = 50, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 250, .y = 50, .width = 20, .height = 20 });
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Right");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Left",
+        .tgt_container = "Right",
+        .src_boundary_container = "Left",
+        .tgt_boundary_container = "Right",
+        .edge_name = null,
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", null).?;
+    try std.testing.expectEqual(@as(usize, 4), edge.points.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 50.0), edge.points.items[0].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 90.0), edge.points.items[1].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 210.0), edge.points.items[2].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 250.0), edge.points.items[3].x, 0.001);
+}
+
+test "dagre routing adds nested boundary anchors up to the lowest common container" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Root", .{ .is_subgraph = true, .x = 200, .y = 80, .width = 360, .height = 140 });
+    try graph.setNode("Left", .{ .is_subgraph = true, .x = 120, .y = 80, .width = 120, .height = 80 });
+    try graph.setNode("Inner", .{ .is_subgraph = true, .x = 120, .y = 80, .width = 60, .height = 40 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .x = 310, .y = 80, .width = 120, .height = 80 });
+    try graph.setNode("A", .{ .x = 120, .y = 80, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 310, .y = 80, .width = 20, .height = 20 });
+    try graph.setParent("Left", "Root");
+    try graph.setParent("Inner", "Left");
+    try graph.setParent("Right", "Root");
+    try graph.setParent("A", "Inner");
+    try graph.setParent("B", "Right");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Root",
+        .tgt_container = "Root",
+        .src_boundary_container = "Inner",
+        .tgt_boundary_container = "Right",
+        .edge_name = null,
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", null).?;
+    try std.testing.expectEqual(@as(usize, 5), edge.points.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 120.0), edge.points.items[0].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 150.0), edge.points.items[1].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 180.0), edge.points.items[2].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 250.0), edge.points.items[3].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 310.0), edge.points.items[4].x, 0.001);
+}
+
+test "dagre compound layout populates rank ranges and border chains" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Outer", .{ .is_subgraph = true, .width = 160, .height = 100 });
+    try graph.setNode("Left", .{ .is_subgraph = true, .width = 100, .height = 70 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .width = 100, .height = 70 });
+    try graph.setNode("A", .{ .width = 60, .height = 30 });
+    try graph.setNode("B", .{ .width = 60, .height = 30 });
+    try graph.setNode("C", .{ .width = 60, .height = 30 });
+
+    try graph.setParent("Left", "Outer");
+    try graph.setParent("Right", "Outer");
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Left");
+    try graph.setParent("C", "Right");
+
+    try graph.setEdge("A", "B", .{}, null);
+    try graph.setEdge("B", "C", .{}, null);
+
+    const config = DagreConfig{ .ranker = .longest_path, .nodesep = 50, .ranksep = 50 };
+    try layoutFlatCompound(std.testing.allocator, &graph, config);
+
+    const outer = graph.getNode("Outer").?;
+    const left = graph.getNode("Left").?;
+    const right = graph.getNode("Right").?;
+
+    try std.testing.expect(outer.min_rank != null);
+    try std.testing.expect(outer.max_rank != null);
+    try std.testing.expect(left.min_rank != null);
+    try std.testing.expect(left.max_rank != null);
+    try std.testing.expect(right.min_rank != null);
+    try std.testing.expect(right.max_rank != null);
+
+    try std.testing.expect(outer.border_left.items.len > 0);
+    try std.testing.expect(outer.border_right.items.len > 0);
+    try std.testing.expect(left.border_left.items.len > 0);
+    try std.testing.expect(left.border_right.items.len > 0);
+
+    try std.testing.expect(graph.graph_label.max_rank != null);
+    try std.testing.expect(graph.graph_label.nesting_root == null);
+}
+
+test "dagre compound layout creates explicit border dummy nodes" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Cluster", .{ .is_subgraph = true });
+    try graph.setNode("Child", .{});
+    try graph.setParent("Child", "Cluster");
+
+    try layoutFlatCompound(std.testing.allocator, &graph, DagreConfig{});
+
+    const cluster = graph.getNode("Cluster").?;
+    try std.testing.expect(cluster.border_top != null);
+    try std.testing.expect(cluster.border_bottom != null);
+    try std.testing.expect(cluster.border_left.items.len > 0);
+    try std.testing.expect(cluster.border_right.items.len > 0);
+
+    const top = graph.getNode(cluster.border_top.?).?;
+    try std.testing.expectEqual(model.DummyKind.border, top.dummy_kind.?);
+    try std.testing.expectEqual(model.BorderKind.top, top.border_kind.?);
+}
+
+test "dagre compound layout separates overlapping sibling subgraphs" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Left", .{ .is_subgraph = true });
+    try graph.setNode("Right", .{ .is_subgraph = true });
+    try graph.setNode("A", .{ .width = 60, .height = 30 });
+    try graph.setNode("B", .{ .width = 60, .height = 30 });
+    try graph.setNode("C", .{ .width = 60, .height = 30 });
+    try graph.setNode("D", .{ .width = 60, .height = 30 });
+
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Left");
+    try graph.setParent("C", "Right");
+    try graph.setParent("D", "Right");
+
+    try graph.setEdge("A", "B", .{}, null);
+    try graph.setEdge("C", "D", .{}, null);
+    try graph.setEdge("B", "D", .{}, null);
+
+    try layoutFlatCompound(std.testing.allocator, &graph, .{
+        .ranker = .longest_path,
+        .nodesep = 50,
+        .ranksep = 50,
+    });
+
+    const left = graph.getNode("Left").?;
+    const right = graph.getNode("Right").?;
+    const left_right_edge = left.x + left.width / 2.0;
+    const right_left_edge = right.x - right.width / 2.0;
+
+    try std.testing.expect(right_left_edge >= left_right_edge + sibling_subgraph_gap - 0.001);
+}
+
+test "dagre compound layout restores edges touching subgraphs with boundary points" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Cluster", .{ .is_subgraph = true, .width = 140, .height = 90 });
+    try graph.setNode("Inner", .{ .width = 60, .height = 30 });
+    try graph.setNode("Source", .{ .width = 60, .height = 30 });
+    try graph.setNode("Sink", .{ .width = 60, .height = 30 });
+    try graph.setParent("Inner", "Cluster");
+    try graph.setEdge("Cluster", "Sink", .{}, "cluster-out");
+    try graph.setEdge("Source", "Cluster", .{}, "cluster-in");
+
+    try layoutFlatCompound(std.testing.allocator, &graph, .{
+        .ranker = .longest_path,
+        .nodesep = 50,
+        .ranksep = 50,
+    });
+
+    const cluster = graph.getNode("Cluster").?;
+    const top = graph.getNode(cluster.border_top.?).?;
+    const bottom = graph.getNode(cluster.border_bottom.?).?;
+
+    const out_edge = graph.edge("Cluster", "Sink", "cluster-out").?;
+    try std.testing.expect(out_edge.points.items.len >= 3);
+    try expectEdgeContainsPoint(out_edge.points.items, .{ .x = bottom.x, .y = bottom.y });
+
+    const in_edge = graph.edge("Source", "Cluster", "cluster-in").?;
+    try std.testing.expect(in_edge.points.items.len >= 3);
+    try expectEdgeContainsPoint(in_edge.points.items, .{ .x = top.x, .y = top.y });
+}
+
+test "dagre compound layout removes sparse nesting ranks after ranking" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer graph.deinitDeep();
+
+    try graph.setNode("A", .{ .rank = 0 });
+    try graph.setNode("B", .{ .rank = 3 });
+    try graph.setNode("C", .{ .rank = 6 });
+    graph.graph_label.node_rank_factor = 3;
+
+    removeEmptyRanks(&graph);
+
+    try std.testing.expectEqual(@as(?i32, 0), graph.getNode("A").?.rank);
+    try std.testing.expectEqual(@as(?i32, 1), graph.getNode("B").?.rank);
+    try std.testing.expectEqual(@as(?i32, 2), graph.getNode("C").?.rank);
+}
+
+test "dagre routing adds a vertical target dock for downward inter-container edges when clear" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Top", .{ .is_subgraph = true, .x = 0, .y = 0, .width = 120, .height = 80 });
+    try graph.setNode("Bottom", .{ .is_subgraph = true, .x = 220, .y = 220, .width = 120, .height = 80 });
+    try graph.setNode("A", .{ .x = 0, .y = 0, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 220, .y = 220, .width = 20, .height = 20 });
+    try graph.setParent("A", "Top");
+    try graph.setParent("B", "Bottom");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Top",
+        .tgt_container = "Bottom",
+        .src_boundary_container = "Top",
+        .tgt_boundary_container = "Bottom",
+        .edge_name = null,
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", null).?;
+    try std.testing.expect(edge.points.items.len >= 3);
+    const dock = edge.points.items[edge.points.items.len - 2];
+    const target = edge.points.items[edge.points.items.len - 1];
+    try std.testing.expectApproxEqAbs(target.x, dock.x, 0.001);
+    try std.testing.expect(dock.y < target.y);
+}
+
+test "dagre routing prefers horizontal target dock when horizontal offset dominates" {
+    var edge = model.EdgeData{};
+    defer edge.points.deinit(std.testing.allocator);
+
+    try edge.points.append(std.testing.allocator, .{ .x = 100, .y = 100 });
+    try edge.points.append(std.testing.allocator, .{ .x = 170, .y = 220 });
+    try edge.points.append(std.testing.allocator, .{ .x = 260, .y = 130 });
+
+    try addOrthogonalTargetDockIfClear(std.testing.allocator, &edge, &.{});
+
+    try std.testing.expectEqual(@as(usize, 4), edge.points.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 170), edge.points.items[2].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 130), edge.points.items[2].y, 0.001);
+}
+
+test "dagre routing skips target docking for same-source fanout into one boundary" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Top", .{ .is_subgraph = true, .x = 0, .y = 0, .width = 120, .height = 80 });
+    try graph.setNode("Bottom", .{ .is_subgraph = true, .x = 220, .y = 220, .width = 220, .height = 120 });
+    try graph.setNode("A", .{ .x = 0, .y = 0, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 180, .y = 220, .width = 20, .height = 20 });
+    try graph.setNode("C", .{ .x = 260, .y = 220, .width = 20, .height = 20 });
+    try graph.setParent("A", "Top");
+    try graph.setParent("B", "Bottom");
+    try graph.setParent("C", "Bottom");
+    try graph.setEdge("A", "B", .{}, null);
+    try graph.setEdge("A", "C", .{}, "alt");
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Top",
+        .tgt_container = "Bottom",
+        .src_boundary_container = "Top",
+        .tgt_boundary_container = "Bottom",
+        .edge_name = null,
+    });
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "C",
+        .src_container = "Top",
+        .tgt_container = "Bottom",
+        .src_boundary_container = "Top",
+        .tgt_boundary_container = "Bottom",
+        .edge_name = "alt",
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const first = graph.edge("A", "B", null).?;
+    const second = graph.edge("A", "C", "alt").?;
+    try std.testing.expect(first.points.items.len >= 4);
+    try std.testing.expect(second.points.items.len >= 4);
+}
+
+test "dagre routing avoids ordinary node obstacles for inter-container edges" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Left", .{ .is_subgraph = true, .x = 80, .y = 120, .width = 120, .height = 120 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .x = 320, .y = 260, .width = 160, .height = 120 });
+    try graph.setNode("A", .{ .x = 80, .y = 80, .width = 20, .height = 20 });
+    try graph.setNode("Blocker", .{ .x = 190, .y = 150, .width = 80, .height = 30 });
+    try graph.setNode("B", .{ .x = 320, .y = 260, .width = 20, .height = 20 });
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Right");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Left",
+        .tgt_container = "Right",
+        .src_boundary_container = "Left",
+        .tgt_boundary_container = "Right",
+        .edge_name = null,
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", null).?;
+    const blocker = [_]ObstacleRect{
+        .{ .id = "Blocker", .left = 150, .right = 230, .top = 135, .bottom = 165, .cx = 190, .cy = 150 },
+    };
+    try std.testing.expect(!routeCrossesAnyBlocker(edge.points.items, &blocker));
+}
+
+test "dagre routing adds orthogonal source dock when first leg can break out cleanly" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Left", .{ .is_subgraph = true, .x = 0, .y = 0, .width = 120, .height = 80 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .x = 260, .y = 240, .width = 120, .height = 80 });
+    try graph.setNode("A", .{ .x = 0, .y = 0, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 260, .y = 240, .width = 20, .height = 20 });
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Right");
+    try graph.setEdge("A", "B", .{}, null);
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+    try inter_edges.append(std.testing.allocator, .{
+        .src_node = "A",
+        .tgt_node = "B",
+        .src_container = "Left",
+        .tgt_container = "Right",
+        .src_boundary_container = "Left",
+        .tgt_boundary_container = "Right",
+        .edge_name = null,
+    });
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", null).?;
+    try std.testing.expect(edge.points.items.len >= 3);
+    try std.testing.expectApproxEqAbs(edge.points.items[0].y, edge.points.items[1].y, 0.001);
+}
+
+test "dagre routing prefers source dock orientation from overall source-target offset" {
+    var edge = model.EdgeData{};
+    defer edge.points.deinit(std.testing.allocator);
+
+    try edge.points.append(std.testing.allocator, .{ .x = 100, .y = 100 });
+    try edge.points.append(std.testing.allocator, .{ .x = 130, .y = 180 });
+    try edge.points.append(std.testing.allocator, .{ .x = 260, .y = 130 });
+
+    try addOrthogonalSourceDockIfClear(std.testing.allocator, &edge, &.{});
+
+    try std.testing.expectEqual(@as(usize, 4), edge.points.items.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 130), edge.points.items[1].x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 100), edge.points.items[1].y, 0.001);
+}
+
+test "dagre compound routing classifies and routes node edges across sibling containers" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Left", .{ .is_subgraph = true, .x = 80, .y = 80, .width = 100, .height = 100 });
+    try graph.setNode("Middle", .{ .is_subgraph = true, .x = 220, .y = 80, .width = 100, .height = 100 });
+    try graph.setNode("Right", .{ .is_subgraph = true, .x = 360, .y = 80, .width = 100, .height = 100 });
+    try graph.setNode("A", .{ .x = 80, .y = 80, .width = 20, .height = 20 });
+    try graph.setNode("B", .{ .x = 360, .y = 80, .width = 20, .height = 20 });
+    try graph.setNode("M", .{ .x = 220, .y = 80, .width = 20, .height = 20 });
+
+    try graph.setParent("A", "Left");
+    try graph.setParent("B", "Right");
+    try graph.setParent("M", "Middle");
+    try graph.setEdge("A", "B", .{}, "cross");
+
+    var inter_edges = std.ArrayListUnmanaged(InterEdge){};
+    defer inter_edges.deinit(std.testing.allocator);
+
+    try collectCompoundInterEdges(std.testing.allocator, &graph, &inter_edges);
+
+    try std.testing.expectEqual(@as(usize, 1), inter_edges.items.len);
+    try std.testing.expectEqualStrings("Left", inter_edges.items[0].src_boundary_container.?);
+    try std.testing.expectEqualStrings("Right", inter_edges.items[0].tgt_boundary_container.?);
+
+    try routeInterContainerEdges(std.testing.allocator, &graph, inter_edges.items);
+
+    const edge = graph.edge("A", "B", "cross").?;
+    try std.testing.expect(edge.points.items.len >= 4);
+
+    const blocker = [_]ObstacleRect{
+        .{ .id = "Middle", .left = 170, .right = 270, .top = 30, .bottom = 130, .cx = 220, .cy = 80 },
+    };
+    try std.testing.expect(!routeCrossesAnyBlocker(edge.points.items, &blocker));
+}
+
+fn expectEdgeContainsPoint(points: []const Point, expected: Point) !void {
+    for (points) |point| {
+        if (pointApproximatelyEquals(point, expected)) return;
+    }
+    return error.TestExpectedEqual;
+}
+
+test "dagre layout uses compound path for grouped graphs by default" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Outer", .{ .is_subgraph = true });
+    try graph.setNode("Inner", .{ .is_subgraph = true });
+    try graph.setNode("A", .{ .width = 60, .height = 30 });
+    try graph.setNode("B", .{ .width = 60, .height = 30 });
+    try graph.setParent("Inner", "Outer");
+    try graph.setParent("A", "Inner");
+    try graph.setParent("B", "Outer");
+    try graph.setEdge("A", "B", .{}, null);
+
+    try layout(std.testing.allocator, &graph, .{
+        .ranker = .longest_path,
+        .nodesep = 50,
+        .ranksep = 50,
+    });
+
+    const outer = graph.getNode("Outer").?;
+    const inner = graph.getNode("Inner").?;
+
+    try std.testing.expect(outer.border_top != null);
+    try std.testing.expect(outer.border_left.items.len > 0);
+    try std.testing.expect(inner.border_top != null);
+    try std.testing.expect(inner.border_right.items.len > 0);
+    try std.testing.expect(outer.width > 0);
+    try std.testing.expect(outer.height > 0);
+    try std.testing.expect(inner.width > 0);
+    try std.testing.expect(inner.height > 0);
+    try std.testing.expect(graph.graph_label.nesting_root == null);
+}
+
+test "dagre layout can still use legacy hierarchical subgraph path" {
+    var graph = Digraph(NodeData, EdgeData, GraphData).init(std.testing.allocator);
+    defer {
+        normalize.freeDummyIds(std.testing.allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    try graph.setNode("Processing", .{ .is_subgraph = true, .subgraph_title = "Processing" });
+    try graph.setNode("Input", .{ .width = 60, .height = 30 });
+    try graph.setNode("Worker", .{ .width = 60, .height = 30 });
+    try graph.setNode("Output", .{ .width = 60, .height = 30 });
+    try graph.setParent("Worker", "Processing");
+    try graph.setEdge("Input", "Worker", .{}, null);
+    try graph.setEdge("Worker", "Output", .{}, null);
+
+    try layout(std.testing.allocator, &graph, .{
+        .use_legacy_hierarchical_subgraphs = true,
+        .ranker = .longest_path,
+    });
+
+    const processing = graph.getNode("Processing").?;
+    try std.testing.expect(processing.width > 0);
+    try std.testing.expect(processing.height > 0);
 }
 
 // TODO: Fix infinite loop in longest_path algorithm with cycles
