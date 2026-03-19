@@ -989,3 +989,32 @@ test "er svg: write to file" {
     const file = try std.fs.cwd().openFile("/tmp/merrow_er_test.svg", .{});
     file.close();
 }
+
+test "er svg: fixture diagrams render to svg" {
+    const allocator = std.testing.allocator;
+    const fixtures = [_]struct {
+        path: []const u8,
+        expected_text: []const u8,
+    }{
+        .{ .path = "test-diagrams/er_simple.mmd", .expected_text = "CUSTOMER" },
+        .{ .path = "test-diagrams/er_simple_v2.mmd", .expected_text = "AUTHOR" },
+        .{ .path = "test-diagrams/er_complex.mmd", .expected_text = "PRODUCT" },
+        .{ .path = "test-diagrams/er_complex_v2.mmd", .expected_text = "HOSPITAL" },
+    };
+
+    for (fixtures) |fixture| {
+        const source = try std.fs.cwd().readFileAlloc(allocator, fixture.path, 1024 * 1024);
+        defer allocator.free(source);
+
+        var diagram = try @import("parser.zig").parse(allocator, source);
+        defer diagram.deinit();
+
+        const svg = try renderErToSVGString(allocator, &diagram);
+        defer allocator.free(svg);
+
+        try std.testing.expect(svg.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, svg, "<svg") != null);
+        try std.testing.expect(std.mem.indexOf(u8, svg, fixture.expected_text) != null);
+        try std.testing.expect(std.mem.indexOf(u8, svg, "<rect") != null);
+    }
+}

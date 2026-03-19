@@ -685,6 +685,15 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
 @end
 
+typedef NS_ENUM(NSInteger, MerrowFreeformInspectorMode) {
+    MerrowFreeformInspectorModeCanvas = 0,
+    MerrowFreeformInspectorModeAddObject = 1,
+    MerrowFreeformInspectorModeAddLink = 2,
+    MerrowFreeformInspectorModeNode = 3,
+    MerrowFreeformInspectorModeGroup = 4,
+    MerrowFreeformInspectorModeEdge = 5,
+};
+
 @interface MerrowStudioAppDelegate : NSObject <NSApplicationDelegate, NSSplitViewDelegate, NSWindowDelegate, NSTextViewDelegate, MerrowFreeformCanvasComponentDelegate>
 @property (nonatomic, strong) NSWindow *window;
 @property (nonatomic, strong) NSSplitView *splitView;
@@ -700,8 +709,6 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 @property (nonatomic, strong) NSView *editorPaneContentHost;
 @property (nonatomic, strong) NSScrollView *editorScrollView;
 @property (nonatomic, strong) NSScrollView *freeformToolsScrollView;
-@property (nonatomic, strong) NSScrollView *sequenceToolsScrollView;
-@property (nonatomic, strong) NSScrollView *classToolsScrollView;
 @property (nonatomic, strong) MerrowFreeformCanvasComponent *freeformCanvasComponent;
 @property (nonatomic, strong) NSTextView *editorTextView;
 @property (nonatomic, strong) NSTextField *viewerPaneTitleLabel;
@@ -710,9 +717,34 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 @property (nonatomic, strong) NSTextField *editorPaneSubtitleLabel;
 @property (nonatomic, strong) NSTextField *freeformSelectionLabel;
 @property (nonatomic, strong) NSTextField *freeformCreateStatusLabel;
+@property (nonatomic, strong) NSTextField *freeformInspectorIntroLabel;
+@property (nonatomic, strong) NSTextField *freeformInspectorIntroDetailLabel;
+@property (nonatomic, strong) NSStackView *freeformCanvasModeSection;
+@property (nonatomic, strong) NSStackView *freeformAddObjectModeSection;
+@property (nonatomic, strong) NSStackView *freeformAddLinkModeSection;
+@property (nonatomic, strong) NSStackView *freeformDefaultsModeSection;
+@property (nonatomic, strong) NSStackView *freeformSelectionModeSection;
+@property (nonatomic, strong) NSStackView *freeformObjectModeSection;
+@property (nonatomic, strong) NSStackView *freeformEdgeModeSection;
+@property (nonatomic, strong) NSStackView *freeformShapePickerSection;
+@property (nonatomic, strong) NSTextField *freeformObjectLabelCaption;
+@property (nonatomic, strong) NSTextField *freeformObjectSizeCaption;
 @property (nonatomic, strong) NSColorWell *freeformCanvasBackgroundColorWell;
 @property (nonatomic, strong) NSSlider *freeformCanvasBackgroundOpacitySlider;
 @property (nonatomic, strong) NSTextField *freeformCanvasBackgroundOpacityValueLabel;
+@property (nonatomic, strong) NSColorWell *freeformDefaultNodeFillColorWell;
+@property (nonatomic, strong) NSColorWell *freeformDefaultNodeStrokeColorWell;
+@property (nonatomic, strong) NSSlider *freeformDefaultNodeStrokeWidthSlider;
+@property (nonatomic, strong) NSTextField *freeformDefaultNodeStrokeWidthValueLabel;
+@property (nonatomic, strong) NSColorWell *freeformDefaultSubgraphFillColorWell;
+@property (nonatomic, strong) NSColorWell *freeformDefaultSubgraphStrokeColorWell;
+@property (nonatomic, strong) NSSlider *freeformDefaultSubgraphStrokeWidthSlider;
+@property (nonatomic, strong) NSTextField *freeformDefaultSubgraphStrokeWidthValueLabel;
+@property (nonatomic, strong) NSColorWell *freeformDefaultEdgeColorWell;
+@property (nonatomic, strong) NSSlider *freeformDefaultEdgeThicknessSlider;
+@property (nonatomic, strong) NSTextField *freeformDefaultEdgeThicknessValueLabel;
+@property (nonatomic, strong) NSPopUpButton *freeformDefaultEdgePatternPopup;
+@property (nonatomic, strong) NSPopUpButton *freeformDefaultEdgeArrowPopup;
 @property (nonatomic, strong) NSTextField *freeformNodeLabelField;
 @property (nonatomic, strong) NSTextField *freeformWidthField;
 @property (nonatomic, strong) NSTextField *freeformHeightField;
@@ -733,54 +765,20 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 @property (nonatomic, strong) NSPopUpButton *freeformConnectorSourcePopup;
 @property (nonatomic, strong) NSPopUpButton *freeformConnectorTargetPopup;
 @property (nonatomic, strong) NSButton *freeformAddConnectorButton;
-@property (nonatomic, strong) NSTextField *sequenceSelectionLabel;
-@property (nonatomic, strong) NSColorWell *sequenceCanvasBackgroundColorWell;
-@property (nonatomic, strong) NSSlider *sequenceCanvasBackgroundOpacitySlider;
-@property (nonatomic, strong) NSTextField *sequenceCanvasBackgroundOpacityValueLabel;
-@property (nonatomic, strong) NSTextField *sequenceElementLabelField;
-@property (nonatomic, strong) NSTextField *sequenceWidthField;
-@property (nonatomic, strong) NSTextField *sequenceHeightField;
-@property (nonatomic, strong) NSColorWell *sequenceFillColorWell;
-@property (nonatomic, strong) NSColorWell *sequenceStrokeColorWell;
-@property (nonatomic, strong) NSSlider *sequenceStrokeWidthSlider;
-@property (nonatomic, strong) NSTextField *sequenceStrokeWidthValueLabel;
-@property (nonatomic, strong) NSTextField *sequenceMessageLabelField;
-@property (nonatomic, strong) NSColorWell *sequenceMessageColorWell;
-@property (nonatomic, strong) NSSlider *sequenceMessageThicknessSlider;
-@property (nonatomic, strong) NSTextField *sequenceMessageThicknessValueLabel;
-@property (nonatomic, strong) NSPopUpButton *sequenceMessagePatternPopup;
-@property (nonatomic, strong) NSPopUpButton *sequenceMessageArrowPopup;
-@property (nonatomic, strong) NSTextField *classSelectionLabel;
-@property (nonatomic, strong) NSColorWell *classCanvasBackgroundColorWell;
-@property (nonatomic, strong) NSSlider *classCanvasBackgroundOpacitySlider;
-@property (nonatomic, strong) NSTextField *classCanvasBackgroundOpacityValueLabel;
-@property (nonatomic, strong) NSTextField *classTitleField;
-@property (nonatomic, strong) NSTextField *classSubtitleField;
-@property (nonatomic, strong) NSTextField *classWidthField;
-@property (nonatomic, strong) NSTextField *classHeightField;
-@property (nonatomic, strong) NSColorWell *classHeaderFillColorWell;
-@property (nonatomic, strong) NSColorWell *classBodyFillColorWell;
-@property (nonatomic, strong) NSColorWell *classStrokeColorWell;
-@property (nonatomic, strong) NSSlider *classStrokeWidthSlider;
-@property (nonatomic, strong) NSTextField *classStrokeWidthValueLabel;
-@property (nonatomic, strong) NSTextView *classAttributesTextView;
-@property (nonatomic, strong) NSTextView *classMethodsTextView;
-@property (nonatomic, strong) NSTextField *classRelationLabelField;
-@property (nonatomic, strong) NSColorWell *classRelationColorWell;
-@property (nonatomic, strong) NSSlider *classRelationThicknessSlider;
-@property (nonatomic, strong) NSTextField *classRelationThicknessValueLabel;
-@property (nonatomic, strong) NSPopUpButton *classRelationPatternPopup;
-@property (nonatomic, strong) NSPopUpButton *classSourceEndpointPopup;
-@property (nonatomic, strong) NSPopUpButton *classTargetEndpointPopup;
 @property (nonatomic, strong) NSMenuItem *mermaidModeMenuItem;
 @property (nonatomic, strong) NSMenuItem *freeformModeMenuItem;
+@property (nonatomic, strong) NSMenuItem *freeformInsertGroupMenuItem;
+@property (nonatomic, strong) NSMenu *freeformInsertShapeMenu;
+@property (nonatomic, strong) NSMenuItem *insertAddObjectMenuItem;
+@property (nonatomic, strong) NSMenuItem *insertAddLinkMenuItem;
 @property (nonatomic, copy) NSString *currentSourcePath;
 @property (nonatomic, assign) BOOL currentDocumentIsFreeform;
 @property (nonatomic, assign) BOOL isApplyingHighlighting;
 @property (nonatomic, assign) BOOL isSynchronizingEditor;
-@property (nonatomic, assign) BOOL isSynchronizingClassInspector;
 @property (nonatomic, assign) BOOL freeformModeEnabled;
 @property (nonatomic, assign) NSUInteger editorGeneration;
+@property (nonatomic, assign) MerrowFreeformInspectorMode freeformInspectorMode;
+@property (nonatomic, assign) BOOL freeformInspectorModeOverrideActive;
 @property (nonatomic, strong) dispatch_queue_t editorWorkQueue;
 @property (nonatomic, copy) NSString *currentCommandContextId;
 @property (nonatomic, copy) NSString *currentCommandContextDisplay;
@@ -788,10 +786,75 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
 @implementation MerrowStudioAppDelegate
 
+- (NSAppearance *)darkInspectorAppearance {
+    return [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+}
+
+- (NSString *)appDisplayName {
+    NSString *name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+    return name.length > 0 ? name : @"Merrow Studio";
+}
+
+- (void)showAboutDialog:(id)sender {
+    (void)sender;
+
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSString *appName = [self appDisplayName];
+    NSString *shortVersion = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
+    NSString *buildVersion = [bundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"";
+    NSImage *appIcon = NSApp.applicationIconImage ?: [NSImage imageNamed:@"NSApplicationIcon"];
+
+    NSMutableDictionary<NSAboutPanelOptionKey, id> *options = [NSMutableDictionary dictionaryWithObject:appName
+                                                                                                   forKey:@"ApplicationName"];
+    if (shortVersion.length > 0) {
+        options[@"ApplicationVersion"] = shortVersion;
+    }
+    if (buildVersion.length > 0 && ![buildVersion isEqualToString:shortVersion]) {
+        options[@"Version"] = [NSString stringWithFormat:@"Build %@", buildVersion];
+    }
+    if (appIcon) {
+        options[@"ApplicationIcon"] = appIcon;
+    }
+
+    [NSApp orderFrontStandardAboutPanelWithOptions:options];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)styleDarkInspectorButton:(NSButton *)button {
+    if (!button || [button isKindOfClass:[NSColorWell class]]) return;
+
+    button.appearance = [self darkInspectorAppearance];
+    button.bordered = YES;
+    button.bezelStyle = NSBezelStyleRounded;
+
+    if (@available(macOS 10.14, *)) {
+        button.bezelColor = [NSColor colorWithRed:0.23 green:0.27 blue:0.33 alpha:1.0];
+        button.contentTintColor = [NSColor colorWithRed:0.95 green:0.96 blue:0.98 alpha:1.0];
+    }
+}
+
+- (void)applyDarkInspectorControlThemeToView:(NSView *)view {
+    if (!view) return;
+
+    if ([view isKindOfClass:[NSButton class]]) {
+        [self styleDarkInspectorButton:(NSButton *)view];
+    }
+
+    for (NSView *subview in view.subviews) {
+        [self applyDarkInspectorControlThemeToView:subview];
+    }
+}
+
 - (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
     SEL action = menuItem.action;
     if (action == @selector(resetFreeformToMermaid:)) {
         return self.freeformModeEnabled || self.currentDocumentIsFreeform;
+    }
+    if (action == @selector(beginFreeformAddGroup:) ||
+        action == @selector(beginFreeformAddShapeFromMenu:) ||
+        action == @selector(showFreeformAddObjectMode:) ||
+        action == @selector(showFreeformAddLinkMode:)) {
+        return self.freeformModeEnabled;
     }
     return YES;
 }
@@ -1050,34 +1113,6 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     return label;
 }
 
-- (NSScrollView *)freeformMultilineEditorWithTextView:(NSTextView * __strong *)outTextView minHeight:(CGFloat)minHeight {
-    NSTextView *textView = [[NSTextView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 240.0, minHeight)];
-    textView.translatesAutoresizingMaskIntoConstraints = NO;
-    textView.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-    textView.textColor = [NSColor colorWithRed:0.92 green:0.94 blue:0.97 alpha:1.0];
-    textView.backgroundColor = [NSColor colorWithRed:0.15 green:0.16 blue:0.19 alpha:1.0];
-    textView.insertionPointColor = [NSColor colorWithRed:0.92 green:0.94 blue:0.97 alpha:1.0];
-    textView.drawsBackground = YES;
-    textView.usesFindPanel = NO;
-    textView.richText = NO;
-    textView.automaticQuoteSubstitutionEnabled = NO;
-    textView.automaticDataDetectionEnabled = NO;
-    textView.delegate = self;
-
-    NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 240.0, minHeight)];
-    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-    scrollView.borderType = NSBezelBorder;
-    scrollView.hasVerticalScroller = YES;
-    scrollView.hasHorizontalScroller = NO;
-    scrollView.autohidesScrollers = YES;
-    scrollView.documentView = textView;
-    [scrollView.heightAnchor constraintEqualToConstant:minHeight].active = YES;
-    [scrollView.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-    if (outTextView) *outTextView = textView;
-    return scrollView;
-}
-
 - (NSView *)freeformSectionViewWithTitle:(NSString *)title lines:(NSArray<NSString *> *)lines {
     NSStackView *section = [[NSStackView alloc] initWithFrame:NSZeroRect];
     section.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1136,6 +1171,202 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     [popup selectItemAtIndex:0];
 }
 
+- (NSArray<NSDictionary *> *)freeformShapeOptionsForGraphType:(MerrowFreeformGraphType)graphType {
+    switch (graphType) {
+        case MerrowFreeformGraphTypeSequence:
+            return @[
+                @{ @"title": @"Rounded Rectangle", @"shape": @1 },
+                @{ @"title": @"Rectangle", @"shape": @0 },
+                @{ @"title": @"Circle", @"shape": @3 },
+                @{ @"title": @"Stadium", @"shape": @6 },
+            ];
+        case MerrowFreeformGraphTypeClass:
+            return @[
+                @{ @"title": @"Rectangle", @"shape": @0 },
+                @{ @"title": @"Rounded Rectangle", @"shape": @1 },
+                @{ @"title": @"Circle", @"shape": @3 },
+                @{ @"title": @"Hexagon", @"shape": @4 },
+            ];
+        case MerrowFreeformGraphTypeER:
+            return @[
+                @{ @"title": @"Rectangle", @"shape": @0 },
+                @{ @"title": @"Rounded Rectangle", @"shape": @1 },
+                @{ @"title": @"Diamond", @"shape": @2 },
+                @{ @"title": @"Circle", @"shape": @3 },
+            ];
+        case MerrowFreeformGraphTypeFlowchart:
+        default:
+            return @[
+                @{ @"title": @"Rounded Rectangle", @"shape": @1 },
+                @{ @"title": @"Rectangle", @"shape": @0 },
+                @{ @"title": @"Diamond", @"shape": @2 },
+                @{ @"title": @"Circle", @"shape": @3 },
+                @{ @"title": @"Hexagon", @"shape": @4 },
+                @{ @"title": @"Cylinder", @"shape": @5 },
+                @{ @"title": @"Stadium", @"shape": @6 },
+                @{ @"title": @"Subroutine", @"shape": @11 },
+            ];
+    }
+}
+
+- (void)rebuildFreeformShapePopupOptions {
+    NSNumber *selectedShape = [self.freeformShapePopup.selectedItem.representedObject isKindOfClass:[NSNumber class]] ? self.freeformShapePopup.selectedItem.representedObject : nil;
+    NSArray<NSDictionary *> *options = [self freeformShapeOptionsForGraphType:self.freeformCanvasComponent.graphType];
+    [self.freeformShapePopup removeAllItems];
+    for (NSDictionary *option in options) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:option[@"title"] action:nil keyEquivalent:@""];
+        item.representedObject = option[@"shape"];
+        [self.freeformShapePopup.menu addItem:item];
+    }
+
+    NSMenuItem *itemToSelect = nil;
+    for (NSMenuItem *item in self.freeformShapePopup.itemArray) {
+        if (selectedShape && [item.representedObject isKindOfClass:[NSNumber class]] && [item.representedObject isEqualToNumber:selectedShape]) {
+            itemToSelect = item;
+            break;
+        }
+    }
+    [self.freeformShapePopup selectItem:itemToSelect ?: self.freeformShapePopup.itemArray.firstObject];
+}
+
+- (void)rebuildFreeformInsertMenu {
+    if (!self.freeformInsertShapeMenu) return;
+
+    [self.freeformInsertShapeMenu removeAllItems];
+    NSArray<NSDictionary *> *options = [self freeformShapeOptionsForGraphType:self.freeformCanvasComponent.graphType];
+    for (NSDictionary *option in options) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:option[@"title"] action:@selector(beginFreeformAddShapeFromMenu:) keyEquivalent:@""];
+        item.target = self;
+        item.representedObject = option[@"shape"];
+        [self.freeformInsertShapeMenu addItem:item];
+    }
+}
+
+- (NSStackView *)newFreeformModeSection {
+    NSStackView *section = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    section.translatesAutoresizingMaskIntoConstraints = NO;
+    section.orientation = NSUserInterfaceLayoutOrientationVertical;
+    section.alignment = NSLayoutAttributeLeading;
+    section.spacing = 12.0;
+    return section;
+}
+
+- (MerrowFreeformInspectorMode)resolvedFreeformInspectorMode {
+    if (self.freeformCanvasComponent.insertionKind == MerrowFreeformInsertionKindConnector) {
+        return MerrowFreeformInspectorModeAddLink;
+    }
+    if (self.freeformCanvasComponent.insertionKind == MerrowFreeformInsertionKindNode ||
+        self.freeformCanvasComponent.insertionKind == MerrowFreeformInsertionKindSubgraph) {
+        return MerrowFreeformInspectorModeAddObject;
+    }
+    if (self.freeformCanvasComponent.hasSelectedEdge) {
+        return MerrowFreeformInspectorModeEdge;
+    }
+    if (self.freeformCanvasComponent.hasSelectedSubgraph) {
+        return MerrowFreeformInspectorModeGroup;
+    }
+    if (self.freeformCanvasComponent.hasSelectedNode) {
+        return MerrowFreeformInspectorModeNode;
+    }
+    if (self.freeformInspectorModeOverrideActive) {
+        return self.freeformInspectorMode;
+    }
+    return MerrowFreeformInspectorModeCanvas;
+}
+
+- (void)setFreeformInspectorModeOverride:(MerrowFreeformInspectorMode)mode {
+    self.freeformInspectorMode = mode;
+    self.freeformInspectorModeOverrideActive = YES;
+}
+
+- (void)clearFreeformInspectorModeOverride {
+    self.freeformInspectorModeOverrideActive = NO;
+}
+
+- (void)updateFreeformInspectorModeUI {
+    MerrowFreeformInspectorMode mode = [self resolvedFreeformInspectorMode];
+    self.freeformCanvasModeSection.hidden = mode != MerrowFreeformInspectorModeCanvas;
+    self.freeformDefaultsModeSection.hidden = mode != MerrowFreeformInspectorModeCanvas;
+    self.freeformAddObjectModeSection.hidden = mode != MerrowFreeformInspectorModeAddObject;
+    self.freeformAddLinkModeSection.hidden = mode != MerrowFreeformInspectorModeAddLink;
+    self.freeformSelectionModeSection.hidden = !(mode == MerrowFreeformInspectorModeNode || mode == MerrowFreeformInspectorModeGroup || mode == MerrowFreeformInspectorModeEdge);
+    self.freeformObjectModeSection.hidden = !(mode == MerrowFreeformInspectorModeNode || mode == MerrowFreeformInspectorModeGroup);
+    self.freeformEdgeModeSection.hidden = mode != MerrowFreeformInspectorModeEdge;
+
+    BOOL editingGroup = mode == MerrowFreeformInspectorModeGroup;
+    self.freeformObjectLabelCaption.stringValue = editingGroup ? @"Group title" : @"Node label";
+    self.freeformObjectSizeCaption.stringValue = editingGroup ? @"Group size" : @"Size";
+    self.freeformShapePickerSection.hidden = editingGroup;
+    self.freeformNodeLabelField.placeholderString = editingGroup ? @"Select a group to edit its title" : @"Select a node to edit its label";
+
+    NSString *thing = @"Canvas";
+    NSString *detail = @"Document-wide defaults and background settings.";
+    switch (mode) {
+        case MerrowFreeformInspectorModeAddObject:
+            thing = @"Add Object";
+            detail = @"Choose a shape or group, then place it on the canvas.";
+            break;
+        case MerrowFreeformInspectorModeAddLink:
+            thing = @"Add Link";
+            detail = @"Choose source and target objects for a new connector.";
+            break;
+        case MerrowFreeformInspectorModeNode:
+            thing = @"Node";
+            detail = @"Editing the selected node.";
+            break;
+        case MerrowFreeformInspectorModeGroup:
+            thing = @"Group";
+            detail = @"Editing the selected group.";
+            break;
+        case MerrowFreeformInspectorModeEdge:
+            thing = @"Connector";
+            detail = @"Editing the selected connector.";
+            break;
+        case MerrowFreeformInspectorModeCanvas:
+        default:
+            break;
+    }
+    self.freeformInspectorIntroLabel.stringValue = [NSString stringWithFormat:@"Inspecting %@", thing];
+    self.freeformInspectorIntroDetailLabel.stringValue = detail;
+}
+
+- (void)resetAppStateForIncomingDocument {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(processEditorChange) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applySyntaxHighlightingIfCurrent) object:nil];
+    [self clearFreeformInspectorModeOverride];
+    self.freeformInspectorMode = MerrowFreeformInspectorModeCanvas;
+    self.currentDocumentIsFreeform = NO;
+    self.freeformModeEnabled = NO;
+    self.currentSourcePath = nil;
+    [self clearCommandContext];
+    [self.freeformCanvasComponent clearDocument];
+    [self applyEditingModeUI];
+    [self syncFreeformInspectorControls];
+}
+
+- (void)blankMermaidWorkspaceForIncomingLoad {
+    self.isSynchronizingEditor = YES;
+    [self.editorTextView setString:@""];
+    [self applySyntaxHighlighting];
+    self.editorGeneration += 1;
+    [self.editorTextView setSelectedRange:NSMakeRange(0, 0)];
+    [self.editorTextView scrollRangeToVisible:NSMakeRange(0, 0)];
+    self.isSynchronizingEditor = NO;
+
+    [self.viewerRenderer replaceScene:NULL];
+    [self.viewerRenderer resetView];
+    [self.viewerView setNeedsDisplay:YES];
+    self.statusLabel.stringValue = @"Loading Mermaid document...";
+}
+
+- (void)finishLoadingMermaidSource:(NSString *)source fromPath:(NSString *)sourcePath {
+    self.freeformModeEnabled = NO;
+    self.currentDocumentIsFreeform = NO;
+    [self applyEditorSource:source fromPath:sourcePath];
+    [self applyEditingModeUI];
+    [self processEditorChange];
+}
+
 - (void)syncFreeformConnectorControls {
     NSArray<NSDictionary *> *objects = [self.freeformCanvasComponent connectableObjects];
     NSString *selectedObjectId = self.freeformCanvasComponent.selectedConnectableObjectId;
@@ -1174,342 +1405,369 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     [self syncFreeformConnectorControls];
 }
 
-- (BOOL)isSequenceFreeformGraph {
-    return self.freeformCanvasComponent.graphType == MerrowFreeformGraphTypeSequence;
-}
-
-- (BOOL)isClassFreeformGraph {
-    return self.freeformCanvasComponent.graphType == MerrowFreeformGraphTypeClass;
-}
-
-- (NSScrollView *)activeFreeformInspectorScrollView {
-    if ([self isSequenceFreeformGraph]) return self.sequenceToolsScrollView;
-    if ([self isClassFreeformGraph]) return self.classToolsScrollView;
-    return self.freeformToolsScrollView;
-}
-
 - (NSScrollView *)createFreeformToolsScrollView {
     NSStackView *stack = [[NSStackView alloc] initWithFrame:NSZeroRect];
     stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.appearance = [self darkInspectorAppearance];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 16.0;
     stack.edgeInsets = NSEdgeInsetsMake(16.0, 16.0, 24.0, 16.0);
 
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CANVAS"
-                                                                                                                     lines:@[
-                                                                                                                             @"Set the freeform background color and transparency used by the canvas and image exports.",
-                                                                                                                     ]]];
+        self.freeformInspectorIntroLabel = [self freeformPanelLabel:@"Inspecting Canvas"
+                                                                                                                     size:15.0
+                                                                                                                 weight:NSFontWeightSemibold
+                                                                                                                    color:[NSColor colorWithRed:0.96 green:0.97 blue:0.99 alpha:1.0]];
+        [stack addArrangedSubview:self.freeformInspectorIntroLabel];
+        self.freeformInspectorIntroDetailLabel = [self freeformPanelLabel:@"Document-wide defaults and background settings."
+                                                                                                                                 size:12.0
+                                                                                                                             weight:NSFontWeightRegular
+                                                                                                                                color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+        [stack addArrangedSubview:self.freeformInspectorIntroDetailLabel];
 
-        NSStackView *backgroundRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        backgroundRow.translatesAutoresizingMaskIntoConstraints = NO;
-        backgroundRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        backgroundRow.alignment = NSLayoutAttributeCenterY;
-        backgroundRow.spacing = 10.0;
-        [backgroundRow addArrangedSubview:[self freeformPanelLabel:@"Background"
-                                                                                                                    size:11.0
-                                                                                                                weight:NSFontWeightSemibold
-                                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformCanvasBackgroundColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.freeformCanvasBackgroundColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformCanvasBackgroundColorWell.target = self;
-        self.freeformCanvasBackgroundColorWell.action = @selector(applyFreeformCanvasBackgroundColor:);
-        [backgroundRow addArrangedSubview:self.freeformCanvasBackgroundColorWell];
-        [stack addArrangedSubview:backgroundRow];
+    self.freeformCanvasModeSection = [self newFreeformModeSection];
+    [self.freeformCanvasModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"CANVAS DEFAULTS"
+                                                                                    lines:@[
+                                                                                        @"Click the canvas with nothing selected to return here.",
+                                                                                        @"Set the freeform background and creation defaults for the whole document.",
+                                                                                    ]]];
+    NSStackView *backgroundRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    backgroundRow.translatesAutoresizingMaskIntoConstraints = NO;
+    backgroundRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    backgroundRow.alignment = NSLayoutAttributeCenterY;
+    backgroundRow.spacing = 10.0;
+    [backgroundRow addArrangedSubview:[self freeformPanelLabel:@"Background"
+                                                          size:11.0
+                                                        weight:NSFontWeightSemibold
+                                                         color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformCanvasBackgroundColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformCanvasBackgroundColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformCanvasBackgroundColorWell.target = self;
+    self.freeformCanvasBackgroundColorWell.action = @selector(applyFreeformCanvasBackgroundColor:);
+    [backgroundRow addArrangedSubview:self.freeformCanvasBackgroundColorWell];
+    [self.freeformCanvasModeSection addArrangedSubview:backgroundRow];
+    [self.freeformCanvasModeSection addArrangedSubview:[self freeformPanelLabel:@"Transparency"
+                                                                           size:11.0
+                                                                         weight:NSFontWeightSemibold
+                                                                          color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformCanvasBackgroundOpacitySlider = [NSSlider sliderWithValue:1.0 minValue:0.0 maxValue:1.0 target:self action:@selector(applyFreeformCanvasBackgroundOpacity:)];
+    self.freeformCanvasBackgroundOpacitySlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformCanvasBackgroundOpacitySlider.continuous = YES;
+    [self.freeformCanvasModeSection addArrangedSubview:self.freeformCanvasBackgroundOpacitySlider];
+    self.freeformCanvasBackgroundOpacityValueLabel = [self freeformPanelLabel:@"100%"
+                                                                         size:11.0
+                                                                       weight:NSFontWeightRegular
+                                                                        color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformCanvasModeSection addArrangedSubview:self.freeformCanvasBackgroundOpacityValueLabel];
+    [stack addArrangedSubview:self.freeformCanvasModeSection];
 
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Transparency"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformCanvasBackgroundOpacitySlider = [NSSlider sliderWithValue:1.0 minValue:0.0 maxValue:1.0 target:self action:@selector(applyFreeformCanvasBackgroundOpacity:)];
-        self.freeformCanvasBackgroundOpacitySlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformCanvasBackgroundOpacitySlider.continuous = YES;
-        [stack addArrangedSubview:self.freeformCanvasBackgroundOpacitySlider];
-        self.freeformCanvasBackgroundOpacityValueLabel = [self freeformPanelLabel:@"100%"
-                                                                                                                                                 size:11.0
-                                                                                                                                             weight:NSFontWeightRegular
-                                                                                                                                                color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.freeformCanvasBackgroundOpacityValueLabel];
+    self.freeformDefaultsModeSection = [self newFreeformModeSection];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"GRAPH DEFAULTS"
+                                                                                      lines:@[
+                                                                                          @"These defaults apply to newly inserted shapes, groups, and connectors.",
+                                                                                          @"Use Insert to switch into add modes, then place objects with the current defaults.",
+                                                                                      ]]];
+    NSStackView *defaultNodeFillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    defaultNodeFillRow.translatesAutoresizingMaskIntoConstraints = NO;
+    defaultNodeFillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    defaultNodeFillRow.alignment = NSLayoutAttributeCenterY;
+    defaultNodeFillRow.spacing = 10.0;
+    [defaultNodeFillRow addArrangedSubview:[self freeformPanelLabel:@"New shape fill" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultNodeFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformDefaultNodeFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultNodeFillColorWell.target = self;
+    self.freeformDefaultNodeFillColorWell.action = @selector(applyFreeformDefaultNodeFillColor:);
+    [defaultNodeFillRow addArrangedSubview:self.freeformDefaultNodeFillColorWell];
+    [self.freeformDefaultsModeSection addArrangedSubview:defaultNodeFillRow];
+    NSStackView *defaultNodeStrokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    defaultNodeStrokeRow.translatesAutoresizingMaskIntoConstraints = NO;
+    defaultNodeStrokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    defaultNodeStrokeRow.alignment = NSLayoutAttributeCenterY;
+    defaultNodeStrokeRow.spacing = 10.0;
+    [defaultNodeStrokeRow addArrangedSubview:[self freeformPanelLabel:@"New shape stroke" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultNodeStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformDefaultNodeStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultNodeStrokeColorWell.target = self;
+    self.freeformDefaultNodeStrokeColorWell.action = @selector(applyFreeformDefaultNodeStrokeColor:);
+    [defaultNodeStrokeRow addArrangedSubview:self.freeformDefaultNodeStrokeColorWell];
+    [self.freeformDefaultsModeSection addArrangedSubview:defaultNodeStrokeRow];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformPanelLabel:@"New shape border thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultNodeStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformDefaultNodeStrokeWidth:)];
+    self.freeformDefaultNodeStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultNodeStrokeWidthSlider.continuous = YES;
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultNodeStrokeWidthSlider];
+    self.freeformDefaultNodeStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultNodeStrokeWidthValueLabel];
 
-    [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CREATE"
-                                                           lines:@[
-                                                               @"Choose a shape, then click Add Shape or Add Group. The next click on the canvas places it.",
-                                                               @"If a group is selected, new objects are nested inside that group.",
-                                                           ]]];
+    NSStackView *defaultSubgraphFillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    defaultSubgraphFillRow.translatesAutoresizingMaskIntoConstraints = NO;
+    defaultSubgraphFillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    defaultSubgraphFillRow.alignment = NSLayoutAttributeCenterY;
+    defaultSubgraphFillRow.spacing = 10.0;
+    [defaultSubgraphFillRow addArrangedSubview:[self freeformPanelLabel:@"New group fill" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultSubgraphFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformDefaultSubgraphFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultSubgraphFillColorWell.target = self;
+    self.freeformDefaultSubgraphFillColorWell.action = @selector(applyFreeformDefaultSubgraphFillColor:);
+    [defaultSubgraphFillRow addArrangedSubview:self.freeformDefaultSubgraphFillColorWell];
+    [self.freeformDefaultsModeSection addArrangedSubview:defaultSubgraphFillRow];
+    NSStackView *defaultSubgraphStrokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    defaultSubgraphStrokeRow.translatesAutoresizingMaskIntoConstraints = NO;
+    defaultSubgraphStrokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    defaultSubgraphStrokeRow.alignment = NSLayoutAttributeCenterY;
+    defaultSubgraphStrokeRow.spacing = 10.0;
+    [defaultSubgraphStrokeRow addArrangedSubview:[self freeformPanelLabel:@"New group stroke" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultSubgraphStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformDefaultSubgraphStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultSubgraphStrokeColorWell.target = self;
+    self.freeformDefaultSubgraphStrokeColorWell.action = @selector(applyFreeformDefaultSubgraphStrokeColor:);
+    [defaultSubgraphStrokeRow addArrangedSubview:self.freeformDefaultSubgraphStrokeColorWell];
+    [self.freeformDefaultsModeSection addArrangedSubview:defaultSubgraphStrokeRow];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformPanelLabel:@"New group border thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultSubgraphStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformDefaultSubgraphStrokeWidth:)];
+    self.freeformDefaultSubgraphStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultSubgraphStrokeWidthSlider.continuous = YES;
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultSubgraphStrokeWidthSlider];
+    self.freeformDefaultSubgraphStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultSubgraphStrokeWidthValueLabel];
 
-    [stack addArrangedSubview:[self freeformPanelLabel:@"Shape"
-                                                  size:11.0
-                                                weight:NSFontWeightSemibold
-                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    NSStackView *defaultEdgeColorRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    defaultEdgeColorRow.translatesAutoresizingMaskIntoConstraints = NO;
+    defaultEdgeColorRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    defaultEdgeColorRow.alignment = NSLayoutAttributeCenterY;
+    defaultEdgeColorRow.spacing = 10.0;
+    [defaultEdgeColorRow addArrangedSubview:[self freeformPanelLabel:@"New connector color" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultEdgeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformDefaultEdgeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultEdgeColorWell.target = self;
+    self.freeformDefaultEdgeColorWell.action = @selector(applyFreeformDefaultEdgeColor:);
+    [defaultEdgeColorRow addArrangedSubview:self.freeformDefaultEdgeColorWell];
+    [self.freeformDefaultsModeSection addArrangedSubview:defaultEdgeColorRow];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformPanelLabel:@"New connector thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultEdgeThicknessSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformDefaultEdgeThickness:)];
+    self.freeformDefaultEdgeThicknessSlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformDefaultEdgeThicknessSlider.continuous = YES;
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultEdgeThicknessSlider];
+    self.freeformDefaultEdgeThicknessValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultEdgeThicknessValueLabel];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformPanelLabel:@"New connector pattern" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultEdgePatternPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformDefaultEdgePatternPopup.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.freeformDefaultEdgePatternPopup addItemsWithTitles:@[@"Solid", @"Dashed", @"Dotted", @"Thick"]];
+    self.freeformDefaultEdgePatternPopup.target = self;
+    self.freeformDefaultEdgePatternPopup.action = @selector(applyFreeformDefaultEdgePattern:);
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultEdgePatternPopup];
+    [self.freeformDefaultsModeSection addArrangedSubview:[self freeformPanelLabel:@"New connector arrows" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformDefaultEdgeArrowPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformDefaultEdgeArrowPopup.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.freeformDefaultEdgeArrowPopup addItemsWithTitles:@[@"None", @"Forward", @"Reverse", @"Both"]];
+    self.freeformDefaultEdgeArrowPopup.target = self;
+    self.freeformDefaultEdgeArrowPopup.action = @selector(applyFreeformDefaultEdgeArrowMode:);
+    [self.freeformDefaultsModeSection addArrangedSubview:self.freeformDefaultEdgeArrowPopup];
+    [stack addArrangedSubview:self.freeformDefaultsModeSection];
+
+    self.freeformShapePickerSection = [self newFreeformModeSection];
+    [self.freeformShapePickerSection addArrangedSubview:[self freeformPanelLabel:@"Shape" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
     self.freeformShapePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
     self.freeformShapePopup.translatesAutoresizingMaskIntoConstraints = NO;
-    NSArray<NSDictionary *> *shapeOptions = @[
-        @{ @"title": @"Rounded Rectangle", @"shape": @1 },
-        @{ @"title": @"Rectangle", @"shape": @0 },
-        @{ @"title": @"Diamond", @"shape": @2 },
-        @{ @"title": @"Circle", @"shape": @3 },
-        @{ @"title": @"Hexagon", @"shape": @4 },
-        @{ @"title": @"Cylinder", @"shape": @5 },
-        @{ @"title": @"Stadium", @"shape": @6 },
-        @{ @"title": @"Subroutine", @"shape": @11 },
-    ];
-    for (NSDictionary *option in shapeOptions) {
-        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:option[@"title"] action:nil keyEquivalent:@""];
-        item.representedObject = option[@"shape"];
-        [self.freeformShapePopup.menu addItem:item];
-    }
-    [self.freeformShapePopup selectItemAtIndex:0];
-    [stack addArrangedSubview:self.freeformShapePopup];
+    self.freeformShapePopup.target = self;
+    self.freeformShapePopup.action = @selector(applyFreeformSelectedShape:);
+    [self rebuildFreeformShapePopupOptions];
+    [self.freeformShapePickerSection addArrangedSubview:self.freeformShapePopup];
+    [stack addArrangedSubview:self.freeformShapePickerSection];
 
+    self.freeformAddObjectModeSection = [self newFreeformModeSection];
+    [self.freeformAddObjectModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"ADD OBJECT"
+                                                                                       lines:@[
+                                                                                           @"Use Insert > Add Object or the buttons below to enter placement mode.",
+                                                                                           @"If a group is selected, new objects are nested inside that group.",
+                                                                                       ]]];
     NSStackView *createButtonsRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
     createButtonsRow.translatesAutoresizingMaskIntoConstraints = NO;
     createButtonsRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     createButtonsRow.alignment = NSLayoutAttributeCenterY;
     createButtonsRow.spacing = 8.0;
-
     self.freeformAddShapeButton = [NSButton buttonWithTitle:@"Add Shape" target:self action:@selector(beginFreeformAddShape:)];
     self.freeformAddShapeButton.translatesAutoresizingMaskIntoConstraints = NO;
     [createButtonsRow addArrangedSubview:self.freeformAddShapeButton];
-
     self.freeformAddGroupButton = [NSButton buttonWithTitle:@"Add Group" target:self action:@selector(beginFreeformAddGroup:)];
     self.freeformAddGroupButton.translatesAutoresizingMaskIntoConstraints = NO;
     [createButtonsRow addArrangedSubview:self.freeformAddGroupButton];
-
     self.freeformCancelCreateButton = [NSButton buttonWithTitle:@"Cancel" target:self action:@selector(cancelFreeformInsertion:)];
     self.freeformCancelCreateButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.freeformCancelCreateButton.enabled = NO;
     [createButtonsRow addArrangedSubview:self.freeformCancelCreateButton];
+    [self.freeformAddObjectModeSection addArrangedSubview:createButtonsRow];
+    self.freeformCreateStatusLabel = [self freeformPanelLabel:@"Choose Add Shape or Add Group, then click the canvas to place it." size:12.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.87 green:0.89 blue:0.93 alpha:1.0]];
+    [self.freeformAddObjectModeSection addArrangedSubview:self.freeformCreateStatusLabel];
+    [stack addArrangedSubview:self.freeformAddObjectModeSection];
 
-    [stack addArrangedSubview:createButtonsRow];
+    self.freeformAddLinkModeSection = [self newFreeformModeSection];
+    [self.freeformAddLinkModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"ADD LINK"
+                                                                                     lines:@[
+                                                                                         @"Use Insert > Add Link to stay focused on connector creation.",
+                                                                                         @"Pick a source and target here, or start a connector from the canvas.",
+                                                                                     ]]];
+    self.freeformConnectorSourcePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformConnectorSourcePopup.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformConnectorSourcePopup.target = self;
+    self.freeformConnectorSourcePopup.action = @selector(freeformConnectorPopupSelectionChanged:);
+    [self.freeformAddLinkModeSection addArrangedSubview:[self freeformPanelLabel:@"From" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    [self.freeformAddLinkModeSection addArrangedSubview:self.freeformConnectorSourcePopup];
+    self.freeformConnectorTargetPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformConnectorTargetPopup.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformConnectorTargetPopup.target = self;
+    self.freeformConnectorTargetPopup.action = @selector(freeformConnectorPopupSelectionChanged:);
+    [self.freeformAddLinkModeSection addArrangedSubview:[self freeformPanelLabel:@"To" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    [self.freeformAddLinkModeSection addArrangedSubview:self.freeformConnectorTargetPopup];
+    self.freeformAddConnectorButton = [NSButton buttonWithTitle:@"Add Connector" target:self action:@selector(addFreeformConnector:)];
+    self.freeformAddConnectorButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformAddConnectorButton.enabled = NO;
+    [self.freeformAddLinkModeSection addArrangedSubview:self.freeformAddConnectorButton];
+    [stack addArrangedSubview:self.freeformAddLinkModeSection];
 
-    self.freeformCreateStatusLabel = [self freeformPanelLabel:@"Choose Add Shape or Add Group, then click the canvas to place it."
-                                                         size:12.0
-                                                       weight:NSFontWeightRegular
-                                                        color:[NSColor colorWithRed:0.87 green:0.89 blue:0.93 alpha:1.0]];
-    [stack addArrangedSubview:self.freeformCreateStatusLabel];
+    self.freeformSelectionModeSection = [self newFreeformModeSection];
+    [self.freeformSelectionModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"SELECTION"
+                                                                                       lines:@[
+                                                                                           @"Node, group, and connector inspectors are shown one at a time.",
+                                                                                       ]]];
+    self.freeformSelectionLabel = [self freeformPanelLabel:@"No selection" size:12.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.96 green:0.97 blue:0.99 alpha:1.0]];
+    [self.freeformSelectionModeSection addArrangedSubview:self.freeformSelectionLabel];
+    [stack addArrangedSubview:self.freeformSelectionModeSection];
 
-    self.freeformSelectionLabel = [self freeformPanelLabel:@"No selection"
-                                                      size:12.0
-                                                    weight:NSFontWeightSemibold
-                                                     color:[NSColor colorWithRed:0.96 green:0.97 blue:0.99 alpha:1.0]];
-    [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"SELECTION"
-                                                           lines:@[
-                                                               @"Click a node to select it. Shift-click a group to select and drag the whole subgraph.",
-                                                           ]]];
-    [stack addArrangedSubview:self.freeformSelectionLabel];
-
-    NSTextField *labelCaption = [self freeformPanelLabel:@"Node label"
-                                                    size:11.0
-                                                  weight:NSFontWeightSemibold
-                                                   color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]];
-    [stack addArrangedSubview:labelCaption];
-
+    self.freeformObjectModeSection = [self newFreeformModeSection];
+    self.freeformObjectLabelCaption = [self freeformPanelLabel:@"Node label" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]];
+    [self.freeformObjectModeSection addArrangedSubview:self.freeformObjectLabelCaption];
     self.freeformNodeLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
     self.freeformNodeLabelField.translatesAutoresizingMaskIntoConstraints = NO;
     self.freeformNodeLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-    self.freeformNodeLabelField.placeholderString = @"Select a node or group to edit its label";
+    self.freeformNodeLabelField.placeholderString = @"Select a node to edit its label";
     self.freeformNodeLabelField.target = self;
     self.freeformNodeLabelField.action = @selector(applyFreeformNodeLabel:);
     self.freeformNodeLabelField.enabled = NO;
-    [stack addArrangedSubview:self.freeformNodeLabelField];
     [self.freeformNodeLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
+    [self.freeformObjectModeSection addArrangedSubview:self.freeformNodeLabelField];
+    self.freeformObjectSizeCaption = [self freeformPanelLabel:@"Size" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]];
+    [self.freeformObjectModeSection addArrangedSubview:self.freeformObjectSizeCaption];
+    NSStackView *sizeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    sizeRow.translatesAutoresizingMaskIntoConstraints = NO;
+    sizeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    sizeRow.alignment = NSLayoutAttributeCenterY;
+    sizeRow.spacing = 8.0;
+    [sizeRow addArrangedSubview:[self freeformPanelLabel:@"W" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformWidthField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
+    self.freeformWidthField.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformWidthField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
+    self.freeformWidthField.placeholderString = @"Width";
+    self.freeformWidthField.target = self;
+    self.freeformWidthField.action = @selector(applyFreeformObjectWidth:);
+    self.freeformWidthField.enabled = NO;
+    [self.freeformWidthField.widthAnchor constraintEqualToConstant:78.0].active = YES;
+    [sizeRow addArrangedSubview:self.freeformWidthField];
+    [sizeRow addArrangedSubview:[self freeformPanelLabel:@"H" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformHeightField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
+    self.freeformHeightField.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformHeightField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
+    self.freeformHeightField.placeholderString = @"Height";
+    self.freeformHeightField.target = self;
+    self.freeformHeightField.action = @selector(applyFreeformObjectHeight:);
+    self.freeformHeightField.enabled = NO;
+    [self.freeformHeightField.widthAnchor constraintEqualToConstant:78.0].active = YES;
+    [sizeRow addArrangedSubview:self.freeformHeightField];
+    [self.freeformObjectModeSection addArrangedSubview:sizeRow];
+    NSStackView *fillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    fillRow.translatesAutoresizingMaskIntoConstraints = NO;
+    fillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    fillRow.alignment = NSLayoutAttributeCenterY;
+    fillRow.spacing = 10.0;
+    [fillRow addArrangedSubview:[self freeformPanelLabel:@"Fill" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformFillColorWell.target = self;
+    self.freeformFillColorWell.action = @selector(applyFreeformFillColor:);
+    self.freeformFillColorWell.enabled = NO;
+    [fillRow addArrangedSubview:self.freeformFillColorWell];
+    [self.freeformObjectModeSection addArrangedSubview:fillRow];
+    NSStackView *strokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    strokeRow.translatesAutoresizingMaskIntoConstraints = NO;
+    strokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    strokeRow.alignment = NSLayoutAttributeCenterY;
+    strokeRow.spacing = 10.0;
+    [strokeRow addArrangedSubview:[self freeformPanelLabel:@"Stroke" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformStrokeColorWell.target = self;
+    self.freeformStrokeColorWell.action = @selector(applyFreeformStrokeColor:);
+    self.freeformStrokeColorWell.enabled = NO;
+    [strokeRow addArrangedSubview:self.freeformStrokeColorWell];
+    [self.freeformObjectModeSection addArrangedSubview:strokeRow];
+    [self.freeformObjectModeSection addArrangedSubview:[self freeformPanelLabel:@"Border thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformStrokeWidth:)];
+    self.freeformStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformStrokeWidthSlider.continuous = YES;
+    self.freeformStrokeWidthSlider.enabled = NO;
+    [self.freeformObjectModeSection addArrangedSubview:self.freeformStrokeWidthSlider];
+    self.freeformStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformObjectModeSection addArrangedSubview:self.freeformStrokeWidthValueLabel];
+    [stack addArrangedSubview:self.freeformObjectModeSection];
 
-        NSStackView *sizeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        sizeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        sizeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        sizeRow.alignment = NSLayoutAttributeCenterY;
-        sizeRow.spacing = 8.0;
-
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"W"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformWidthField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.freeformWidthField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformWidthField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.freeformWidthField.placeholderString = @"Width";
-        self.freeformWidthField.target = self;
-        self.freeformWidthField.action = @selector(applyFreeformObjectWidth:);
-        self.freeformWidthField.enabled = NO;
-        [self.freeformWidthField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.freeformWidthField];
-
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"H"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformHeightField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.freeformHeightField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformHeightField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.freeformHeightField.placeholderString = @"Height";
-        self.freeformHeightField.target = self;
-        self.freeformHeightField.action = @selector(applyFreeformObjectHeight:);
-        self.freeformHeightField.enabled = NO;
-        [self.freeformHeightField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.freeformHeightField];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Size"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:sizeRow];
-
-        NSStackView *fillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        fillRow.translatesAutoresizingMaskIntoConstraints = NO;
-        fillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        fillRow.alignment = NSLayoutAttributeCenterY;
-        fillRow.spacing = 10.0;
-        [fillRow addArrangedSubview:[self freeformPanelLabel:@"Fill"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.freeformFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformFillColorWell.target = self;
-        self.freeformFillColorWell.action = @selector(applyFreeformFillColor:);
-        self.freeformFillColorWell.enabled = NO;
-        [fillRow addArrangedSubview:self.freeformFillColorWell];
-        [stack addArrangedSubview:fillRow];
-
-        NSStackView *strokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        strokeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        strokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        strokeRow.alignment = NSLayoutAttributeCenterY;
-        strokeRow.spacing = 10.0;
-        [strokeRow addArrangedSubview:[self freeformPanelLabel:@"Stroke"
-                                                                                                            size:11.0
-                                                                                                        weight:NSFontWeightSemibold
-                                                                                                         color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.freeformStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformStrokeColorWell.target = self;
-        self.freeformStrokeColorWell.action = @selector(applyFreeformStrokeColor:);
-        self.freeformStrokeColorWell.enabled = NO;
-        [strokeRow addArrangedSubview:self.freeformStrokeColorWell];
-        [stack addArrangedSubview:strokeRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Border thickness"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformStrokeWidth:)];
-        self.freeformStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformStrokeWidthSlider.continuous = YES;
-        self.freeformStrokeWidthSlider.enabled = NO;
-        [stack addArrangedSubview:self.freeformStrokeWidthSlider];
-        self.freeformStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt"
-                                                                                                                         size:11.0
-                                                                                                                     weight:NSFontWeightRegular
-                                                                                                                        color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.freeformStrokeWidthValueLabel];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CONNECTOR STYLE"
-                                                                                                                     lines:@[
-                                                                    @"Use Start Connector from the canvas context menu, or pick a source and target below to add one from the inspector.",
-                                                                    @"Select a connector to edit its label, stroke, pattern, thickness, and arrow direction, or drag either endpoint handle to reconnect it.",
-                                                                                                                     ]]];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Add connector"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformConnectorSourcePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.freeformConnectorSourcePopup.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformConnectorSourcePopup.target = self;
-        self.freeformConnectorSourcePopup.action = @selector(freeformConnectorPopupSelectionChanged:);
-        [stack addArrangedSubview:[self freeformPanelLabel:@"From"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:self.freeformConnectorSourcePopup];
-
-        self.freeformConnectorTargetPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.freeformConnectorTargetPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformConnectorTargetPopup.target = self;
-        self.freeformConnectorTargetPopup.action = @selector(freeformConnectorPopupSelectionChanged:);
-        [stack addArrangedSubview:[self freeformPanelLabel:@"To"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:self.freeformConnectorTargetPopup];
-
-        self.freeformAddConnectorButton = [NSButton buttonWithTitle:@"Add Connector" target:self action:@selector(addFreeformConnector:)];
-        self.freeformAddConnectorButton.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformAddConnectorButton.enabled = NO;
-        [stack addArrangedSubview:self.freeformAddConnectorButton];
-
-        self.freeformEdgeLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.freeformEdgeLabelField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformEdgeLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.freeformEdgeLabelField.placeholderString = @"Select a connector to edit its label";
-        self.freeformEdgeLabelField.target = self;
-        self.freeformEdgeLabelField.action = @selector(applyFreeformEdgeLabel:);
-        self.freeformEdgeLabelField.enabled = NO;
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Connector label"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:self.freeformEdgeLabelField];
-        [self.freeformEdgeLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        NSStackView *edgeColorRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        edgeColorRow.translatesAutoresizingMaskIntoConstraints = NO;
-        edgeColorRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        edgeColorRow.alignment = NSLayoutAttributeCenterY;
-        edgeColorRow.spacing = 10.0;
-        [edgeColorRow addArrangedSubview:[self freeformPanelLabel:@"Connector color"
-                                                                                                                 size:11.0
-                                                                                                             weight:NSFontWeightSemibold
-                                                                                                                color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformEdgeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.freeformEdgeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformEdgeColorWell.target = self;
-        self.freeformEdgeColorWell.action = @selector(applyFreeformEdgeColor:);
-        self.freeformEdgeColorWell.enabled = NO;
-        [edgeColorRow addArrangedSubview:self.freeformEdgeColorWell];
-        [stack addArrangedSubview:edgeColorRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Connector thickness"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformEdgeThicknessSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformEdgeThickness:)];
-        self.freeformEdgeThicknessSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.freeformEdgeThicknessSlider.continuous = YES;
-        self.freeformEdgeThicknessSlider.enabled = NO;
-        [stack addArrangedSubview:self.freeformEdgeThicknessSlider];
-        self.freeformEdgeThicknessValueLabel = [self freeformPanelLabel:@"2.0 pt"
-                                                                                                                             size:11.0
-                                                                                                                         weight:NSFontWeightRegular
-                                                                                                                            color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.freeformEdgeThicknessValueLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Connector pattern"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformEdgePatternPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.freeformEdgePatternPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.freeformEdgePatternPopup addItemsWithTitles:@[@"Solid", @"Dashed", @"Dotted", @"Thick"]];
-        self.freeformEdgePatternPopup.target = self;
-        self.freeformEdgePatternPopup.action = @selector(applyFreeformEdgePattern:);
-        self.freeformEdgePatternPopup.enabled = NO;
-        [stack addArrangedSubview:self.freeformEdgePatternPopup];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Arrow direction"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.freeformEdgeArrowPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.freeformEdgeArrowPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.freeformEdgeArrowPopup addItemsWithTitles:@[@"None", @"Forward", @"Reverse", @"Both"]];
-        self.freeformEdgeArrowPopup.target = self;
-        self.freeformEdgeArrowPopup.action = @selector(applyFreeformEdgeArrowMode:);
-        self.freeformEdgeArrowPopup.enabled = NO;
-        [stack addArrangedSubview:self.freeformEdgeArrowPopup];
+    self.freeformEdgeModeSection = [self newFreeformModeSection];
+    [self.freeformEdgeModeSection addArrangedSubview:[self freeformSectionViewWithTitle:@"CONNECTOR"
+                                                                                 lines:@[
+                                                                                     @"Connector editing is only shown when a connector is selected.",
+                                                                                 ]]];
+    [self.freeformEdgeModeSection addArrangedSubview:[self freeformPanelLabel:@"Connector label" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformEdgeLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    self.freeformEdgeLabelField.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformEdgeLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
+    self.freeformEdgeLabelField.placeholderString = @"Select a connector to edit its label";
+    self.freeformEdgeLabelField.target = self;
+    self.freeformEdgeLabelField.action = @selector(applyFreeformEdgeLabel:);
+    self.freeformEdgeLabelField.enabled = NO;
+    [self.freeformEdgeLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
+    [self.freeformEdgeModeSection addArrangedSubview:self.freeformEdgeLabelField];
+    NSStackView *edgeColorRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    edgeColorRow.translatesAutoresizingMaskIntoConstraints = NO;
+    edgeColorRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    edgeColorRow.alignment = NSLayoutAttributeCenterY;
+    edgeColorRow.spacing = 10.0;
+    [edgeColorRow addArrangedSubview:[self freeformPanelLabel:@"Connector color" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformEdgeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
+    self.freeformEdgeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformEdgeColorWell.target = self;
+    self.freeformEdgeColorWell.action = @selector(applyFreeformEdgeColor:);
+    self.freeformEdgeColorWell.enabled = NO;
+    [edgeColorRow addArrangedSubview:self.freeformEdgeColorWell];
+    [self.freeformEdgeModeSection addArrangedSubview:edgeColorRow];
+    [self.freeformEdgeModeSection addArrangedSubview:[self freeformPanelLabel:@"Connector thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformEdgeThicknessSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformEdgeThickness:)];
+    self.freeformEdgeThicknessSlider.translatesAutoresizingMaskIntoConstraints = NO;
+    self.freeformEdgeThicknessSlider.continuous = YES;
+    self.freeformEdgeThicknessSlider.enabled = NO;
+    [self.freeformEdgeModeSection addArrangedSubview:self.freeformEdgeThicknessSlider];
+    self.freeformEdgeThicknessValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
+    [self.freeformEdgeModeSection addArrangedSubview:self.freeformEdgeThicknessValueLabel];
+    [self.freeformEdgeModeSection addArrangedSubview:[self freeformPanelLabel:@"Connector pattern" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformEdgePatternPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformEdgePatternPopup.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.freeformEdgePatternPopup addItemsWithTitles:@[@"Solid", @"Dashed", @"Dotted", @"Thick"]];
+    self.freeformEdgePatternPopup.target = self;
+    self.freeformEdgePatternPopup.action = @selector(applyFreeformEdgePattern:);
+    self.freeformEdgePatternPopup.enabled = NO;
+    [self.freeformEdgeModeSection addArrangedSubview:self.freeformEdgePatternPopup];
+    [self.freeformEdgeModeSection addArrangedSubview:[self freeformPanelLabel:@"Arrow direction" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
+    self.freeformEdgeArrowPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
+    self.freeformEdgeArrowPopup.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.freeformEdgeArrowPopup addItemsWithTitles:@[@"None", @"Forward", @"Reverse", @"Both"]];
+    self.freeformEdgeArrowPopup.target = self;
+    self.freeformEdgeArrowPopup.action = @selector(applyFreeformEdgeArrowMode:);
+    self.freeformEdgeArrowPopup.enabled = NO;
+    [self.freeformEdgeModeSection addArrangedSubview:self.freeformEdgeArrowPopup];
+    [stack addArrangedSubview:self.freeformEdgeModeSection];
 
     NSView *document = [[NSView alloc] initWithFrame:NSZeroRect];
     document.translatesAutoresizingMaskIntoConstraints = NO;
+    document.appearance = [self darkInspectorAppearance];
     [document addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
         [stack.leadingAnchor constraintEqualToAnchor:document.leadingAnchor],
@@ -1527,511 +1785,40 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     scrollView.borderType = NSNoBorder;
     scrollView.backgroundColor = [NSColor colorWithRed:0.10 green:0.11 blue:0.13 alpha:1.0];
     scrollView.drawsBackground = YES;
+    scrollView.appearance = [self darkInspectorAppearance];
     scrollView.documentView = document;
+    [self applyDarkInspectorControlThemeToView:document];
+    [self updateFreeformInspectorModeUI];
     return scrollView;
 }
 
-- (NSScrollView *)createSequenceToolsScrollView {
-        NSStackView *stack = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        stack.translatesAutoresizingMaskIntoConstraints = NO;
-        stack.orientation = NSUserInterfaceLayoutOrientationVertical;
-        stack.alignment = NSLayoutAttributeLeading;
-        stack.spacing = 16.0;
-        stack.edgeInsets = NSEdgeInsetsMake(16.0, 16.0, 24.0, 16.0);
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"SEQUENCE"
-                                                                                                                     lines:@[
-                                                                                                                             @"Sequence diagrams load into the freeform canvas as participants, messages, notes, activations, and fragments.",
-                                                                                                                             @"Use the canvas to reposition elements, then edit their labels and styling here with sequence-focused controls.",
-                                                                                                                     ]]];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CANVAS"
-                                                                                                                     lines:@[
-                                                                                                                             @"Set the sequence canvas background used by the freeform workspace and image exports.",
-                                                                                                                     ]]];
-
-        NSStackView *backgroundRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        backgroundRow.translatesAutoresizingMaskIntoConstraints = NO;
-        backgroundRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        backgroundRow.alignment = NSLayoutAttributeCenterY;
-        backgroundRow.spacing = 10.0;
-        [backgroundRow addArrangedSubview:[self freeformPanelLabel:@"Background"
-                                                                                                                    size:11.0
-                                                                                                                weight:NSFontWeightSemibold
-                                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceCanvasBackgroundColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.sequenceCanvasBackgroundColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceCanvasBackgroundColorWell.target = self;
-        self.sequenceCanvasBackgroundColorWell.action = @selector(applyFreeformCanvasBackgroundColor:);
-        [backgroundRow addArrangedSubview:self.sequenceCanvasBackgroundColorWell];
-        [stack addArrangedSubview:backgroundRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Transparency"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceCanvasBackgroundOpacitySlider = [NSSlider sliderWithValue:1.0 minValue:0.0 maxValue:1.0 target:self action:@selector(applyFreeformCanvasBackgroundOpacity:)];
-        self.sequenceCanvasBackgroundOpacitySlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceCanvasBackgroundOpacitySlider.continuous = YES;
-        [stack addArrangedSubview:self.sequenceCanvasBackgroundOpacitySlider];
-        self.sequenceCanvasBackgroundOpacityValueLabel = [self freeformPanelLabel:@"100%"
-                                                                                                                                                 size:11.0
-                                                                                                                                             weight:NSFontWeightRegular
-                                                                                                                                                color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.sequenceCanvasBackgroundOpacityValueLabel];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"SELECTION"
-                                                                                                                     lines:@[
-                                                                                                                             @"Participants, notes, activations, and fragments map to editable objects in the canvas.",
-                                                                                                                             @"Select a message to edit its label and line style, or select a sequence element to adjust its size and colors.",
-                                                                                                                     ]]];
-        self.sequenceSelectionLabel = [self freeformPanelLabel:@"No selection"
-                                                                                                            size:12.0
-                                                                                                        weight:NSFontWeightSemibold
-                                                                                                         color:[NSColor colorWithRed:0.96 green:0.97 blue:0.99 alpha:1.0]];
-        [stack addArrangedSubview:self.sequenceSelectionLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Element label"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceElementLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.sequenceElementLabelField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceElementLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.sequenceElementLabelField.placeholderString = @"Select a participant, note, or fragment to edit its label";
-        self.sequenceElementLabelField.target = self;
-        self.sequenceElementLabelField.action = @selector(applyFreeformNodeLabel:);
-        self.sequenceElementLabelField.enabled = NO;
-        [stack addArrangedSubview:self.sequenceElementLabelField];
-        [self.sequenceElementLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        NSStackView *sizeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        sizeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        sizeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        sizeRow.alignment = NSLayoutAttributeCenterY;
-        sizeRow.spacing = 8.0;
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"W"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceWidthField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.sequenceWidthField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceWidthField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.sequenceWidthField.placeholderString = @"Width";
-        self.sequenceWidthField.target = self;
-        self.sequenceWidthField.action = @selector(applyFreeformObjectWidth:);
-        self.sequenceWidthField.enabled = NO;
-        [self.sequenceWidthField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.sequenceWidthField];
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"H"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceHeightField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.sequenceHeightField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceHeightField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.sequenceHeightField.placeholderString = @"Height";
-        self.sequenceHeightField.target = self;
-        self.sequenceHeightField.action = @selector(applyFreeformObjectHeight:);
-        self.sequenceHeightField.enabled = NO;
-        [self.sequenceHeightField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.sequenceHeightField];
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Element size"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:sizeRow];
-
-        NSStackView *fillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        fillRow.translatesAutoresizingMaskIntoConstraints = NO;
-        fillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        fillRow.alignment = NSLayoutAttributeCenterY;
-        fillRow.spacing = 10.0;
-        [fillRow addArrangedSubview:[self freeformPanelLabel:@"Fill"
-                                                                                                        size:11.0
-                                                                                                    weight:NSFontWeightSemibold
-                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.sequenceFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceFillColorWell.target = self;
-        self.sequenceFillColorWell.action = @selector(applyFreeformFillColor:);
-        self.sequenceFillColorWell.enabled = NO;
-        [fillRow addArrangedSubview:self.sequenceFillColorWell];
-        [stack addArrangedSubview:fillRow];
-
-        NSStackView *strokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        strokeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        strokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        strokeRow.alignment = NSLayoutAttributeCenterY;
-        strokeRow.spacing = 10.0;
-        [strokeRow addArrangedSubview:[self freeformPanelLabel:@"Stroke"
-                                                                                                            size:11.0
-                                                                                                        weight:NSFontWeightSemibold
-                                                                                                         color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.sequenceStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceStrokeColorWell.target = self;
-        self.sequenceStrokeColorWell.action = @selector(applyFreeformStrokeColor:);
-        self.sequenceStrokeColorWell.enabled = NO;
-        [strokeRow addArrangedSubview:self.sequenceStrokeColorWell];
-        [stack addArrangedSubview:strokeRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Border thickness"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformStrokeWidth:)];
-        self.sequenceStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceStrokeWidthSlider.continuous = YES;
-        self.sequenceStrokeWidthSlider.enabled = NO;
-        [stack addArrangedSubview:self.sequenceStrokeWidthSlider];
-        self.sequenceStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt"
-                                                                                                                         size:11.0
-                                                                                                                     weight:NSFontWeightRegular
-                                                                                                                        color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.sequenceStrokeWidthValueLabel];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"MESSAGE STYLE"
-                                                                                                                     lines:@[
-                                                                                                                             @"Select a sequence message to edit its label, stroke, pattern, thickness, and arrow direction.",
-                                                                                                                     ]]];
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Message label"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceMessageLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.sequenceMessageLabelField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceMessageLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.sequenceMessageLabelField.placeholderString = @"Select a message to edit its label";
-        self.sequenceMessageLabelField.target = self;
-        self.sequenceMessageLabelField.action = @selector(applyFreeformEdgeLabel:);
-        self.sequenceMessageLabelField.enabled = NO;
-        [stack addArrangedSubview:self.sequenceMessageLabelField];
-        [self.sequenceMessageLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        NSStackView *messageColorRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        messageColorRow.translatesAutoresizingMaskIntoConstraints = NO;
-        messageColorRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        messageColorRow.alignment = NSLayoutAttributeCenterY;
-        messageColorRow.spacing = 10.0;
-        [messageColorRow addArrangedSubview:[self freeformPanelLabel:@"Message color"
-                                                                                                                        size:11.0
-                                                                                                                    weight:NSFontWeightSemibold
-                                                                                                                     color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceMessageColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.sequenceMessageColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceMessageColorWell.target = self;
-        self.sequenceMessageColorWell.action = @selector(applyFreeformEdgeColor:);
-        self.sequenceMessageColorWell.enabled = NO;
-        [messageColorRow addArrangedSubview:self.sequenceMessageColorWell];
-        [stack addArrangedSubview:messageColorRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Message thickness"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceMessageThicknessSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformEdgeThickness:)];
-        self.sequenceMessageThicknessSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.sequenceMessageThicknessSlider.continuous = YES;
-        self.sequenceMessageThicknessSlider.enabled = NO;
-        [stack addArrangedSubview:self.sequenceMessageThicknessSlider];
-        self.sequenceMessageThicknessValueLabel = [self freeformPanelLabel:@"2.0 pt"
-                                                                                                                                    size:11.0
-                                                                                                                                weight:NSFontWeightRegular
-                                                                                                                                 color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.sequenceMessageThicknessValueLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Message pattern"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceMessagePatternPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.sequenceMessagePatternPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.sequenceMessagePatternPopup addItemsWithTitles:@[@"Solid", @"Dashed", @"Dotted", @"Thick"]];
-        self.sequenceMessagePatternPopup.target = self;
-        self.sequenceMessagePatternPopup.action = @selector(applyFreeformEdgePattern:);
-        self.sequenceMessagePatternPopup.enabled = NO;
-        [stack addArrangedSubview:self.sequenceMessagePatternPopup];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Arrow direction"
-                                                                                                    size:11.0
-                                                                                                weight:NSFontWeightSemibold
-                                                                                                 color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.sequenceMessageArrowPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.sequenceMessageArrowPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.sequenceMessageArrowPopup addItemsWithTitles:@[@"None", @"Forward", @"Reverse", @"Both"]];
-        self.sequenceMessageArrowPopup.target = self;
-        self.sequenceMessageArrowPopup.action = @selector(applyFreeformEdgeArrowMode:);
-        self.sequenceMessageArrowPopup.enabled = NO;
-        [stack addArrangedSubview:self.sequenceMessageArrowPopup];
-
-        NSView *document = [[NSView alloc] initWithFrame:NSZeroRect];
-        document.translatesAutoresizingMaskIntoConstraints = NO;
-        [document addSubview:stack];
-        [NSLayoutConstraint activateConstraints:@[
-                [stack.leadingAnchor constraintEqualToAnchor:document.leadingAnchor],
-                [stack.trailingAnchor constraintEqualToAnchor:document.trailingAnchor],
-                [stack.topAnchor constraintEqualToAnchor:document.topAnchor],
-                [stack.bottomAnchor constraintEqualToAnchor:document.bottomAnchor],
-                [stack.widthAnchor constraintEqualToAnchor:document.widthAnchor],
-        ]];
-
-        NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-        scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-        scrollView.hasVerticalScroller = YES;
-        scrollView.hasHorizontalScroller = NO;
-        scrollView.autohidesScrollers = YES;
-        scrollView.borderType = NSNoBorder;
-        scrollView.backgroundColor = [NSColor colorWithRed:0.10 green:0.11 blue:0.13 alpha:1.0];
-        scrollView.drawsBackground = YES;
-        scrollView.documentView = document;
-        return scrollView;
-}
-
-    - (NSScrollView *)createClassToolsScrollView {
-        NSStackView *stack = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        stack.translatesAutoresizingMaskIntoConstraints = NO;
-        stack.orientation = NSUserInterfaceLayoutOrientationVertical;
-        stack.alignment = NSLayoutAttributeLeading;
-        stack.spacing = 16.0;
-        stack.edgeInsets = NSEdgeInsetsMake(16.0, 16.0, 24.0, 16.0);
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CLASS"
-                                       lines:@[
-                                       @"Class diagrams load as compartmented class boxes with UML relationship endpoint styles.",
-                                       @"Edit the class title, stereotype lines, attributes, methods, and relation endpoints directly from this inspector.",
-                                       ]]];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CANVAS"
-                                       lines:@[@"Set the class-canvas background used by the workspace and exports."]]];
-
-        NSStackView *backgroundRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        backgroundRow.translatesAutoresizingMaskIntoConstraints = NO;
-        backgroundRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        backgroundRow.alignment = NSLayoutAttributeCenterY;
-        backgroundRow.spacing = 10.0;
-        [backgroundRow addArrangedSubview:[self freeformPanelLabel:@"Background" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classCanvasBackgroundColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.classCanvasBackgroundColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classCanvasBackgroundColorWell.target = self;
-        self.classCanvasBackgroundColorWell.action = @selector(applyFreeformCanvasBackgroundColor:);
-        [backgroundRow addArrangedSubview:self.classCanvasBackgroundColorWell];
-        [stack addArrangedSubview:backgroundRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Transparency" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classCanvasBackgroundOpacitySlider = [NSSlider sliderWithValue:1.0 minValue:0.0 maxValue:1.0 target:self action:@selector(applyFreeformCanvasBackgroundOpacity:)];
-        self.classCanvasBackgroundOpacitySlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classCanvasBackgroundOpacitySlider.continuous = YES;
-        [stack addArrangedSubview:self.classCanvasBackgroundOpacitySlider];
-        self.classCanvasBackgroundOpacityValueLabel = [self freeformPanelLabel:@"100%" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.classCanvasBackgroundOpacityValueLabel];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"CLASS BOX"
-                                       lines:@[@"Select a class box to edit its title, stereotype block, compartments, sizing, and fill colors."]]];
-        self.classSelectionLabel = [self freeformPanelLabel:@"No selection" size:12.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.96 green:0.97 blue:0.99 alpha:1.0]];
-        [stack addArrangedSubview:self.classSelectionLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Class title" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classTitleField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.classTitleField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classTitleField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.classTitleField.placeholderString = @"Select a class to edit its title";
-        self.classTitleField.target = self;
-        self.classTitleField.action = @selector(applyFreeformNodeLabel:);
-        self.classTitleField.enabled = NO;
-        [stack addArrangedSubview:self.classTitleField];
-        [self.classTitleField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Stereotype / subtitle" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classSubtitleField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.classSubtitleField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classSubtitleField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.classSubtitleField.placeholderString = @"Examples: <<interface>>, <<abstract>>";
-        self.classSubtitleField.target = self;
-        self.classSubtitleField.action = @selector(applyClassSubtitle:);
-        self.classSubtitleField.enabled = NO;
-        [stack addArrangedSubview:self.classSubtitleField];
-        [self.classSubtitleField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        NSStackView *sizeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        sizeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        sizeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        sizeRow.alignment = NSLayoutAttributeCenterY;
-        sizeRow.spacing = 8.0;
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"W" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classWidthField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.classWidthField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classWidthField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.classWidthField.target = self;
-        self.classWidthField.action = @selector(applyFreeformObjectWidth:);
-        self.classWidthField.enabled = NO;
-        [self.classWidthField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.classWidthField];
-        [sizeRow addArrangedSubview:[self freeformPanelLabel:@"H" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classHeightField = [[NSTextField alloc] initWithFrame:NSMakeRect(0.0, 0.0, 72.0, 24.0)];
-        self.classHeightField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classHeightField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.classHeightField.target = self;
-        self.classHeightField.action = @selector(applyFreeformObjectHeight:);
-        self.classHeightField.enabled = NO;
-        [self.classHeightField.widthAnchor constraintEqualToConstant:78.0].active = YES;
-        [sizeRow addArrangedSubview:self.classHeightField];
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Box size" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:sizeRow];
-
-        NSStackView *headerFillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        headerFillRow.translatesAutoresizingMaskIntoConstraints = NO;
-        headerFillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        headerFillRow.alignment = NSLayoutAttributeCenterY;
-        headerFillRow.spacing = 10.0;
-        [headerFillRow addArrangedSubview:[self freeformPanelLabel:@"Header fill" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classHeaderFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.classHeaderFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classHeaderFillColorWell.target = self;
-        self.classHeaderFillColorWell.action = @selector(applyFreeformFillColor:);
-        self.classHeaderFillColorWell.enabled = NO;
-        [headerFillRow addArrangedSubview:self.classHeaderFillColorWell];
-        [stack addArrangedSubview:headerFillRow];
-
-        NSStackView *bodyFillRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        bodyFillRow.translatesAutoresizingMaskIntoConstraints = NO;
-        bodyFillRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        bodyFillRow.alignment = NSLayoutAttributeCenterY;
-        bodyFillRow.spacing = 10.0;
-        [bodyFillRow addArrangedSubview:[self freeformPanelLabel:@"Body fill" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classBodyFillColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.classBodyFillColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classBodyFillColorWell.target = self;
-        self.classBodyFillColorWell.action = @selector(applyClassBodyFillColor:);
-        self.classBodyFillColorWell.enabled = NO;
-        [bodyFillRow addArrangedSubview:self.classBodyFillColorWell];
-        [stack addArrangedSubview:bodyFillRow];
-
-        NSStackView *strokeRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        strokeRow.translatesAutoresizingMaskIntoConstraints = NO;
-        strokeRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        strokeRow.alignment = NSLayoutAttributeCenterY;
-        strokeRow.spacing = 10.0;
-        [strokeRow addArrangedSubview:[self freeformPanelLabel:@"Stroke" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classStrokeColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.classStrokeColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classStrokeColorWell.target = self;
-        self.classStrokeColorWell.action = @selector(applyFreeformStrokeColor:);
-        self.classStrokeColorWell.enabled = NO;
-        [strokeRow addArrangedSubview:self.classStrokeColorWell];
-        [stack addArrangedSubview:strokeRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Border thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classStrokeWidthSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformStrokeWidth:)];
-        self.classStrokeWidthSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classStrokeWidthSlider.continuous = YES;
-        self.classStrokeWidthSlider.enabled = NO;
-        [stack addArrangedSubview:self.classStrokeWidthSlider];
-        self.classStrokeWidthValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.classStrokeWidthValueLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Attributes" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:[self freeformMultilineEditorWithTextView:&_classAttributesTextView minHeight:96.0]];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Methods" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        [stack addArrangedSubview:[self freeformMultilineEditorWithTextView:&_classMethodsTextView minHeight:96.0]];
-
-        [stack addArrangedSubview:[self freeformSectionViewWithTitle:@"RELATION STYLE"
-                                       lines:@[@"Select a class relationship to edit its label, line style, thickness, and UML endpoint types."]]];
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Relation label" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classRelationLabelField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        self.classRelationLabelField.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classRelationLabelField.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
-        self.classRelationLabelField.target = self;
-        self.classRelationLabelField.action = @selector(applyFreeformEdgeLabel:);
-        self.classRelationLabelField.enabled = NO;
-        [stack addArrangedSubview:self.classRelationLabelField];
-        [self.classRelationLabelField.widthAnchor constraintGreaterThanOrEqualToConstant:240.0].active = YES;
-
-        NSStackView *relationColorRow = [[NSStackView alloc] initWithFrame:NSZeroRect];
-        relationColorRow.translatesAutoresizingMaskIntoConstraints = NO;
-        relationColorRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        relationColorRow.alignment = NSLayoutAttributeCenterY;
-        relationColorRow.spacing = 10.0;
-        [relationColorRow addArrangedSubview:[self freeformPanelLabel:@"Relation color" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classRelationColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(0.0, 0.0, 44.0, 28.0)];
-        self.classRelationColorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classRelationColorWell.target = self;
-        self.classRelationColorWell.action = @selector(applyFreeformEdgeColor:);
-        self.classRelationColorWell.enabled = NO;
-        [relationColorRow addArrangedSubview:self.classRelationColorWell];
-        [stack addArrangedSubview:relationColorRow];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Relation thickness" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classRelationThicknessSlider = [NSSlider sliderWithValue:2.0 minValue:1.0 maxValue:12.0 target:self action:@selector(applyFreeformEdgeThickness:)];
-        self.classRelationThicknessSlider.translatesAutoresizingMaskIntoConstraints = NO;
-        self.classRelationThicknessSlider.continuous = YES;
-        self.classRelationThicknessSlider.enabled = NO;
-        [stack addArrangedSubview:self.classRelationThicknessSlider];
-        self.classRelationThicknessValueLabel = [self freeformPanelLabel:@"2.0 pt" size:11.0 weight:NSFontWeightRegular color:[NSColor colorWithRed:0.79 green:0.82 blue:0.88 alpha:1.0]];
-        [stack addArrangedSubview:self.classRelationThicknessValueLabel];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Relation pattern" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classRelationPatternPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.classRelationPatternPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.classRelationPatternPopup addItemsWithTitles:@[@"Solid", @"Dashed", @"Dotted", @"Thick"]];
-        self.classRelationPatternPopup.target = self;
-        self.classRelationPatternPopup.action = @selector(applyFreeformEdgePattern:);
-        self.classRelationPatternPopup.enabled = NO;
-        [stack addArrangedSubview:self.classRelationPatternPopup];
-
-        NSArray<NSString *> *endpointOptions = @[ @"None", @"Inheritance", @"Composition", @"Aggregation", @"Dependency", @"Lollipop" ];
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Source endpoint" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classSourceEndpointPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.classSourceEndpointPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.classSourceEndpointPopup addItemsWithTitles:endpointOptions];
-        self.classSourceEndpointPopup.target = self;
-        self.classSourceEndpointPopup.action = @selector(applyClassSourceEndpointStyle:);
-        self.classSourceEndpointPopup.enabled = NO;
-        [stack addArrangedSubview:self.classSourceEndpointPopup];
-
-        [stack addArrangedSubview:[self freeformPanelLabel:@"Target endpoint" size:11.0 weight:NSFontWeightSemibold color:[NSColor colorWithRed:0.55 green:0.60 blue:0.68 alpha:1.0]]];
-        self.classTargetEndpointPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0.0, 0.0, 220.0, 26.0) pullsDown:NO];
-        self.classTargetEndpointPopup.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.classTargetEndpointPopup addItemsWithTitles:endpointOptions];
-        self.classTargetEndpointPopup.target = self;
-        self.classTargetEndpointPopup.action = @selector(applyClassTargetEndpointStyle:);
-        self.classTargetEndpointPopup.enabled = NO;
-        [stack addArrangedSubview:self.classTargetEndpointPopup];
-
-        NSView *document = [[NSView alloc] initWithFrame:NSZeroRect];
-        document.translatesAutoresizingMaskIntoConstraints = NO;
-        [document addSubview:stack];
-        [NSLayoutConstraint activateConstraints:@[
-            [stack.leadingAnchor constraintEqualToAnchor:document.leadingAnchor],
-            [stack.trailingAnchor constraintEqualToAnchor:document.trailingAnchor],
-            [stack.topAnchor constraintEqualToAnchor:document.topAnchor],
-            [stack.bottomAnchor constraintEqualToAnchor:document.bottomAnchor],
-            [stack.widthAnchor constraintEqualToAnchor:document.widthAnchor],
-        ]];
-
-        NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-        scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-        scrollView.hasVerticalScroller = YES;
-        scrollView.hasHorizontalScroller = NO;
-        scrollView.autohidesScrollers = YES;
-        scrollView.borderType = NSNoBorder;
-        scrollView.backgroundColor = [NSColor colorWithRed:0.10 green:0.11 blue:0.13 alpha:1.0];
-        scrollView.drawsBackground = YES;
-        scrollView.documentView = document;
-        return scrollView;
-    }
-
 - (void)syncFreeformInspectorControls {
-    self.freeformSelectionLabel.stringValue = self.freeformCanvasComponent.selectionSummary ?: @"No selection";
+    [self rebuildFreeformShapePopupOptions];
+    [self rebuildFreeformInsertMenu];
+    [self updateFreeformInspectorModeUI];
     self.freeformCreateStatusLabel.stringValue = self.freeformCanvasComponent.insertionSummary ?: @"";
     self.freeformCancelCreateButton.enabled = self.freeformCanvasComponent.insertionModeActive;
     self.freeformCanvasBackgroundColorWell.color = self.freeformCanvasComponent.canvasBackgroundColor ?: [NSColor whiteColor];
     self.freeformCanvasBackgroundOpacitySlider.doubleValue = self.freeformCanvasComponent.canvasBackgroundOpacity;
     self.freeformCanvasBackgroundOpacityValueLabel.stringValue = [NSString stringWithFormat:@"%.0f%%", self.freeformCanvasComponent.canvasBackgroundOpacity * 100.0];
+    self.freeformDefaultNodeFillColorWell.color = self.freeformCanvasComponent.defaultNodeFillColor ?: [NSColor whiteColor];
+    self.freeformDefaultNodeStrokeColorWell.color = self.freeformCanvasComponent.defaultNodeStrokeColor ?: [NSColor blackColor];
+    self.freeformDefaultNodeStrokeWidthSlider.doubleValue = self.freeformCanvasComponent.defaultNodeStrokeWidth;
+    self.freeformDefaultNodeStrokeWidthValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.defaultNodeStrokeWidth];
+    self.freeformDefaultSubgraphFillColorWell.color = self.freeformCanvasComponent.defaultSubgraphFillColor ?: [NSColor whiteColor];
+    self.freeformDefaultSubgraphStrokeColorWell.color = self.freeformCanvasComponent.defaultSubgraphStrokeColor ?: [NSColor blackColor];
+    self.freeformDefaultSubgraphStrokeWidthSlider.doubleValue = self.freeformCanvasComponent.defaultSubgraphStrokeWidth;
+    self.freeformDefaultSubgraphStrokeWidthValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.defaultSubgraphStrokeWidth];
+    self.freeformDefaultEdgeColorWell.color = self.freeformCanvasComponent.defaultEdgeStrokeColor ?: [NSColor blackColor];
+    self.freeformDefaultEdgeThicknessSlider.doubleValue = self.freeformCanvasComponent.defaultEdgeThickness;
+    self.freeformDefaultEdgeThicknessValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.defaultEdgeThickness];
+    [self.freeformDefaultEdgePatternPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.defaultEdgeLineStyle, 3))];
+    [self.freeformDefaultEdgeArrowPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.defaultEdgeArrowMode, 3))];
+    self.freeformDefaultEdgeArrowPopup.enabled = self.freeformCanvasComponent.graphType != MerrowFreeformGraphTypeER;
     [self syncFreeformConnectorControls];
 
     const BOOL hasSelection = self.freeformCanvasComponent.hasSelectedNode || self.freeformCanvasComponent.hasSelectedSubgraph;
+    const BOOL hasNodeSelection = self.freeformCanvasComponent.hasSelectedNode;
     const BOOL hasEdgeSelection = self.freeformCanvasComponent.hasSelectedEdge;
     self.freeformNodeLabelField.enabled = hasSelection;
     self.freeformWidthField.enabled = hasSelection;
@@ -2060,6 +1847,16 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
         self.freeformStrokeWidthValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.selectedNodeStrokeWidth];
     }
 
+    if (hasNodeSelection) {
+        NSNumber *selectedShape = @(self.freeformCanvasComponent.selectedNodeShape);
+        for (NSMenuItem *item in self.freeformShapePopup.itemArray) {
+            if ([item.representedObject isKindOfClass:[NSNumber class]] && [item.representedObject isEqualToNumber:selectedShape]) {
+                [self.freeformShapePopup selectItem:item];
+                break;
+            }
+        }
+    }
+
     if (!hasEdgeSelection) {
         self.freeformEdgeLabelField.stringValue = @"";
         self.freeformEdgeThicknessValueLabel.stringValue = @"-";
@@ -2074,117 +1871,7 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
         [self.freeformEdgeArrowPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeArrowMode, 3))];
     }
 
-    self.sequenceSelectionLabel.stringValue = self.freeformCanvasComponent.selectionSummary ?: @"No selection";
-    self.sequenceCanvasBackgroundColorWell.color = self.freeformCanvasComponent.canvasBackgroundColor ?: [NSColor whiteColor];
-    self.sequenceCanvasBackgroundOpacitySlider.doubleValue = self.freeformCanvasComponent.canvasBackgroundOpacity;
-    self.sequenceCanvasBackgroundOpacityValueLabel.stringValue = [NSString stringWithFormat:@"%.0f%%", self.freeformCanvasComponent.canvasBackgroundOpacity * 100.0];
-    self.sequenceElementLabelField.enabled = hasSelection;
-    self.sequenceWidthField.enabled = hasSelection;
-    self.sequenceHeightField.enabled = hasSelection;
-    self.sequenceFillColorWell.enabled = hasSelection;
-    self.sequenceStrokeColorWell.enabled = hasSelection;
-    self.sequenceStrokeWidthSlider.enabled = hasSelection;
-    self.sequenceMessageLabelField.enabled = hasEdgeSelection;
-    self.sequenceMessageColorWell.enabled = hasEdgeSelection;
-    self.sequenceMessageThicknessSlider.enabled = hasEdgeSelection;
-    self.sequenceMessagePatternPopup.enabled = hasEdgeSelection;
-    self.sequenceMessageArrowPopup.enabled = hasEdgeSelection;
-
-    if (!hasSelection) {
-        self.sequenceElementLabelField.stringValue = @"";
-        self.sequenceWidthField.stringValue = @"";
-        self.sequenceHeightField.stringValue = @"";
-        self.sequenceStrokeWidthValueLabel.stringValue = @"-";
-    } else {
-        self.sequenceElementLabelField.stringValue = self.freeformCanvasComponent.selectedNodeLabel ?: @"";
-        self.sequenceWidthField.stringValue = [NSString stringWithFormat:@"%.0f", self.freeformCanvasComponent.selectedObjectWidth];
-        self.sequenceHeightField.stringValue = [NSString stringWithFormat:@"%.0f", self.freeformCanvasComponent.selectedObjectHeight];
-        self.sequenceFillColorWell.color = self.freeformCanvasComponent.selectedNodeFillColor ?: [NSColor whiteColor];
-        self.sequenceStrokeColorWell.color = self.freeformCanvasComponent.selectedNodeStrokeColor ?: [NSColor blackColor];
-        self.sequenceStrokeWidthSlider.doubleValue = self.freeformCanvasComponent.selectedNodeStrokeWidth;
-        self.sequenceStrokeWidthValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.selectedNodeStrokeWidth];
-    }
-
-    if (!hasEdgeSelection) {
-        self.sequenceMessageLabelField.stringValue = @"";
-        self.sequenceMessageThicknessValueLabel.stringValue = @"-";
-        [self.sequenceMessagePatternPopup selectItemAtIndex:0];
-        [self.sequenceMessageArrowPopup selectItemAtIndex:0];
-    } else {
-        self.sequenceMessageLabelField.stringValue = self.freeformCanvasComponent.selectedEdgeLabel ?: @"";
-        self.sequenceMessageColorWell.color = self.freeformCanvasComponent.selectedEdgeStrokeColor ?: [NSColor blackColor];
-        self.sequenceMessageThicknessSlider.doubleValue = self.freeformCanvasComponent.selectedEdgeThickness;
-        self.sequenceMessageThicknessValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.selectedEdgeThickness];
-        [self.sequenceMessagePatternPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeLineStyle, 3))];
-        [self.sequenceMessageArrowPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeArrowMode, 3))];
-    }
-
-    self.classSelectionLabel.stringValue = self.freeformCanvasComponent.selectionSummary ?: @"No selection";
-    self.classCanvasBackgroundColorWell.color = self.freeformCanvasComponent.canvasBackgroundColor ?: [NSColor whiteColor];
-    self.classCanvasBackgroundOpacitySlider.doubleValue = self.freeformCanvasComponent.canvasBackgroundOpacity;
-    self.classCanvasBackgroundOpacityValueLabel.stringValue = [NSString stringWithFormat:@"%.0f%%", self.freeformCanvasComponent.canvasBackgroundOpacity * 100.0];
-    self.classTitleField.enabled = hasSelection;
-    self.classSubtitleField.enabled = hasSelection;
-    self.classWidthField.enabled = hasSelection;
-    self.classHeightField.enabled = hasSelection;
-    self.classHeaderFillColorWell.enabled = hasSelection;
-    self.classBodyFillColorWell.enabled = hasSelection;
-    self.classStrokeColorWell.enabled = hasSelection;
-    self.classStrokeWidthSlider.enabled = hasSelection;
-    self.classAttributesTextView.editable = hasSelection;
-    self.classMethodsTextView.editable = hasSelection;
-    self.classRelationLabelField.enabled = hasEdgeSelection;
-    self.classRelationColorWell.enabled = hasEdgeSelection;
-    self.classRelationThicknessSlider.enabled = hasEdgeSelection;
-    self.classRelationPatternPopup.enabled = hasEdgeSelection;
-    self.classSourceEndpointPopup.enabled = hasEdgeSelection;
-    self.classTargetEndpointPopup.enabled = hasEdgeSelection;
-
-    if (!hasSelection) {
-        self.classTitleField.stringValue = @"";
-        self.classSubtitleField.stringValue = @"";
-        self.classWidthField.stringValue = @"";
-        self.classHeightField.stringValue = @"";
-        self.classStrokeWidthValueLabel.stringValue = @"-";
-        self.isSynchronizingClassInspector = YES;
-        [self.classAttributesTextView setString:@""];
-        [self.classMethodsTextView setString:@""];
-        self.isSynchronizingClassInspector = NO;
-    } else {
-        self.classTitleField.stringValue = self.freeformCanvasComponent.selectedNodeLabel ?: @"";
-        self.classSubtitleField.stringValue = self.freeformCanvasComponent.selectedNodeSubtitle ?: @"";
-        self.classWidthField.stringValue = [NSString stringWithFormat:@"%.0f", self.freeformCanvasComponent.selectedObjectWidth];
-        self.classHeightField.stringValue = [NSString stringWithFormat:@"%.0f", self.freeformCanvasComponent.selectedObjectHeight];
-        self.classHeaderFillColorWell.color = self.freeformCanvasComponent.selectedNodeFillColor ?: [NSColor whiteColor];
-        self.classBodyFillColorWell.color = self.freeformCanvasComponent.selectedNodeBodyFillColor ?: [NSColor whiteColor];
-        self.classStrokeColorWell.color = self.freeformCanvasComponent.selectedNodeStrokeColor ?: [NSColor blackColor];
-        self.classStrokeWidthSlider.doubleValue = self.freeformCanvasComponent.selectedNodeStrokeWidth;
-        self.classStrokeWidthValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.selectedNodeStrokeWidth];
-        self.isSynchronizingClassInspector = YES;
-        if (self.classAttributesTextView.window.firstResponder != self.classAttributesTextView) {
-            [self.classAttributesTextView setString:self.freeformCanvasComponent.selectedNodeAttributesText ?: @""];
-        }
-        if (self.classMethodsTextView.window.firstResponder != self.classMethodsTextView) {
-            [self.classMethodsTextView setString:self.freeformCanvasComponent.selectedNodeMethodsText ?: @""];
-        }
-        self.isSynchronizingClassInspector = NO;
-    }
-
-    if (!hasEdgeSelection) {
-        self.classRelationLabelField.stringValue = @"";
-        self.classRelationThicknessValueLabel.stringValue = @"-";
-        [self.classRelationPatternPopup selectItemAtIndex:0];
-        [self.classSourceEndpointPopup selectItemAtIndex:0];
-        [self.classTargetEndpointPopup selectItemAtIndex:0];
-    } else {
-        self.classRelationLabelField.stringValue = self.freeformCanvasComponent.selectedEdgeLabel ?: @"";
-        self.classRelationColorWell.color = self.freeformCanvasComponent.selectedEdgeStrokeColor ?: [NSColor blackColor];
-        self.classRelationThicknessSlider.doubleValue = self.freeformCanvasComponent.selectedEdgeThickness;
-        self.classRelationThicknessValueLabel.stringValue = [NSString stringWithFormat:@"%.1f pt", self.freeformCanvasComponent.selectedEdgeThickness];
-        [self.classRelationPatternPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeLineStyle, 3))];
-        [self.classSourceEndpointPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeSourceEndStyle, 5))];
-        [self.classTargetEndpointPopup selectItemAtIndex:MAX(0, MIN(self.freeformCanvasComponent.selectedEdgeTargetEndStyle, 5))];
-    }
+    [self updateFreeformInspectorModeUI];
 }
 
 - (BOOL)isFreeformGraphPath:(NSString *)path {
@@ -2228,6 +1915,7 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 }
 
 - (BOOL)loadFreeformDocumentFromPath:(NSString *)sourcePath {
+    [self resetAppStateForIncomingDocument];
     NSError *error = nil;
     NSData *data = [NSData dataWithContentsOfFile:sourcePath options:0 error:&error];
     if (!data) {
@@ -2304,14 +1992,12 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
 - (void)applyEditingModeUI {
     if (self.freeformModeEnabled) {
-        const BOOL isSequenceGraph = [self isSequenceFreeformGraph];
-        const BOOL isClassGraph = [self isClassFreeformGraph];
         self.viewerPaneTitleLabel.stringValue = @"Editable Canvas";
-        self.viewerPaneSubtitleLabel.stringValue = isSequenceGraph ? @"Sequence-aware freeform canvas with editable participants, fragments, notes, and messages" : (isClassGraph ? @"Class-aware freeform canvas with compartment boxes and UML relationship endpoints" : @"Reusable freeform object-graph component with direct selection and drag editing");
+        self.viewerPaneSubtitleLabel.stringValue = @"Reusable freeform object-graph component with direct selection and drag editing";
         [self mountViewerPaneBodyView:self.freeformCanvasComponent];
-        self.editorPaneTitleLabel.stringValue = isSequenceGraph ? @"Sequence Properties" : (isClassGraph ? @"Class Properties" : @"Freeform Canvas");
-        self.editorPaneSubtitleLabel.stringValue = isSequenceGraph ? @"Sequence-specific inspector and message styling workspace" : (isClassGraph ? @"Class-specific inspector for compartments, box styling, and UML relations" : @"Tools and inspector workspace for custom object-graph editing");
-        [self mountEditorPaneBodyView:[self activeFreeformInspectorScrollView]];
+        self.editorPaneTitleLabel.stringValue = @"Freeform Canvas";
+        self.editorPaneSubtitleLabel.stringValue = @"Tools and inspector workspace for custom object-graph editing";
+        [self mountEditorPaneBodyView:self.freeformToolsScrollView];
         self.commandField.hidden = YES;
         self.commandButton.hidden = YES;
         self.contextLabel.hidden = YES;
@@ -2344,9 +2030,7 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
                                                                                   sizeof(message));
     if (!graph) {
         [self.freeformCanvasComponent clearDocument];
-        if (self.freeformModeEnabled) {
-            [self applyEditingModeUI];
-        }
+        self.freeformSelectionLabel.stringValue = @"No selection";
         [self syncFreeformInspectorControls];
         self.statusLabel.stringValue = [NSString stringWithUTF8String:message[0] != 0 ? message : "Freeform canvas unavailable"]; 
         return;
@@ -2354,9 +2038,6 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
     [self.freeformCanvasComponent loadEditableGraph:graph];
     merrow_studio_free_editable_graph(graph);
-    if (self.freeformModeEnabled) {
-        [self applyEditingModeUI];
-    }
     [self syncFreeformInspectorControls];
     self.statusLabel.stringValue = [NSString stringWithUTF8String:message[0] != 0 ? message : "Editable canvas ready"];
 }
@@ -2403,9 +2084,9 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
     if (!self.freeformModeEnabled) {
         self.freeformModeEnabled = YES;
+        [self applyEditingModeUI];
     }
 
-    [self applyEditingModeUI];
     [self syncFreeformInspectorControls];
     [self markDocumentEdited:YES];
     self.statusLabel.stringValue = @"Freeform canvas reset from Mermaid source.";
@@ -2419,24 +2100,67 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 - (IBAction)beginFreeformAddShape:(id)sender {
     (void)sender;
     [self.freeformCanvasComponent beginInsertingNodeWithShape:[self selectedFreeformShapeCode]];
+    [self clearFreeformInspectorModeOverride];
     [self syncFreeformInspectorControls];
-    self.statusLabel.stringValue = @"Click the canvas to place the new shape.";
+    self.statusLabel.stringValue = self.freeformCanvasComponent.insertionSummary ?: @"Click the canvas to place the new shape.";
     [self.window makeFirstResponder:self.freeformCanvasComponent];
+}
+
+- (IBAction)showFreeformAddObjectMode:(id)sender {
+    (void)sender;
+    [self setFreeformInspectorModeOverride:MerrowFreeformInspectorModeAddObject];
+    [self syncFreeformInspectorControls];
+    self.statusLabel.stringValue = @"Add Object mode ready.";
+    [self.window makeFirstResponder:self.freeformCanvasComponent];
+}
+
+- (IBAction)showFreeformAddLinkMode:(id)sender {
+    (void)sender;
+    [self setFreeformInspectorModeOverride:MerrowFreeformInspectorModeAddLink];
+    [self syncFreeformInspectorControls];
+    self.statusLabel.stringValue = @"Add Link mode ready.";
+    [self.window makeFirstResponder:self.freeformCanvasComponent];
+}
+
+- (IBAction)beginFreeformAddShapeFromMenu:(id)sender {
+    NSNumber *shapeValue = [sender representedObject];
+    if ([shapeValue isKindOfClass:[NSNumber class]]) {
+        for (NSMenuItem *item in self.freeformShapePopup.itemArray) {
+            if ([item.representedObject isKindOfClass:[NSNumber class]] && [item.representedObject isEqualToNumber:shapeValue]) {
+                [self.freeformShapePopup selectItem:item];
+                break;
+            }
+        }
+    }
+    [self beginFreeformAddShape:nil];
 }
 
 - (IBAction)beginFreeformAddGroup:(id)sender {
     (void)sender;
     [self.freeformCanvasComponent beginInsertingSubgraph];
+    [self clearFreeformInspectorModeOverride];
     [self syncFreeformInspectorControls];
-    self.statusLabel.stringValue = @"Click the canvas to place the new group.";
+    self.statusLabel.stringValue = self.freeformCanvasComponent.insertionSummary ?: @"Click the canvas to place the new group.";
     [self.window makeFirstResponder:self.freeformCanvasComponent];
 }
 
 - (IBAction)cancelFreeformInsertion:(id)sender {
     (void)sender;
     [self.freeformCanvasComponent cancelInsertionMode];
+    [self clearFreeformInspectorModeOverride];
     [self syncFreeformInspectorControls];
     self.statusLabel.stringValue = @"Freeform insertion cancelled.";
+}
+
+- (IBAction)applyFreeformSelectedShape:(id)sender {
+    (void)sender;
+    if (!self.freeformCanvasComponent.hasSelectedNode) {
+        return;
+    }
+    [self.freeformCanvasComponent updateSelectedNodeShape:[self selectedFreeformShapeCode]];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+    self.statusLabel.stringValue = @"Shape updated.";
 }
 
 - (IBAction)addFreeformConnector:(id)sender {
@@ -2451,111 +2175,158 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 }
 
 - (IBAction)applyFreeformNodeLabel:(id)sender {
-    NSTextField *field = [sender isKindOfClass:[NSTextField class]] ? (NSTextField *)sender : self.freeformNodeLabelField;
-    [self.freeformCanvasComponent updateSelectedNodeLabel:field.stringValue ?: @""];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedNodeLabel:self.freeformNodeLabelField.stringValue ?: @""];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformCanvasBackgroundColor:(id)sender {
-    NSColorWell *colorWell = [sender isKindOfClass:[NSColorWell class]] ? (NSColorWell *)sender : self.freeformCanvasBackgroundColorWell;
-    [self.freeformCanvasComponent updateCanvasBackgroundColor:colorWell.color];
+    (void)sender;
+    [self.freeformCanvasComponent updateCanvasBackgroundColor:self.freeformCanvasBackgroundColorWell.color];
     [self syncFreeformInspectorControls];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformCanvasBackgroundOpacity:(id)sender {
-    NSSlider *slider = [sender isKindOfClass:[NSSlider class]] ? (NSSlider *)sender : self.freeformCanvasBackgroundOpacitySlider;
-    [self.freeformCanvasComponent updateCanvasBackgroundOpacity:slider.doubleValue];
+    (void)sender;
+    [self.freeformCanvasComponent updateCanvasBackgroundOpacity:self.freeformCanvasBackgroundOpacitySlider.doubleValue];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultNodeFillColor:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultNodeFillColor:self.freeformDefaultNodeFillColorWell.color];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultNodeStrokeColor:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultNodeStrokeColor:self.freeformDefaultNodeStrokeColorWell.color];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultNodeStrokeWidth:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultNodeStrokeWidth:self.freeformDefaultNodeStrokeWidthSlider.doubleValue];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultSubgraphFillColor:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultSubgraphFillColor:self.freeformDefaultSubgraphFillColorWell.color];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultSubgraphStrokeColor:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultSubgraphStrokeColor:self.freeformDefaultSubgraphStrokeColorWell.color];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultSubgraphStrokeWidth:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultSubgraphStrokeWidth:self.freeformDefaultSubgraphStrokeWidthSlider.doubleValue];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultEdgeColor:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultEdgeStrokeColor:self.freeformDefaultEdgeColorWell.color];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultEdgeThickness:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultEdgeThickness:self.freeformDefaultEdgeThicknessSlider.doubleValue];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultEdgePattern:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultEdgeLineStyle:self.freeformDefaultEdgePatternPopup.indexOfSelectedItem];
+    [self syncFreeformInspectorControls];
+    [self markDocumentEdited:YES];
+}
+
+- (IBAction)applyFreeformDefaultEdgeArrowMode:(id)sender {
+    (void)sender;
+    [self.freeformCanvasComponent updateDefaultEdgeArrowMode:self.freeformDefaultEdgeArrowPopup.indexOfSelectedItem];
     [self syncFreeformInspectorControls];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformObjectWidth:(id)sender {
-    NSTextField *field = [sender isKindOfClass:[NSTextField class]] ? (NSTextField *)sender : self.freeformWidthField;
-    [self.freeformCanvasComponent updateSelectedObjectWidth:MAX(1.0, field.doubleValue)];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedObjectWidth:MAX(1.0, self.freeformWidthField.doubleValue)];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformObjectHeight:(id)sender {
-    NSTextField *field = [sender isKindOfClass:[NSTextField class]] ? (NSTextField *)sender : self.freeformHeightField;
-    [self.freeformCanvasComponent updateSelectedObjectHeight:MAX(1.0, field.doubleValue)];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedObjectHeight:MAX(1.0, self.freeformHeightField.doubleValue)];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformFillColor:(id)sender {
-    NSColorWell *colorWell = [sender isKindOfClass:[NSColorWell class]] ? (NSColorWell *)sender : self.freeformFillColorWell;
-    [self.freeformCanvasComponent updateSelectedNodeFillColor:colorWell.color];
-    [self markDocumentEdited:YES];
-}
-
-- (IBAction)applyClassBodyFillColor:(id)sender {
-    NSColorWell *colorWell = [sender isKindOfClass:[NSColorWell class]] ? (NSColorWell *)sender : self.classBodyFillColorWell;
-    [self.freeformCanvasComponent updateSelectedNodeBodyFillColor:colorWell.color];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedNodeFillColor:self.freeformFillColorWell.color];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformStrokeColor:(id)sender {
-    NSColorWell *colorWell = [sender isKindOfClass:[NSColorWell class]] ? (NSColorWell *)sender : self.freeformStrokeColorWell;
-    [self.freeformCanvasComponent updateSelectedNodeStrokeColor:colorWell.color];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedNodeStrokeColor:self.freeformStrokeColorWell.color];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformStrokeWidth:(id)sender {
-    NSSlider *slider = [sender isKindOfClass:[NSSlider class]] ? (NSSlider *)sender : self.freeformStrokeWidthSlider;
-    [self.freeformCanvasComponent updateSelectedNodeStrokeWidth:slider.doubleValue];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedNodeStrokeWidth:self.freeformStrokeWidthSlider.doubleValue];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformEdgeLabel:(id)sender {
-    NSTextField *field = [sender isKindOfClass:[NSTextField class]] ? (NSTextField *)sender : self.freeformEdgeLabelField;
-    [self.freeformCanvasComponent updateSelectedEdgeLabel:field.stringValue ?: @""];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedEdgeLabel:self.freeformEdgeLabelField.stringValue ?: @""];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformEdgeColor:(id)sender {
-    NSColorWell *colorWell = [sender isKindOfClass:[NSColorWell class]] ? (NSColorWell *)sender : self.freeformEdgeColorWell;
-    [self.freeformCanvasComponent updateSelectedEdgeStrokeColor:colorWell.color];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedEdgeStrokeColor:self.freeformEdgeColorWell.color];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformEdgeThickness:(id)sender {
-    NSSlider *slider = [sender isKindOfClass:[NSSlider class]] ? (NSSlider *)sender : self.freeformEdgeThicknessSlider;
-    [self.freeformCanvasComponent updateSelectedEdgeThickness:slider.doubleValue];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedEdgeThickness:self.freeformEdgeThicknessSlider.doubleValue];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformEdgePattern:(id)sender {
-    NSPopUpButton *popup = [sender isKindOfClass:[NSPopUpButton class]] ? (NSPopUpButton *)sender : self.freeformEdgePatternPopup;
-    [self.freeformCanvasComponent updateSelectedEdgeLineStyle:popup.indexOfSelectedItem];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedEdgeLineStyle:self.freeformEdgePatternPopup.indexOfSelectedItem];
     [self markDocumentEdited:YES];
 }
 
 - (IBAction)applyFreeformEdgeArrowMode:(id)sender {
-    NSPopUpButton *popup = [sender isKindOfClass:[NSPopUpButton class]] ? (NSPopUpButton *)sender : self.freeformEdgeArrowPopup;
-    [self.freeformCanvasComponent updateSelectedEdgeArrowMode:popup.indexOfSelectedItem];
-    [self markDocumentEdited:YES];
-}
-
-- (IBAction)applyClassSubtitle:(id)sender {
-    NSTextField *field = [sender isKindOfClass:[NSTextField class]] ? (NSTextField *)sender : self.classSubtitleField;
-    [self.freeformCanvasComponent updateSelectedNodeSubtitle:field.stringValue ?: @""];
-    [self markDocumentEdited:YES];
-}
-
-- (IBAction)applyClassSourceEndpointStyle:(id)sender {
-    NSPopUpButton *popup = [sender isKindOfClass:[NSPopUpButton class]] ? (NSPopUpButton *)sender : self.classSourceEndpointPopup;
-    [self.freeformCanvasComponent updateSelectedEdgeSourceEndStyle:popup.indexOfSelectedItem];
-    [self markDocumentEdited:YES];
-}
-
-- (IBAction)applyClassTargetEndpointStyle:(id)sender {
-    NSPopUpButton *popup = [sender isKindOfClass:[NSPopUpButton class]] ? (NSPopUpButton *)sender : self.classTargetEndpointPopup;
-    [self.freeformCanvasComponent updateSelectedEdgeTargetEndStyle:popup.indexOfSelectedItem];
+    (void)sender;
+    [self.freeformCanvasComponent updateSelectedEdgeArrowMode:self.freeformEdgeArrowPopup.indexOfSelectedItem];
     [self markDocumentEdited:YES];
 }
 
 - (void)freeformCanvasComponentDidChangeSelection:(MerrowFreeformCanvasComponent *)component {
-    (void)component;
+    [self clearFreeformInspectorModeOverride];
+    self.freeformSelectionLabel.stringValue = component.selectionSummary ?: @"No selection";
     [self syncFreeformInspectorControls];
 }
 
@@ -3001,6 +2772,9 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
         return;
     }
 
+    [self resetAppStateForIncomingDocument];
+    [self blankMermaidWorkspaceForIncomingLoad];
+
     NSError *error = nil;
     NSString *source = [NSString stringWithContentsOfFile:sourcePath encoding:NSUTF8StringEncoding error:&error];
     if (!source) {
@@ -3008,41 +2782,24 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
         return;
     }
 
-    self.currentDocumentIsFreeform = NO;
-    [self applyEditorSource:source fromPath:sourcePath];
+    [self finishLoadingMermaidSource:source fromPath:sourcePath];
 }
 
 - (void)textDidChange:(NSNotification *)notification {
-    if (notification.object == self.editorTextView) {
-        if (self.isApplyingHighlighting || self.isSynchronizingEditor) return;
-        self.editorGeneration += 1;
-        [self clearCommandContext];
-        [self markDocumentEdited:YES];
-        [self debounceSyntaxHighlighting];
-        [self requestEditorAnalysis];
-        return;
-    }
-
-    if (notification.object == self.classAttributesTextView) {
-        if (self.isSynchronizingClassInspector) return;
-        [self.freeformCanvasComponent updateSelectedNodeAttributesText:self.classAttributesTextView.string ?: @""];
-        [self markDocumentEdited:YES];
-        return;
-    }
-
-    if (notification.object == self.classMethodsTextView) {
-        if (self.isSynchronizingClassInspector) return;
-        [self.freeformCanvasComponent updateSelectedNodeMethodsText:self.classMethodsTextView.string ?: @""];
-        [self markDocumentEdited:YES];
-        return;
-    }
+    if (notification.object != self.editorTextView || self.isApplyingHighlighting || self.isSynchronizingEditor) return;
+    self.editorGeneration += 1;
+    [self clearCommandContext];
+    [self markDocumentEdited:YES];
+    [self debounceSyntaxHighlighting];
+    [self requestEditorAnalysis];
 }
 
 - (IBAction)newDocument:(id)sender {
     (void)sender;
     [self promptToSaveIfNeededThen:^(BOOL shouldContinue) {
         if (!shouldContinue) return;
-        [self applyEditorSource:MerrowStudioUntitledSource() fromPath:nil];
+        [self resetAppStateForIncomingDocument];
+        [self finishLoadingMermaidSource:MerrowStudioUntitledSource() fromPath:nil];
         self.statusLabel.stringValue = @"New Mermaid document.";
     }];
 }
@@ -3151,7 +2908,9 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 - (void)installMenuBar {
     NSMenu *menuBar = [[NSMenu alloc] initWithTitle:@""];
 
-    NSMenuItem *appMenuItem = [[NSMenuItem alloc] initWithTitle:@"Merrow Studio" action:nil keyEquivalent:@""];
+    NSString *appName = [self appDisplayName];
+
+    NSMenuItem *appMenuItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
     [menuBar addItem:appMenuItem];
 
     NSMenuItem *editMenuItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
@@ -3166,8 +2925,16 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     NSMenuItem *freeformMenuItem = [[NSMenuItem alloc] initWithTitle:@"Freeform" action:nil keyEquivalent:@""];
     [menuBar addItem:freeformMenuItem];
 
-    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"Merrow Studio"];
-    NSString *quitTitle = @"Quit Merrow Studio";
+        NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
+        NSString *aboutTitle = [NSString stringWithFormat:@"About %@", appName];
+        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle
+                                      action:@selector(showAboutDialog:)
+                                  keyEquivalent:@""];
+        aboutItem.target = self;
+        [appMenu addItem:aboutItem];
+        [appMenu addItem:[NSMenuItem separatorItem]];
+
+        NSString *quitTitle = [NSString stringWithFormat:@"Quit %@", appName];
     NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle
                                                       action:@selector(terminate:)
                                                keyEquivalent:@"q"];
@@ -3182,6 +2949,16 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     NSMenuItem *redoItem = [[NSMenuItem alloc] initWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
     [editMenu addItem:redoItem];
 
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *cutItem = [[NSMenuItem alloc] initWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
+    [editMenu addItem:cutItem];
+
+    NSMenuItem *copyItem = [[NSMenuItem alloc] initWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+    [editMenu addItem:copyItem];
+
+    NSMenuItem *pasteItem = [[NSMenuItem alloc] initWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+    [editMenu addItem:pasteItem];
     [editMenuItem setSubmenu:editMenu];
 
     NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
@@ -3279,13 +3056,40 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
 
     [diagramMenuItem setSubmenu:diagramMenu];
 
+    NSMenuItem *insertMenuItem = [[NSMenuItem alloc] initWithTitle:@"Insert" action:nil keyEquivalent:@""];
+    [menuBar addItem:insertMenuItem];
+
+    NSMenu *insertMenu = [[NSMenu alloc] initWithTitle:@"Insert"];
+    self.insertAddObjectMenuItem = [[NSMenuItem alloc] initWithTitle:@"Add Object" action:@selector(showFreeformAddObjectMode:) keyEquivalent:@""];
+    self.insertAddObjectMenuItem.target = self;
+    [insertMenu addItem:self.insertAddObjectMenuItem];
+
+    self.insertAddLinkMenuItem = [[NSMenuItem alloc] initWithTitle:@"Add Link" action:@selector(showFreeformAddLinkMode:) keyEquivalent:@""];
+    self.insertAddLinkMenuItem.target = self;
+    [insertMenu addItem:self.insertAddLinkMenuItem];
+
+    [insertMenuItem setSubmenu:insertMenu];
+
     NSMenu *freeformMenu = [[NSMenu alloc] initWithTitle:@"Freeform"];
+
+    NSMenuItem *insertShapeItem = [[NSMenuItem alloc] initWithTitle:@"Insert Shape" action:nil keyEquivalent:@""];
+    self.freeformInsertShapeMenu = [[NSMenu alloc] initWithTitle:@"Insert Shape"];
+    [insertShapeItem setSubmenu:self.freeformInsertShapeMenu];
+    [freeformMenu addItem:insertShapeItem];
+
+    self.freeformInsertGroupMenuItem = [[NSMenuItem alloc] initWithTitle:@"Insert Group" action:@selector(beginFreeformAddGroup:) keyEquivalent:@""];
+    self.freeformInsertGroupMenuItem.target = self;
+    [freeformMenu addItem:self.freeformInsertGroupMenuItem];
+
+    [freeformMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem *resetToMermaidItem = [[NSMenuItem alloc] initWithTitle:@"Reset to Mermaid" action:@selector(resetFreeformToMermaid:) keyEquivalent:@""];
     resetToMermaidItem.target = self;
     [freeformMenu addItem:resetToMermaidItem];
 
     [freeformMenuItem setSubmenu:freeformMenu];
+
+    [self rebuildFreeformInsertMenu];
 
     [NSApp setMainMenu:menuBar];
 }
@@ -3436,8 +3240,6 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     self.editorPaneContentHost = [[NSView alloc] initWithFrame:NSZeroRect];
     self.editorPaneContentHost.translatesAutoresizingMaskIntoConstraints = NO;
     self.freeformToolsScrollView = [self createFreeformToolsScrollView];
-    self.sequenceToolsScrollView = [self createSequenceToolsScrollView];
-    self.classToolsScrollView = [self createClassToolsScrollView];
     self.editorPane = [self wrappedPaneWithTitle:@"Mermaid Source" subtitle:@"Editor with live highlighting and parser feedback" bodyView:self.editorPaneContentHost dark:YES titleLabel:&_editorPaneTitleLabel subtitleLabel:&_editorPaneSubtitleLabel];
     [self mountEditorPaneBodyView:self.editorScrollView];
 
@@ -3537,6 +3339,11 @@ static void MerrowDrawArrow(CGPoint from, CGPoint tip, NSColor *color) {
     container.translatesAutoresizingMaskIntoConstraints = YES;
     container.wantsLayer = YES;
     container.layer.backgroundColor = (dark ? [NSColor colorWithRed:0.10 green:0.11 blue:0.13 alpha:1.0] : [NSColor colorWithRed:0.96 green:0.97 blue:0.98 alpha:1.0]).CGColor;
+    if (dark) {
+        NSAppearance *appearance = [self darkInspectorAppearance];
+        container.appearance = appearance;
+        bodyView.appearance = appearance;
+    }
 
     NSTextField *titleLabel = [NSTextField labelWithString:title];
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;

@@ -1210,6 +1210,27 @@ test "state parser: complex diagram" {
     try std.testing.expectEqualStrings("This is a note", still.note.?.text);
 }
 
+test "state parser: power cycle with descriptions" {
+    const allocator = std.testing.allocator;
+    var diagram = try parse(allocator,
+        \\stateDiagram-v2
+        \\    [*] --> Red
+        \\    Red --> Green : Timer
+        \\    Green --> Yellow : Timer
+        \\    Yellow --> Red : Timer
+        \\    Red --> [*] : Power off
+        \\    Red : Stop
+        \\    Green : Go
+        \\    Yellow : Caution
+    );
+    defer diagram.deinit();
+
+    try std.testing.expectEqual(@as(usize, 5), diagram.relationCount());
+    try std.testing.expectEqualStrings("Stop", diagram.getState("Red").?.description.?);
+    try std.testing.expectEqualStrings("Go", diagram.getState("Green").?.description.?);
+    try std.testing.expectEqualStrings("Caution", diagram.getState("Yellow").?.description.?);
+}
+
 test "state parser: state with alias and body" {
     const allocator = std.testing.allocator;
     var diagram = try parse(allocator,

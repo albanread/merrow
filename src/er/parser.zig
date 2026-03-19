@@ -792,3 +792,32 @@ test "er parser: complex diagram" {
     const order = diagram.getEntity("ORDER").?;
     try std.testing.expectEqual(@as(usize, 3), order.attributes.items.len);
 }
+
+test "er parser: fixture diagrams parse successfully" {
+    const allocator = std.testing.allocator;
+    const fixtures = [_]struct {
+        path: []const u8,
+        min_entities: usize,
+        min_relationships: usize,
+        expected_entity: []const u8,
+    }{
+        .{ .path = "test-diagrams/er_simple.mmd", .min_entities = 3, .min_relationships = 2, .expected_entity = "CUSTOMER" },
+        .{ .path = "test-diagrams/er_simple_v2.mmd", .min_entities = 3, .min_relationships = 2, .expected_entity = "AUTHOR" },
+        .{ .path = "test-diagrams/er_complex.mmd", .min_entities = 8, .min_relationships = 8, .expected_entity = "PRODUCT" },
+        .{ .path = "test-diagrams/er_complex_v2.mmd", .min_entities = 11, .min_relationships = 13, .expected_entity = "HOSPITAL" },
+    };
+
+    for (fixtures) |fixture| {
+        const source = try std.fs.cwd().readFileAlloc(allocator, fixture.path, 1024 * 1024);
+        defer allocator.free(source);
+
+        try std.testing.expect(isErDiagram(source));
+
+        var diagram = try parse(allocator, source);
+        defer diagram.deinit();
+
+        try std.testing.expect(diagram.entityCount() >= fixture.min_entities);
+        try std.testing.expect(diagram.relationshipCount() >= fixture.min_relationships);
+        try std.testing.expect(diagram.getEntity(fixture.expected_entity) != null);
+    }
+}

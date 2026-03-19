@@ -13,6 +13,12 @@ const Parser = merrow.flowchart.Parser;
 const ClassParser = merrow.class.parser;
 const ClassSvgRender = merrow.class.svg_render;
 const ClassPngRender = merrow.class.png_render;
+const ErParser = merrow.er.parser;
+const ErSvgRender = merrow.er.svg_render;
+const ErPngRender = merrow.er.png_render;
+const StateParser = merrow.state.parser;
+const StateSvgRender = merrow.state.svg_render;
+const StatePngRender = merrow.state.png_render;
 const SeqParser = merrow.sequence.parser.Parser;
 const SeqLayout = merrow.sequence.seq_layout;
 const SeqSvgRender = merrow.sequence.svg_render;
@@ -26,6 +32,7 @@ const LabelPlacement = graph_render.LabelPlacement;
 const Vec2 = graph_render.Vec2;
 const seq_model = merrow.sequence.model;
 const class_model = merrow.class.model;
+const er_model = merrow.er.model;
 
 const Graph = Digraph(NodeData, EdgeData, GraphData);
 
@@ -61,6 +68,7 @@ pub const StudioGraphType = enum(u32) {
     flowchart = 0,
     sequence = 1,
     class = 2,
+    er = 3,
 };
 
 pub const StudioPoint = extern struct {
@@ -327,6 +335,14 @@ fn detectSequenceDiagram(source: []const u8) bool {
 
 fn detectClassDiagram(source: []const u8) bool {
     return ClassParser.isClassDiagram(source);
+}
+
+fn detectErDiagram(source: []const u8) bool {
+    return ErParser.isErDiagram(source);
+}
+
+fn detectStateDiagram(source: []const u8) bool {
+    return StateParser.isStateDiagram(source);
 }
 
 fn rankDirFromText(text: []const u8) dagre.RankDir {
@@ -663,6 +679,315 @@ fn classLineStyleTag(line_type: class_model.LineType) u32 {
     return switch (line_type) {
         .solid => 0,
         .dotted => 2,
+    };
+}
+
+fn erCardinalityEndStyleTag(cardinality: er_model.Cardinality) u32 {
+    return switch (cardinality) {
+        .only_one => 6,
+        .zero_or_one => 7,
+        .zero_or_more => 8,
+        .one_or_more => 9,
+    };
+}
+
+fn dupErEntitySubtitle(entity: *const er_model.Entity) !?[*c]const u8 {
+    const alias = entity.alias orelse return null;
+    if (alias.len == 0) return null;
+    if (std.mem.eql(u8, alias, entity.label)) return null;
+    return try dupCString(c_allocator, entity.label);
+}
+
+fn dupJoinedErAttributes(allocator: std.mem.Allocator, entity: *const er_model.Entity) !?[*c]const u8 {
+    if (entity.attributes.items.len == 0) return null;
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    for (entity.attributes.items, 0..) |attr, idx| {
+        if (idx > 0) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, attr.attr_type);
+        try buffer.append(allocator, '\t');
+        try buffer.appendSlice(allocator, attr.name);
+        try buffer.append(allocator, '\t');
+
+        for (attr.keys.items, 0..) |key, key_idx| {
+            if (key_idx > 0) try buffer.append(allocator, ',');
+            try buffer.appendSlice(allocator, key.asStr());
+        }
+    }
+
+    return try dupCString(c_allocator, buffer.items);
+}
+
+const ErEditableEntityDimensions = struct {
+    width: f64,
+    height: f64,
+};
+
+const er_editable_margin: f64 = 50.0;
+const er_editable_header_height: f64 = 42.75;
+const er_editable_attr_row_height: f64 = 28.0;
+const er_editable_entity_min_width: f64 = 120.0;
+const er_editable_entity_padding: f64 = 12.0;
+const er_editable_node_sep: f64 = 80.0;
+const er_editable_rank_sep: f64 = 80.0;
+const er_editable_char_width: f64 = 8.0;
+const er_editable_attr_char_width: f64 = 7.2;
+
+fn erEntityBoxSize(entity: *const er_model.Entity) ErEditableEntityDimensions {
+    const display_name = entity.displayName();
+    const name_width = @as(f64, @floatFromInt(display_name.len)) * er_editable_char_width + er_editable_entity_padding * 2.0;
+
+    if (entity.attributes.items.len == 0) {
+        return .{
+            .width = @max(name_width, er_editable_entity_min_width),
+            .height = er_editable_header_height,
+        };
+    }
+
+    var type_max: f64 = 40.0;
+    var name_max: f64 = 40.0;
+    var key_max: f64 = 30.0;
+
+    for (entity.attributes.items) |attr| {
+        const type_width = @as(f64, @floatFromInt(attr.attr_type.len)) * er_editable_attr_char_width + er_editable_entity_padding * 2.0;
+        if (type_width > type_max) type_max = type_width;
+
+        const attr_name_width = @as(f64, @floatFromInt(attr.name.len)) * er_editable_attr_char_width + er_editable_entity_padding * 2.0;
+        if (attr_name_width > name_max) name_max = attr_name_width;
+
+        var key_len: usize = 0;
+        for (attr.keys.items, 0..) |key, key_idx| {
+            key_len += key.asStr().len;
+            if (key_idx > 0) key_len += 1;
+        }
+        if (key_len > 0) {
+            const key_width = @as(f64, @floatFromInt(key_len)) * er_editable_attr_char_width + er_editable_entity_padding * 2.0;
+            if (key_width > key_max) key_max = key_width;
+        }
+    }
+
+    return .{
+        .width = @max(@max(type_max + name_max + key_max, name_width), er_editable_entity_min_width),
+        .height = er_editable_header_height + @as(f64, @floatFromInt(entity.attributes.items.len)) * er_editable_attr_row_height,
+    };
+}
+
+const ErEditablePosition = struct {
+    x: f64,
+    y: f64,
+};
+
+fn layoutErEntities(
+    allocator: std.mem.Allocator,
+    diagram: *const er_model.ErDiagram,
+    sorted_names: []const []const u8,
+    widths: *const std.StringHashMap(f64),
+    heights: *const std.StringHashMap(f64),
+    positions: *std.StringHashMap(ErEditablePosition),
+) !void {
+    if (sorted_names.len == 0) return;
+
+    var connected_to = std.StringHashMap(std.ArrayListUnmanaged([]const u8)).init(allocator);
+    defer {
+        var iter = connected_to.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit(allocator);
+        }
+        connected_to.deinit();
+    }
+
+    var in_rel = std.StringHashMap(bool).init(allocator);
+    defer in_rel.deinit();
+
+    for (diagram.relationships.items) |rel| {
+        try in_rel.put(rel.entity_a, true);
+        try in_rel.put(rel.entity_b, true);
+
+        const entry = try connected_to.getOrPut(rel.entity_a);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        try entry.value_ptr.append(allocator, rel.entity_b);
+    }
+
+    var layer_map = std.StringHashMap(usize).init(allocator);
+    defer layer_map.deinit();
+
+    var queue = std.ArrayListUnmanaged([]const u8){};
+    defer queue.deinit(allocator);
+
+    for (sorted_names) |name| {
+        if (in_rel.contains(name) and !layer_map.contains(name)) {
+            try layer_map.put(name, 0);
+            try queue.append(allocator, name);
+
+            var qi: usize = 0;
+            while (qi < queue.items.len) : (qi += 1) {
+                const current = queue.items[qi];
+                const current_layer = layer_map.get(current) orelse 0;
+
+                if (connected_to.getPtr(current)) |neighbors| {
+                    for (neighbors.items) |neighbor| {
+                        if (!layer_map.contains(neighbor)) {
+                            try layer_map.put(neighbor, current_layer + 1);
+                            try queue.append(allocator, neighbor);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    var max_layer: usize = 0;
+    {
+        var iter = layer_map.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.* > max_layer) max_layer = entry.value_ptr.*;
+        }
+    }
+
+    for (sorted_names) |name| {
+        if (!layer_map.contains(name)) {
+            try layer_map.put(name, max_layer + 1);
+        }
+    }
+
+    const total_layers = max_layer + 2;
+    var layers = try allocator.alloc(std.ArrayListUnmanaged([]const u8), total_layers);
+    defer {
+        for (layers) |*layer| layer.deinit(allocator);
+        allocator.free(layers);
+    }
+    for (layers) |*layer| layer.* = .{};
+
+    for (sorted_names) |name| {
+        const layer_index = layer_map.get(name) orelse 0;
+        if (layer_index < total_layers) {
+            try layers[layer_index].append(allocator, name);
+        }
+    }
+
+    const is_horizontal = diagram.direction == .LR or diagram.direction == .RL;
+
+    var layer_offset: f64 = 0.0;
+    for (layers) |layer_entities| {
+        if (layer_entities.items.len == 0) continue;
+
+        var cross_offset: f64 = 0.0;
+        var max_primary: f64 = 0.0;
+
+        for (layer_entities.items) |name| {
+            const width = widths.get(name) orelse er_editable_entity_min_width;
+            const height = heights.get(name) orelse er_editable_header_height;
+
+            if (is_horizontal) {
+                try positions.put(name, .{ .x = layer_offset, .y = cross_offset });
+                cross_offset += height + er_editable_node_sep;
+                if (width > max_primary) max_primary = width;
+            } else {
+                try positions.put(name, .{ .x = cross_offset, .y = layer_offset });
+                cross_offset += width + er_editable_node_sep;
+                if (height > max_primary) max_primary = height;
+            }
+        }
+
+        layer_offset += max_primary + er_editable_rank_sep;
+    }
+}
+
+fn appendErEditableGraph(
+    allocator: std.mem.Allocator,
+    diagram: *const er_model.ErDiagram,
+    buffers: *EditableGraphBuffers,
+) !struct { width: f64, height: f64 } {
+    const sorted_names = try diagram.sortedEntityNames();
+    defer allocator.free(sorted_names);
+
+    var entity_widths = std.StringHashMap(f64).init(allocator);
+    defer entity_widths.deinit();
+    var entity_heights = std.StringHashMap(f64).init(allocator);
+    defer entity_heights.deinit();
+    var positions = std.StringHashMap(ErEditablePosition).init(allocator);
+    defer positions.deinit();
+
+    for (sorted_names) |name| {
+        const entity = diagram.getEntity(name) orelse continue;
+        const dims = erEntityBoxSize(entity);
+        try entity_widths.put(name, dims.width);
+        try entity_heights.put(name, dims.height);
+    }
+
+    try layoutErEntities(allocator, diagram, sorted_names, &entity_widths, &entity_heights, &positions);
+
+    var min_x: f64 = std.math.inf(f64);
+    var min_y: f64 = std.math.inf(f64);
+    var max_x: f64 = -std.math.inf(f64);
+    var max_y: f64 = -std.math.inf(f64);
+
+    for (sorted_names) |name| {
+        const pos = positions.get(name) orelse continue;
+        const width = entity_widths.get(name) orelse er_editable_entity_min_width;
+        const height = entity_heights.get(name) orelse er_editable_header_height;
+        if (pos.x < min_x) min_x = pos.x;
+        if (pos.y < min_y) min_y = pos.y;
+        if (pos.x + width > max_x) max_x = pos.x + width;
+        if (pos.y + height > max_y) max_y = pos.y + height;
+    }
+
+    if (min_x == std.math.inf(f64) or min_y == std.math.inf(f64)) {
+        min_x = 0.0;
+        min_y = 0.0;
+        max_x = 200.0;
+        max_y = 120.0;
+    }
+
+    const offset_x = er_editable_margin - min_x;
+    const offset_y = er_editable_margin - min_y;
+
+    for (sorted_names) |name| {
+        const entity = diagram.getEntity(name) orelse continue;
+        const pos = positions.get(name) orelse continue;
+        const width = entity_widths.get(name) orelse er_editable_entity_min_width;
+        const height = entity_heights.get(name) orelse er_editable_header_height;
+        try buffers.nodes.append(c_allocator, .{
+            .id = try dupCString(c_allocator, name),
+            .label = try dupCString(c_allocator, entity.displayName()),
+            .subtitle = (try dupErEntitySubtitle(entity)) orelse null,
+            .attributes_text = (try dupJoinedErAttributes(allocator, entity)) orelse null,
+            .methods_text = null,
+            .parent_subgraph_id = null,
+            .shape = 0,
+            .x = pos.x + offset_x + width / 2.0,
+            .y = pos.y + offset_y + height / 2.0,
+            .width = width,
+            .height = height,
+            .fill = studioColor(er_model.entity_header_fill),
+            .body_fill = studioColor(er_model.entity_row_odd_fill),
+            .stroke = studioColor(er_model.entity_stroke),
+            .stroke_width = 1.5,
+            .label_color = studioColor(er_model.entity_name_color),
+            .label_font_size = 14.0,
+        });
+    }
+
+    for (diagram.relationships.items) |rel| {
+        try buffers.edges.append(c_allocator, .{
+            .source_id = try dupCString(c_allocator, rel.entity_a),
+            .target_id = try dupCString(c_allocator, rel.entity_b),
+            .label = if (rel.role.len > 0) try dupCString(c_allocator, rel.role) else null,
+            .color = studioColor(er_model.rel_line_color),
+            .thickness = 1.5,
+            .line_style = if (rel.rel_spec.rel_type == .non_identifying) 1 else 0,
+            .has_arrow = 0,
+            .has_source_arrow = 0,
+            .source_end_style = erCardinalityEndStyleTag(rel.rel_spec.card_a),
+            .target_end_style = erCardinalityEndStyleTag(rel.rel_spec.card_b),
+        });
+    }
+
+    return .{
+        .width = (max_x - min_x) + er_editable_margin * 2.0,
+        .height = (max_y - min_y) + er_editable_margin * 2.0,
     };
 }
 
@@ -1858,6 +2183,17 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
         return finalizeEditableGraph(c_allocator, .class, &buffers, layout.width, layout.height);
     }
 
+    if (detectErDiagram(source)) {
+        var diagram = try ErParser.parse(temp_allocator, source);
+        defer diagram.deinit();
+
+        var buffers = EditableGraphBuffers{};
+        errdefer buffers.deinit(c_allocator);
+
+        const layout = try appendErEditableGraph(temp_allocator, &diagram, &buffers);
+        return finalizeEditableGraph(c_allocator, .er, &buffers, layout.width, layout.height);
+    }
+
     var parser = try Parser.init(temp_allocator, source);
     defer parser.deinit();
 
@@ -1909,7 +2245,7 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
 }
 
 fn buildSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioScene {
-    if (detectSequenceDiagram(source) or detectClassDiagram(source)) return error.UnsupportedPreviewScene;
+    if (detectSequenceDiagram(source) or detectClassDiagram(source) or detectErDiagram(source)) return error.UnsupportedPreviewScene;
 
     var parser = try Parser.init(temp_allocator, source);
     defer parser.deinit();
@@ -2024,7 +2360,7 @@ pub export fn merrow_studio_render_preview_png(
     const allocator = gpa.allocator();
 
     const source = source_ptr[0..source_len];
-    if (!detectSequenceDiagram(source) and !detectClassDiagram(source)) {
+    if (!detectSequenceDiagram(source) and !detectClassDiagram(source) and !detectErDiagram(source) and !detectStateDiagram(source)) {
         copyCString(out_message, out_message_len, "No fallback preview renderer for this diagram type");
         return 2;
     }
@@ -2053,7 +2389,23 @@ pub export fn merrow_studio_render_preview_png(
             copyCString(out_message, out_message_len, @errorName(err));
             return 4;
         };
-    } else {
+    } else if (detectStateDiagram(source)) {
+        var diagram = StateParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        StatePngRender.renderStateToPNG(
+            allocator,
+            &diagram,
+            preview_path,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 4;
+        };
+    } else if (detectClassDiagram(source)) {
         var diagram = ClassParser.parse(allocator, source) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
             return 1;
@@ -2061,6 +2413,22 @@ pub export fn merrow_studio_render_preview_png(
         defer diagram.deinit();
 
         ClassPngRender.renderClassToPNG(
+            allocator,
+            &diagram,
+            preview_path,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 4;
+        };
+    } else {
+        var diagram = ErParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        ErPngRender.renderErToPNG(
             allocator,
             &diagram,
             preview_path,
@@ -2121,6 +2489,41 @@ pub export fn merrow_studio_export_diagram(
         return 0;
     }
 
+    if (detectStateDiagram(source)) {
+        var diagram = StateParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        switch (format) {
+            0 => StatePngRender.renderStateToPNG(
+                allocator,
+                &diagram,
+                output_path,
+                if (maybe_font) |*loaded| &loaded.font else null,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            1 => StateSvgRender.renderStateToSVG(
+                allocator,
+                &diagram,
+                output_path,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            else => {
+                copyCString(out_message, out_message_len, "Unsupported export format");
+                return 2;
+            },
+        }
+
+        copyCString(out_message, out_message_len, if (format == 0) "PNG export complete" else "SVG export complete");
+        return 0;
+    }
+
     if (detectClassDiagram(source)) {
         var diagram = ClassParser.parse(allocator, source) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
@@ -2143,6 +2546,41 @@ pub export fn merrow_studio_export_diagram(
                 &diagram,
                 output_path,
                 if (maybe_font) |*loaded| &loaded.font else null,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            else => {
+                copyCString(out_message, out_message_len, "Unsupported export format");
+                return 2;
+            },
+        }
+
+        copyCString(out_message, out_message_len, if (format == 0) "PNG export complete" else "SVG export complete");
+        return 0;
+    }
+
+    if (detectErDiagram(source)) {
+        var diagram = ErParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        switch (format) {
+            0 => ErPngRender.renderErToPNG(
+                allocator,
+                &diagram,
+                output_path,
+                if (maybe_font) |*loaded| &loaded.font else null,
+            ) catch |err| {
+                copyCString(out_message, out_message_len, @errorName(err));
+                return 4;
+            },
+            1 => ErSvgRender.renderErToSVG(
+                allocator,
+                &diagram,
+                output_path,
             ) catch |err| {
                 copyCString(out_message, out_message_len, @errorName(err));
                 return 4;
@@ -2479,6 +2917,28 @@ pub export fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source
         return 0;
     }
 
+    if (detectErDiagram(source)) {
+        var diagram = ErParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        copyCString(out_message, out_message_len, "Syntax OK");
+        return 0;
+    }
+
+    if (detectStateDiagram(source)) {
+        var diagram = StateParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 1;
+        };
+        defer diagram.deinit();
+
+        copyCString(out_message, out_message_len, "Syntax OK");
+        return 0;
+    }
+
     var parser = Parser.init(allocator, source) catch |err| {
         copyCString(out_message, out_message_len, @errorName(err));
         return 2;
@@ -2797,6 +3257,45 @@ test "editable graph conversion fixture class simple preserves compartments and 
         1,
         0,
     ));
+}
+
+test "editable graph conversion fixture er simple preserves entities and cardinalities" {
+    const source = try loadTestDiagramFixture(std.testing.allocator, "test-diagrams/er_simple.mmd");
+    defer std.testing.allocator.free(source);
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    try std.testing.expectEqual(@as(u32, @intFromEnum(StudioGraphType.er)), graph.graph_type);
+    try std.testing.expectEqual(@as(usize, 3), graph.node_count);
+    try std.testing.expectEqual(@as(usize, 2), graph.edge_count);
+    try std.testing.expect(editableGraphNodeFieldMatches(
+        graph,
+        "CUSTOMER",
+        null,
+        "int\tid\tPK\nstring\tname\t\nstring\temail\t",
+        null,
+    ));
+    try std.testing.expect(editableGraphEdgeMatchesEndStyles(
+        graph,
+        "CUSTOMER",
+        "ORDER",
+        0,
+        6,
+        8,
+    ));
+    try std.testing.expect(editableGraphEdgeMatchesEndStyles(
+        graph,
+        "ORDER",
+        "LINE-ITEM",
+        0,
+        6,
+        9,
+    ));
+}
+
+test "editable graph conversion fixture er complex builds" {
+    try expectEditableGraphFixtureBuilds("test-diagrams/er_complex.mmd");
 }
 
 test "editable graph conversion fixture saas architecture" {

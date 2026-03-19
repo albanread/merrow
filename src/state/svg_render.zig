@@ -44,6 +44,7 @@ const STATE_PADDING_H: f64 = 20.0;
 const STATE_PADDING_V: f64 = 12.0;
 const STATE_MIN_WIDTH: f64 = 80.0;
 const STATE_MIN_HEIGHT: f64 = 40.0;
+const STATE_FIXED_WIDTH: f64 = 180.0;
 const START_END_RADIUS: f64 = 7.0;
 const FORK_JOIN_WIDTH: f64 = 70.0;
 const FORK_JOIN_HEIGHT: f64 = 6.0;
@@ -71,6 +72,38 @@ const NOTE_CALLOUT_COLOR = state_model.note_stroke;
 
 const Position = struct { x: f64, y: f64 };
 const NodeSize = struct { w: f64, h: f64 };
+const GraphBounds = struct {
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+};
+
+const EdgeRoute = struct {
+    points: [8][2]f64 = undefined,
+    len: usize = 0,
+
+    fn append(self: *EdgeRoute, x: f64, y: f64) void {
+        if (self.len > 0) {
+            const last = self.points[self.len - 1];
+            if (@abs(last[0] - x) < 0.001 and @abs(last[1] - y) < 0.001) return;
+        }
+
+        self.points[self.len] = .{ x, y };
+        self.len += 1;
+    }
+
+    fn slice(self: *const EdgeRoute) []const [2]f64 {
+        return self.points[0..self.len];
+    }
+};
+
+const LabelBox = struct {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+};
 
 // -----------------------------------------------------------------------
 // Public API
@@ -281,14 +314,21 @@ pub fn renderStateToSVGString(
         }
     }
 
-    // Include edge points in bounding box.
-    var edge_iter = graph.edgeIterator();
-    while (edge_iter.next()) |entry| {
-        for (entry.data.points.items) |pt| {
-            if (pt.x < min_x) min_x = pt.x;
-            if (pt.x > max_x) max_x = pt.x;
-            if (pt.y < min_y) min_y = pt.y;
-            if (pt.y > max_y) max_y = pt.y;
+    // Include routed edge points in bounding box.
+    const graph_bounds = GraphBounds{
+        .min_x = min_x,
+        .min_y = min_y,
+        .max_x = max_x,
+        .max_y = max_y,
+    };
+
+    for (diagram.relations.items) |rel| {
+        const route = buildEdgeRoute(mutable_diagram, &graph, &composite_set, rel, graph_bounds, 0.0, 0.0) orelse continue;
+        for (route.slice()) |pt| {
+            if (pt[0] < min_x) min_x = pt[0];
+            if (pt[0] > max_x) max_x = pt[0];
+            if (pt[1] < min_y) min_y = pt[1];
+            if (pt[1] > max_y) max_y = pt[1];
         }
     }
 
@@ -386,85 +426,12 @@ pub fn renderStateToSVGString(
     }
 
     // ── 4b. Draw edges (behind regular nodes) ───────────────────
-    for (diagram.relations.items) |rel| {
-        const ed = graph.edge(rel.from, rel.to, null);
-        if (ed == null) continue;
-        const edge_data = ed.?;
+    var label_boxes = std.ArrayListUnmanaged(LabelBox){};
+    defer label_boxes.deinit(allocator);
 
-        const points = edge_data.points.items;
-
-        // Get source and target node positions.
-        const src_node = graph.getNode(rel.from);
-        const tgt_node = graph.getNode(rel.to);
-
-        const from_state_type = blk: {
-            if (mutable_diagram.states.get(rel.from)) |s| break :blk s.state_type;
-            break :blk StateType.default;
-        };
-        const to_state_type = blk: {
-            if (mutable_diagram.states.get(rel.to)) |s| break :blk s.state_type;
-            break :blk StateType.default;
-        };
-
-        // Check if source or target is composite — use the container box for clipping
-        const from_is_composite = composite_set.contains(rel.from);
-        const to_is_composite = composite_set.contains(rel.to);
-
-        // Build path: source border → intermediate Dagre points → target border.
-        var path_points = std.ArrayListUnmanaged([2]f64){};
-        defer path_points.deinit(allocator);
-
-        if (src_node) |sn| {
-            const src_w = if (from_is_composite) sn.width else computeStateSizeById(mutable_diagram, rel.from).w;
-            const src_h = if (from_is_composite) sn.height else computeStateSizeById(mutable_diagram, rel.from).h;
-            if (points.len > 0) {
-                const clipped = computeExitPoint(
-                    sn.x + offset_x,
-                    sn.y + offset_y,
-                    src_w,
-                    src_h,
-                    if (from_is_composite) StateType.default else from_state_type,
-                    points[0].x + offset_x,
-                    points[0].y + offset_y,
-                );
-                try path_points.append(allocator, .{ clipped.x, clipped.y });
-            } else if (tgt_node) |tn| {
-                const clipped = computeExitPoint(
-                    sn.x + offset_x,
-                    sn.y + offset_y,
-                    src_w,
-                    src_h,
-                    if (from_is_composite) StateType.default else from_state_type,
-                    tn.x + offset_x,
-                    tn.y + offset_y,
-                );
-                try path_points.append(allocator, .{ clipped.x, clipped.y });
-            }
-        }
-
-        for (points) |pt| {
-            try path_points.append(allocator, .{ pt.x + offset_x, pt.y + offset_y });
-        }
-
-        if (tgt_node) |tn| {
-            const tgt_w = if (to_is_composite) tn.width else computeStateSizeById(mutable_diagram, rel.to).w;
-            const tgt_h = if (to_is_composite) tn.height else computeStateSizeById(mutable_diagram, rel.to).h;
-            const last_x = if (points.len > 0) points[points.len - 1].x + offset_x else if (src_node) |sn| sn.x + offset_x else tn.x + offset_x;
-            const last_y = if (points.len > 0) points[points.len - 1].y + offset_y else if (src_node) |sn| sn.y + offset_y else tn.y + offset_y;
-            const clipped = computeEntryPoint(
-                tn.x + offset_x,
-                tn.y + offset_y,
-                tgt_w,
-                tgt_h,
-                if (to_is_composite) StateType.default else to_state_type,
-                last_x,
-                last_y,
-            );
-            try path_points.append(allocator, .{ clipped.x, clipped.y });
-        }
-
-        // Draw the polyline.
-        const pp = path_points.items;
+    for (diagram.relations.items, 0..) |rel, rel_idx| {
+        const route = buildEdgeRoute(mutable_diagram, &graph, &composite_set, rel, graph_bounds, offset_x, offset_y) orelse continue;
+        const pp = route.slice();
         if (pp.len >= 2) {
             try svg.polyline(pp, state_model.edge_color, EDGE_STROKE_WIDTH, null);
 
@@ -480,44 +447,29 @@ pub fn renderStateToSVGString(
 
         // Edge label
         if (rel.label) |lbl| {
-            // Place label at the midpoint of the edge.
-            const mid_idx = pp.len / 2;
-            var mid_x: f64 = 0;
-            var mid_y: f64 = 0;
-            if (pp.len >= 2 and mid_idx > 0) {
-                mid_x = (pp[mid_idx - 1][0] + pp[mid_idx][0]) / 2.0;
-                mid_y = (pp[mid_idx - 1][1] + pp[mid_idx][1]) / 2.0;
-            } else if (pp.len >= 1) {
-                mid_x = pp[0][0];
-                mid_y = pp[0][1];
-            }
-
-            // Offset label perpendicular to the edge direction.
-            var dx: f64 = 0;
-            var dy: f64 = 1;
-            if (pp.len >= 2 and mid_idx > 0) {
-                dx = pp[mid_idx][0] - pp[mid_idx - 1][0];
-                dy = pp[mid_idx][1] - pp[mid_idx - 1][1];
-            }
-            const len = @sqrt(dx * dx + dy * dy);
-            const ox = if (len > 0) -dy / len * 10.0 else 0.0;
-            const oy = if (len > 0) dx / len * 10.0 else 10.0;
-
-            // Draw background rect behind label for readability
             const label_w = @as(f64, @floatFromInt(lbl.len)) * 7.0 + 8.0;
             const label_h: f64 = 18.0;
-            const bg_x = mid_x + ox - label_w / 2.0;
-            const bg_y = mid_y + oy - label_h / 2.0;
+
+            const label_pos = computeEdgeLabelPlacement(pp, rel_idx, label_w, label_h, label_boxes.items);
+            const bg_x = label_pos.x - label_w / 2.0;
+            const bg_y = label_pos.y - label_h / 2.0;
             try svg.rect(bg_x, bg_y, label_w, label_h, 3, 3, .{ 255, 255, 255, 230 }, null, 0);
 
             try svg.textCentered(
-                mid_x + ox,
-                mid_y + oy,
+                label_pos.x,
+                label_pos.y,
                 lbl,
                 EDGE_LABEL_FONT_SIZE,
                 state_model.text_color,
                 "sans-serif",
             );
+
+            try label_boxes.append(allocator, .{
+                .left = bg_x,
+                .top = bg_y,
+                .right = bg_x + label_w,
+                .bottom = bg_y + label_h,
+            });
         }
     }
 
@@ -569,22 +521,86 @@ fn computeStateSize(state: *const state_model.State) NodeSize {
         .choice => .{ .w = CHOICE_SIZE, .h = CHOICE_SIZE },
         .divider => .{ .w = 40.0, .h = 4.0 },
         .default => {
-            const label = state.displayLabel();
-            const text_w = @as(f64, @floatFromInt(label.len)) * CHAR_WIDTH;
-            const w = @max(text_w + STATE_PADDING_H * 2, STATE_MIN_WIDTH);
-            var h = STATE_MIN_HEIGHT;
-            if (state.descriptions.items.len > 0) {
-                h += @as(f64, @floatFromInt(state.descriptions.items.len)) * LINE_HEIGHT;
+            const w = @max(STATE_FIXED_WIDTH, STATE_MIN_WIDTH);
+            const max_chars = stateMaxCharsPerLine(w);
+
+            const label_lines = countWrappedTextLines(state.displayLabel(), max_chars);
+
+            var description_lines: usize = 0;
+            if (state.description) |desc| {
+                description_lines += countWrappedTextLines(desc, max_chars);
             }
-            // Account for primary description too
-            if (state.description != null) {
-                if (state.descriptions.items.len == 0) {
-                    h += LINE_HEIGHT;
-                }
+            for (state.descriptions.items) |desc| {
+                description_lines += countWrappedTextLines(desc.data, max_chars);
             }
+
+            var h = STATE_PADDING_V * 2.0 + @as(f64, @floatFromInt(label_lines)) * LINE_HEIGHT;
+            if (description_lines > 0) {
+                h += 8.0 + @as(f64, @floatFromInt(description_lines)) * LINE_HEIGHT;
+            }
+
+            h = @max(h, STATE_MIN_HEIGHT);
             return .{ .w = w, .h = h };
         },
     };
+}
+
+fn stateMaxCharsPerLine(width: f64) usize {
+    const content_w = @max(width - STATE_PADDING_H * 2.0, CHAR_WIDTH);
+    const chars_f = @floor(content_w / CHAR_WIDTH);
+    const chars: usize = @intFromFloat(chars_f);
+    return @max(chars, 1);
+}
+
+fn countWrappedTextLines(text: []const u8, max_chars_per_line: usize) usize {
+    var total: usize = 0;
+    var line_iter = std.mem.splitScalar(u8, text, '\n');
+
+    while (line_iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (trimmed.len == 0) {
+            total += 1;
+            continue;
+        }
+
+        total += (trimmed.len + max_chars_per_line - 1) / max_chars_per_line;
+    }
+
+    return @max(total, 1);
+}
+
+fn drawWrappedCenteredText(
+    svg: *SvgWriter,
+    text: []const u8,
+    cx: f64,
+    start_y: f64,
+    font_size: f64,
+    color: [4]u8,
+    max_chars_per_line: usize,
+) !usize {
+    var y = start_y;
+    var lines_drawn: usize = 0;
+    var line_iter = std.mem.splitScalar(u8, text, '\n');
+
+    while (line_iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (trimmed.len == 0) {
+            y += LINE_HEIGHT;
+            lines_drawn += 1;
+            continue;
+        }
+
+        var start: usize = 0;
+        while (start < trimmed.len) {
+            const end = @min(start + max_chars_per_line, trimmed.len);
+            try svg.textCentered(cx, y, trimmed[start..end], font_size, color, "sans-serif");
+            y += LINE_HEIGHT;
+            lines_drawn += 1;
+            start = end;
+        }
+    }
+
+    return @max(lines_drawn, 1);
 }
 
 /// Compute the size of a state by looking it up in the diagram by ID.
@@ -744,26 +760,60 @@ fn renderStateNode(
             const ry = cy - h / 2.0;
             try svg.rect(rx, ry, w, h, 5, 5, state_model.state_fill_color, state_model.state_stroke_color, 2);
 
-            // Label text
-            const label = state.displayLabel();
-            // If there are descriptions, shift label up slightly
-            const has_extra = state.descriptions.items.len > 0 or state.description != null;
-            const label_y = if (has_extra) cy - 5.0 else cy;
-            try svg.textCentered(cx, label_y, label, LABEL_FONT_SIZE, state_model.text_color, "sans-serif");
+            const max_chars = stateMaxCharsPerLine(w);
+            var line_y = ry + STATE_PADDING_V + LINE_HEIGHT / 2.0;
 
-            // Primary description
+            _ = try drawWrappedCenteredText(
+                svg,
+                state.displayLabel(),
+                cx,
+                line_y,
+                LABEL_FONT_SIZE,
+                state_model.text_color,
+                max_chars,
+            );
+
+            const label_lines = countWrappedTextLines(state.displayLabel(), max_chars);
+            line_y += @as(f64, @floatFromInt(label_lines)) * LINE_HEIGHT;
+
+            var description_lines: usize = 0;
             if (state.description) |desc| {
-                // Draw separator line
-                const sep_y = cy + 4.0;
-                try svg.line(rx + 4, sep_y, rx + w - 4, sep_y, state_model.state_stroke_color, 0.5, null);
-                try svg.textCentered(cx, cy + 18.0, desc, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
+                description_lines += countWrappedTextLines(desc, max_chars);
+            }
+            for (state.descriptions.items) |desc| {
+                description_lines += countWrappedTextLines(desc.data, max_chars);
             }
 
-            // Additional descriptions
-            const desc_start_y: f64 = if (state.description != null) cy + 32.0 else cy + 14.0;
-            for (state.descriptions.items, 0..) |desc, i| {
-                const dy = desc_start_y + @as(f64, @floatFromInt(i)) * LINE_HEIGHT;
-                try svg.textCentered(cx, dy, desc.data, NOTE_FONT_SIZE, state_model.text_color, "sans-serif");
+            if (description_lines > 0) {
+                const sep_y = line_y + 2.0;
+                try svg.line(rx + 4, sep_y, rx + w - 4, sep_y, state_model.state_stroke_color, 0.5, null);
+                line_y = sep_y + 10.0;
+
+                if (state.description) |desc| {
+                    const used = try drawWrappedCenteredText(
+                        svg,
+                        desc,
+                        cx,
+                        line_y,
+                        NOTE_FONT_SIZE,
+                        state_model.text_color,
+                        max_chars,
+                    );
+                    line_y += @as(f64, @floatFromInt(used)) * LINE_HEIGHT;
+                }
+
+                for (state.descriptions.items) |desc| {
+                    const used = try drawWrappedCenteredText(
+                        svg,
+                        desc.data,
+                        cx,
+                        line_y,
+                        NOTE_FONT_SIZE,
+                        state_model.text_color,
+                        max_chars,
+                    );
+                    line_y += @as(f64, @floatFromInt(used)) * LINE_HEIGHT;
+                }
             }
         },
     }
@@ -798,6 +848,218 @@ fn renderArrowhead(
     arrow_pts[1] = .{ to_x - ux * arrow_len + px * arrow_half_w, to_y - uy * arrow_len + py * arrow_half_w };
     arrow_pts[2] = .{ to_x - ux * arrow_len - px * arrow_half_w, to_y - uy * arrow_len - py * arrow_half_w };
     try svg.polygon(&arrow_pts, state_model.edge_color, state_model.edge_color, 1);
+}
+
+fn buildEdgeRoute(
+    diagram: *StateDiagram,
+    graph: *Graph,
+    composite_set: *const std.StringHashMap(void),
+    rel: state_model.Relation,
+    bounds: GraphBounds,
+    offset_x: f64,
+    offset_y: f64,
+) ?EdgeRoute {
+    const src_node = graph.getNode(rel.from) orelse return null;
+    const tgt_node = graph.getNode(rel.to) orelse return null;
+
+    const from_is_composite = composite_set.contains(rel.from);
+    const to_is_composite = composite_set.contains(rel.to);
+
+    const from_state_type = blk: {
+        if (diagram.states.get(rel.from)) |s| break :blk s.state_type;
+        break :blk StateType.default;
+    };
+    const to_state_type = blk: {
+        if (diagram.states.get(rel.to)) |s| break :blk s.state_type;
+        break :blk StateType.default;
+    };
+
+    const src_center = Position{ .x = src_node.x + offset_x, .y = src_node.y + offset_y };
+    const tgt_center = Position{ .x = tgt_node.x + offset_x, .y = tgt_node.y + offset_y };
+    const src_size = if (from_is_composite)
+        NodeSize{ .w = src_node.width, .h = src_node.height }
+    else
+        computeStateSizeById(diagram, rel.from);
+    const tgt_size = if (to_is_composite)
+        NodeSize{ .w = tgt_node.width, .h = tgt_node.height }
+    else
+        computeStateSizeById(diagram, rel.to);
+
+    var route = EdgeRoute{};
+
+    if (std.mem.eql(u8, rel.from, rel.to)) {
+        const loop_x = src_center.x + src_size.w / 2.0 + NODESEP * 0.6;
+        const loop_y = src_center.y - src_size.h / 2.0 - RANKSEP * 0.5;
+        const exit_target = Position{ .x = loop_x, .y = src_center.y };
+        const entry_source = Position{ .x = src_center.x, .y = loop_y };
+        const src_exit = computeExitPoint(
+            src_center.x,
+            src_center.y,
+            src_size.w,
+            src_size.h,
+            if (from_is_composite) StateType.default else from_state_type,
+            exit_target.x,
+            exit_target.y,
+        );
+        const tgt_entry = computeEntryPoint(
+            tgt_center.x,
+            tgt_center.y,
+            tgt_size.w,
+            tgt_size.h,
+            if (to_is_composite) StateType.default else to_state_type,
+            entry_source.x,
+            entry_source.y,
+        );
+        route.append(src_exit.x, src_exit.y);
+        route.append(loop_x, src_exit.y);
+        route.append(loop_x, loop_y);
+        route.append(tgt_entry.x, loop_y);
+        route.append(tgt_entry.x, tgt_entry.y);
+        return route;
+    }
+
+    var bend1: ?Position = null;
+    var bend2: ?Position = null;
+    const dx = tgt_center.x - src_center.x;
+    const dy = tgt_center.y - src_center.y;
+
+    switch (diagram.direction) {
+        .TB, .BT => {
+            if (dy < -RANKSEP * 0.25) {
+                const corridor_x = @max(bounds.max_x + offset_x + NODESEP * 0.9, @max(src_center.x + src_size.w / 2.0, tgt_center.x + tgt_size.w / 2.0) + NODESEP * 0.6);
+                bend1 = .{ .x = corridor_x, .y = src_center.y };
+                bend2 = .{ .x = corridor_x, .y = tgt_center.y };
+            } else if (@abs(dx) > 12.0) {
+                const mid_y = (src_center.y + tgt_center.y) / 2.0;
+                bend1 = .{ .x = src_center.x, .y = mid_y };
+                bend2 = .{ .x = tgt_center.x, .y = mid_y };
+            }
+        },
+        .LR, .RL => {
+            if (dx < -NODESEP * 0.25) {
+                const corridor_y = @max(bounds.max_y + offset_y + RANKSEP * 0.9, @max(src_center.y + src_size.h / 2.0, tgt_center.y + tgt_size.h / 2.0) + RANKSEP * 0.6);
+                bend1 = .{ .x = src_center.x, .y = corridor_y };
+                bend2 = .{ .x = tgt_center.x, .y = corridor_y };
+            } else if (@abs(dy) > 12.0) {
+                const mid_x = (src_center.x + tgt_center.x) / 2.0;
+                bend1 = .{ .x = mid_x, .y = src_center.y };
+                bend2 = .{ .x = mid_x, .y = tgt_center.y };
+            }
+        },
+    }
+
+    const exit_target = bend1 orelse tgt_center;
+    const entry_source = bend2 orelse bend1 orelse src_center;
+
+    const src_exit = computeExitPoint(
+        src_center.x,
+        src_center.y,
+        src_size.w,
+        src_size.h,
+        if (from_is_composite) StateType.default else from_state_type,
+        exit_target.x,
+        exit_target.y,
+    );
+    const tgt_entry = computeEntryPoint(
+        tgt_center.x,
+        tgt_center.y,
+        tgt_size.w,
+        tgt_size.h,
+        if (to_is_composite) StateType.default else to_state_type,
+        entry_source.x,
+        entry_source.y,
+    );
+
+    route.append(src_exit.x, src_exit.y);
+    if (bend1) |pt| route.append(pt.x, pt.y);
+    if (bend2) |pt| route.append(pt.x, pt.y);
+    route.append(tgt_entry.x, tgt_entry.y);
+
+    return route;
+}
+
+fn computeEdgeLabelPlacement(
+    points: []const [2]f64,
+    edge_index: usize,
+    label_w: f64,
+    label_h: f64,
+    existing: []const LabelBox,
+) Position {
+    const anchor = edgeLabelAnchor(points);
+    const base_sign: f64 = if ((edge_index % 2) == 0) 1.0 else -1.0;
+
+    var attempt: usize = 0;
+    while (true) : (attempt += 1) {
+        const band = attempt / 2;
+        const sign = if (attempt == 0) base_sign else if ((attempt % 2) == 1) -base_sign else base_sign;
+        const distance = 10.0 + @as(f64, @floatFromInt(band)) * 16.0;
+        const x = anchor.x + anchor.nx * distance * sign;
+        const y = anchor.y + anchor.ny * distance * sign;
+        const box = LabelBox{
+            .left = x - label_w / 2.0,
+            .top = y - label_h / 2.0,
+            .right = x + label_w / 2.0,
+            .bottom = y + label_h / 2.0,
+        };
+        if (!labelBoxOverlapsAny(box, existing) or attempt >= 6) {
+            return .{ .x = x, .y = y };
+        }
+    }
+}
+
+fn edgeLabelAnchor(points: []const [2]f64) struct { x: f64, y: f64, nx: f64, ny: f64 } {
+    if (points.len < 2) return .{ .x = 0.0, .y = 0.0, .nx = 0.0, .ny = -1.0 };
+
+    var total_len: f64 = 0.0;
+    for (points[1..], 1..) |pt, idx| {
+        const prev = points[idx - 1];
+        const dx = pt[0] - prev[0];
+        const dy = pt[1] - prev[1];
+        total_len += @sqrt(dx * dx + dy * dy);
+    }
+
+    if (total_len < 0.001) {
+        return .{ .x = points[0][0], .y = points[0][1], .nx = 0.0, .ny = -1.0 };
+    }
+
+    const midpoint = total_len / 2.0;
+    var traversed: f64 = 0.0;
+    for (points[1..], 1..) |pt, idx| {
+        const prev = points[idx - 1];
+        const dx = pt[0] - prev[0];
+        const dy = pt[1] - prev[1];
+        const seg_len = @sqrt(dx * dx + dy * dy);
+        if (seg_len < 0.001) continue;
+        if (traversed + seg_len >= midpoint) {
+            const t = (midpoint - traversed) / seg_len;
+            const ux = dx / seg_len;
+            const uy = dy / seg_len;
+            return .{
+                .x = prev[0] + dx * t,
+                .y = prev[1] + dy * t,
+                .nx = -uy,
+                .ny = ux,
+            };
+        }
+        traversed += seg_len;
+    }
+
+    const last = points[points.len - 1];
+    const prev = points[points.len - 2];
+    const dx = last[0] - prev[0];
+    const dy = last[1] - prev[1];
+    const seg_len = @sqrt(dx * dx + dy * dy);
+    if (seg_len < 0.001) return .{ .x = last[0], .y = last[1], .nx = 0.0, .ny = -1.0 };
+    return .{ .x = last[0], .y = last[1], .nx = -dy / seg_len, .ny = dx / seg_len };
+}
+
+fn labelBoxOverlapsAny(candidate: LabelBox, existing: []const LabelBox) bool {
+    for (existing) |box| {
+        if (candidate.left < box.right and candidate.right > box.left and candidate.top < box.bottom and candidate.bottom > box.top) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // -----------------------------------------------------------------------

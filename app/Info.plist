@@ -8,6 +8,8 @@
     <string>merrow-studio</string>
     <key>CFBundleIdentifier</key>
     <string>com.merrow.studio</string>
+    <key>CFBundleIconFile</key>
+    <string>MerrowStudio</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

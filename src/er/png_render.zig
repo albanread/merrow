@@ -397,9 +397,6 @@ fn renderEntity(
     // Header background
     canvas.fillRect(x, y, width, @min(HEADER_HEIGHT, height), er_model.entity_header_fill[0], er_model.entity_header_fill[1], er_model.entity_header_fill[2], er_model.entity_header_fill[3]);
 
-    // Outer border
-    canvas.strokeRect(x, y, width, height, 2, er_model.entity_stroke[0], er_model.entity_stroke[1], er_model.entity_stroke[2], er_model.entity_stroke[3]);
-
     if (num_attrs == 0) {
         // Simple entity box — centered name
         if (maybe_font) |font| {
@@ -408,6 +405,7 @@ fn renderEntity(
             const ty: f32 = @floatCast(y + height / 2.0);
             font.drawText(canvas, display_name, tx, ty, @floatCast(ENTITY_NAME_FONT_SIZE), er_model.entity_name_color[0], er_model.entity_name_color[1], er_model.entity_name_color[2], 255) catch {};
         }
+        canvas.strokeRect(x, y, width, height, 2, er_model.entity_stroke[0], er_model.entity_stroke[1], er_model.entity_stroke[2], er_model.entity_stroke[3]);
         return;
     }
 
@@ -478,6 +476,10 @@ fn renderEntity(
             }
         }
     }
+
+    // Draw the outer border last so row backgrounds do not overpaint the
+    // bottom edge in raster output.
+    canvas.strokeRect(x, y, width, height, 2, er_model.entity_stroke[0], er_model.entity_stroke[1], er_model.entity_stroke[2], er_model.entity_stroke[3]);
 }
 
 // -----------------------------------------------------------------------
@@ -864,4 +866,31 @@ test "er png: with title" {
 
     const stat = try std.fs.cwd().statFile("/tmp/merrow_er_png_title_test.png");
     try std.testing.expect(stat.size > 0);
+}
+
+test "er png: fixture diagrams render to png" {
+    const allocator = std.testing.allocator;
+    const fixtures = [_]struct {
+        path: []const u8,
+        output_path: []const u8,
+        min_size: u64,
+    }{
+        .{ .path = "test-diagrams/er_simple.mmd", .output_path = "/tmp/merrow_er_fixture_simple.png", .min_size = 16 * 1024 },
+        .{ .path = "test-diagrams/er_simple_v2.mmd", .output_path = "/tmp/merrow_er_fixture_simple_v2.png", .min_size = 16 * 1024 },
+        .{ .path = "test-diagrams/er_complex.mmd", .output_path = "/tmp/merrow_er_fixture_complex.png", .min_size = 64 * 1024 },
+        .{ .path = "test-diagrams/er_complex_v2.mmd", .output_path = "/tmp/merrow_er_fixture_complex_v2.png", .min_size = 64 * 1024 },
+    };
+
+    for (fixtures) |fixture| {
+        const source = try std.fs.cwd().readFileAlloc(allocator, fixture.path, 1024 * 1024);
+        defer allocator.free(source);
+
+        var diagram = try @import("parser.zig").parse(allocator, source);
+        defer diagram.deinit();
+
+        try renderErToPNG(allocator, &diagram, fixture.output_path, null);
+
+        const stat = try std.fs.cwd().statFile(fixture.output_path);
+        try std.testing.expect(stat.size >= fixture.min_size);
+    }
 }

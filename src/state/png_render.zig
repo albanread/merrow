@@ -45,6 +45,7 @@ const STATE_PADDING_H: f64 = 20.0;
 const STATE_PADDING_V: f64 = 12.0;
 const STATE_MIN_WIDTH: f64 = 80.0;
 const STATE_MIN_HEIGHT: f64 = 40.0;
+const STATE_FIXED_WIDTH: f64 = 180.0;
 const START_END_RADIUS: f64 = 7.0;
 const FORK_JOIN_WIDTH: f64 = 70.0;
 const FORK_JOIN_HEIGHT: f64 = 6.0;
@@ -552,19 +553,93 @@ fn computeStateSize(state: *const state_model.State) NodeSize {
         .choice => .{ .w = CHOICE_SIZE, .h = CHOICE_SIZE },
         .divider => .{ .w = 40.0, .h = 4.0 },
         .default => {
-            const label = state.displayLabel();
-            const text_w = @as(f64, @floatFromInt(label.len)) * CHAR_WIDTH;
-            const w = @max(text_w + STATE_PADDING_H * 2, STATE_MIN_WIDTH);
-            var h = STATE_MIN_HEIGHT;
-            if (state.description != null) {
-                h += LINE_HEIGHT;
+            const w = @max(STATE_FIXED_WIDTH, STATE_MIN_WIDTH);
+            const max_chars = stateMaxCharsPerLine(w);
+
+            const label_lines = countWrappedTextLines(state.displayLabel(), max_chars);
+
+            var description_lines: usize = 0;
+            if (state.description) |desc| {
+                description_lines += countWrappedTextLines(desc, max_chars);
             }
-            if (state.descriptions.items.len > 0) {
-                h += @as(f64, @floatFromInt(state.descriptions.items.len)) * LINE_HEIGHT;
+            for (state.descriptions.items) |desc| {
+                description_lines += countWrappedTextLines(desc.data, max_chars);
             }
+
+            var h = STATE_PADDING_V * 2.0 + @as(f64, @floatFromInt(label_lines)) * LINE_HEIGHT;
+            if (description_lines > 0) {
+                h += 8.0 + @as(f64, @floatFromInt(description_lines)) * LINE_HEIGHT;
+            }
+
+            h = @max(h, STATE_MIN_HEIGHT);
             return .{ .w = w, .h = h };
         },
     };
+}
+
+fn stateMaxCharsPerLine(width: f64) usize {
+    const content_w = @max(width - STATE_PADDING_H * 2.0, CHAR_WIDTH);
+    const chars_f = @floor(content_w / CHAR_WIDTH);
+    const chars: usize = @intFromFloat(chars_f);
+    return @max(chars, 1);
+}
+
+fn countWrappedTextLines(text: []const u8, max_chars_per_line: usize) usize {
+    var total: usize = 0;
+    var line_iter = std.mem.splitScalar(u8, text, '\n');
+
+    while (line_iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (trimmed.len == 0) {
+            total += 1;
+            continue;
+        }
+
+        total += (trimmed.len + max_chars_per_line - 1) / max_chars_per_line;
+    }
+
+    return @max(total, 1);
+}
+
+fn drawWrappedCenteredText(
+    canvas: *Canvas,
+    font: *Font,
+    text: []const u8,
+    cx: f64,
+    start_y: f64,
+    font_size: f64,
+    color: [4]u8,
+    max_chars_per_line: usize,
+) usize {
+    var y = start_y;
+    var lines_drawn: usize = 0;
+    var line_iter = std.mem.splitScalar(u8, text, '\n');
+
+    while (line_iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (trimmed.len == 0) {
+            y += LINE_HEIGHT;
+            lines_drawn += 1;
+            continue;
+        }
+
+        var start: usize = 0;
+        while (start < trimmed.len) {
+            const end = @min(start + max_chars_per_line, trimmed.len);
+            const chunk = trimmed[start..end];
+
+            const tw = font.measureText(chunk, @floatCast(font_size));
+            const tx: f32 = @floatCast(cx - @as(f64, tw) / 2.0);
+            const ty: f32 = @floatCast(y - font_size / 2.0);
+            font.drawText(canvas, chunk, tx, ty, @floatCast(font_size), color[0], color[1], color[2], color[3]) catch {};
+
+            y += LINE_HEIGHT;
+            lines_drawn += 1;
+            start = end;
+        }
+    }
+
+    return @max(lines_drawn, 1);
 }
 
 /// Compute the size of a state by looking it up in the diagram by ID.
@@ -672,34 +747,63 @@ fn renderStateNode(
 
             // Label text
             if (maybe_font) |font| {
-                const label = state.displayLabel();
-                const has_extra = state.descriptions.items.len > 0 or state.description != null;
-                const label_y_offset: f64 = if (has_extra) -5.0 else 0.0;
+                const max_chars = stateMaxCharsPerLine(w);
+                var line_y = ry + STATE_PADDING_V + LINE_HEIGHT / 2.0;
 
-                const tw = font.measureText(label, @floatCast(LABEL_FONT_SIZE));
-                const tx: f32 = @floatCast(cx - @as(f64, tw) / 2.0);
-                const ty: f32 = @floatCast(cy + label_y_offset - 7.0);
-                font.drawText(canvas, label, tx, ty, @floatCast(LABEL_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                _ = drawWrappedCenteredText(
+                    canvas,
+                    font,
+                    state.displayLabel(),
+                    cx,
+                    line_y,
+                    LABEL_FONT_SIZE,
+                    state_model.text_color,
+                    max_chars,
+                );
 
-                // Primary description
+                const label_lines = countWrappedTextLines(state.displayLabel(), max_chars);
+                line_y += @as(f64, @floatFromInt(label_lines)) * LINE_HEIGHT;
+
+                var description_lines: usize = 0;
                 if (state.description) |desc| {
-                    // Separator line
-                    const sep_y = cy + 4.0;
-                    canvas.drawLine(rx + 4, sep_y, rx + w - 4, sep_y, 1, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
-
-                    const dw = font.measureText(desc, @floatCast(NOTE_FONT_SIZE));
-                    const dx: f32 = @floatCast(cx - @as(f64, dw) / 2.0);
-                    const dy: f32 = @floatCast(cy + 10.0);
-                    font.drawText(canvas, desc, dx, dy, @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                    description_lines += countWrappedTextLines(desc, max_chars);
+                }
+                for (state.descriptions.items) |desc| {
+                    description_lines += countWrappedTextLines(desc.data, max_chars);
                 }
 
-                // Additional descriptions
-                const desc_start_y: f64 = if (state.description != null) cy + 26.0 else cy + 8.0;
-                for (state.descriptions.items, 0..) |desc, i| {
-                    const desc_y: f32 = @floatCast(desc_start_y + @as(f64, @floatFromInt(i)) * LINE_HEIGHT);
-                    const dw = font.measureText(desc.data, @floatCast(NOTE_FONT_SIZE));
-                    const dx: f32 = @floatCast(cx - @as(f64, dw) / 2.0);
-                    font.drawText(canvas, desc.data, dx, desc_y, @floatCast(NOTE_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+                if (description_lines > 0) {
+                    const sep_y = line_y + 2.0;
+                    canvas.drawLine(rx + 4, sep_y, rx + w - 4, sep_y, 1, state_model.state_stroke_color[0], state_model.state_stroke_color[1], state_model.state_stroke_color[2], state_model.state_stroke_color[3]);
+                    line_y = sep_y + 10.0;
+
+                    if (state.description) |desc| {
+                        const used = drawWrappedCenteredText(
+                            canvas,
+                            font,
+                            desc,
+                            cx,
+                            line_y,
+                            NOTE_FONT_SIZE,
+                            state_model.text_color,
+                            max_chars,
+                        );
+                        line_y += @as(f64, @floatFromInt(used)) * LINE_HEIGHT;
+                    }
+
+                    for (state.descriptions.items) |desc| {
+                        const used = drawWrappedCenteredText(
+                            canvas,
+                            font,
+                            desc.data,
+                            cx,
+                            line_y,
+                            NOTE_FONT_SIZE,
+                            state_model.text_color,
+                            max_chars,
+                        );
+                        line_y += @as(f64, @floatFromInt(used)) * LINE_HEIGHT;
+                    }
                 }
             }
         },

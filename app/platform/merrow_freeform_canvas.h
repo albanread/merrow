@@ -75,6 +75,7 @@ typedef NS_ENUM(NSInteger, MerrowFreeformGraphType) {
     MerrowFreeformGraphTypeFlowchart = 0,
     MerrowFreeformGraphTypeSequence = 1,
     MerrowFreeformGraphTypeClass = 2,
+    MerrowFreeformGraphTypeER = 3,
 };
 
 typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
@@ -98,13 +99,25 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 @property (nonatomic, readonly, assign) BOOL hasSelectedSubgraph;
 @property (nonatomic, readonly, assign) BOOL hasSelectedEdge;
 @property (nonatomic, readonly, assign) BOOL insertionModeActive;
+@property (nonatomic, readonly, assign) MerrowFreeformInsertionKind insertionKind;
 @property (nonatomic, readonly, copy) NSString * _Nonnull selectionSummary;
 @property (nonatomic, readonly, copy) NSString * _Nonnull insertionSummary;
 @property (nonatomic, readonly, copy, nullable) NSString *selectedConnectableObjectId;
 @property (nonatomic, readonly, strong) NSColor * _Nonnull canvasBackgroundColor;
 @property (nonatomic, readonly, assign) CGFloat canvasBackgroundOpacity;
 @property (nonatomic, readonly, assign) MerrowFreeformGraphType graphType;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull defaultNodeFillColor;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull defaultNodeStrokeColor;
+@property (nonatomic, readonly, assign) CGFloat defaultNodeStrokeWidth;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull defaultSubgraphFillColor;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull defaultSubgraphStrokeColor;
+@property (nonatomic, readonly, assign) CGFloat defaultSubgraphStrokeWidth;
+@property (nonatomic, readonly, strong) NSColor * _Nonnull defaultEdgeStrokeColor;
+@property (nonatomic, readonly, assign) CGFloat defaultEdgeThickness;
+@property (nonatomic, readonly, assign) NSInteger defaultEdgeLineStyle;
+@property (nonatomic, readonly, assign) NSInteger defaultEdgeArrowMode;
 @property (nonatomic, readonly, copy) NSString * _Nonnull selectedNodeLabel;
+@property (nonatomic, readonly, assign) uint32_t selectedNodeShape;
 @property (nonatomic, readonly, strong) NSColor * _Nonnull selectedNodeFillColor;
 @property (nonatomic, readonly, strong) NSColor * _Nonnull selectedNodeStrokeColor;
 @property (nonatomic, readonly, assign) CGFloat selectedNodeStrokeWidth;
@@ -135,7 +148,18 @@ typedef NS_ENUM(NSInteger, MerrowFreeformInsertionKind) {
 - (BOOL)writeSVGExportToPath:(NSString * _Nonnull)path scale:(CGFloat)scale error:(NSError * _Nullable * _Nullable)error;
 - (void)updateCanvasBackgroundColor:(NSColor * _Nonnull)color;
 - (void)updateCanvasBackgroundOpacity:(CGFloat)opacity;
+- (void)updateDefaultNodeFillColor:(NSColor * _Nonnull)color;
+- (void)updateDefaultNodeStrokeColor:(NSColor * _Nonnull)color;
+- (void)updateDefaultNodeStrokeWidth:(CGFloat)strokeWidth;
+- (void)updateDefaultSubgraphFillColor:(NSColor * _Nonnull)color;
+- (void)updateDefaultSubgraphStrokeColor:(NSColor * _Nonnull)color;
+- (void)updateDefaultSubgraphStrokeWidth:(CGFloat)strokeWidth;
+- (void)updateDefaultEdgeStrokeColor:(NSColor * _Nonnull)color;
+- (void)updateDefaultEdgeThickness:(CGFloat)thickness;
+- (void)updateDefaultEdgeLineStyle:(NSInteger)lineStyle;
+- (void)updateDefaultEdgeArrowMode:(NSInteger)arrowMode;
 - (void)updateSelectedNodeLabel:(NSString * _Nonnull)label;
+- (void)updateSelectedNodeShape:(uint32_t)shape;
 - (void)updateSelectedNodeFillColor:(NSColor * _Nonnull)color;
 - (void)updateSelectedNodeBodyFillColor:(NSColor * _Nonnull)color;
 - (void)updateSelectedNodeStrokeColor:(NSColor * _Nonnull)color;
