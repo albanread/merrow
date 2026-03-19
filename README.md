@@ -4,9 +4,11 @@
 
 Under development: A fast, self-contained Mermaid diagram renderer, with freeform editing for export.
 
-e.g. those merm
+
 
 Merrow parses Mermaid diagram syntax and renders to **PNG** (raster via a built-in canvas) and **SVG** (vector). 
+
+Additionally merrow allows mermaid to be converted to an editable object canvas, which can then be edited.
 
 The main use case for merrow is the generation of Flowchart and Sequence diagrams for documents - hence the focus on PNG rendering.
 
@@ -56,11 +58,13 @@ zig build -Doptimize=ReleaseSafe
 
 ### macOS Studio App
 
-On macOS, you can package the native studio target as an `.app` bundle in `zig-out/`:
+On macOS, you can package the native studio target as an `.app` bundle in `release/` and also produce a versioned `.zip` archive:
 
 ```sh
 ./scripts/package_studio_app.sh
 ```
+
+In VS Code, you can also run the `package merrow studio` task.
 
 Build the bundle and launch it:
 
