@@ -1,12 +1,41 @@
 .zig-cache/
 zig-out/
+
+# OS / editor files
 .DS_Store
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
+
+# Local scratch / generated binaries
 /tmp/
+/release/
 /main
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.dSYM/
+*.app/
+
+# Packaged distributables
+*.zip
+*.dmg
+*.pkg
+*.tar
+*.tar.gz
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+
+# Generated diagram render outputs
 test-diagrams/*.png
 test-diagrams/*.svg
+visual-checks/
