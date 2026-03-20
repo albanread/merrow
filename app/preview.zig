@@ -45,6 +45,7 @@ const font_size: f32 = 16.0;
 const max_label_width: f32 = 220.0;
 const wrapped_text_safety_w: f64 = 12.0;
 const c_allocator = std.heap.c_allocator;
+const preview_raster_scale: f64 = 4.0;
 
 const NodeSize = struct { w: f64, h: f64 };
 
@@ -612,6 +613,37 @@ fn renderSequenceDiagramToFile(
         &diagram,
         layout,
         output_path,
+        layout_config,
+        render_config,
+        if (maybe_font) |*font| font else null,
+    );
+}
+
+fn renderSequenceDiagramToBytes(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    maybe_font_data: ?[]const u8,
+    raster_scale: f64,
+) ![]u8 {
+    var parser = SeqParser.init(allocator, source);
+    var diagram = try parser.parse();
+    defer diagram.deinit();
+
+    const layout_config = SeqLayout.LayoutConfig{};
+    const layout = SeqLayout.layout(&diagram, layout_config);
+
+    var maybe_font: ?Font = if (maybe_font_data) |data|
+        Font.initFromMemory(allocator, data) catch null
+    else
+        null;
+    defer if (maybe_font) |*font| font.deinit();
+
+    var render_config = SeqPngRender.SeqPngRenderConfig{};
+    render_config.scale_factor = raster_scale;
+    return SeqPngRender.renderToPNGBytes(
+        allocator,
+        &diagram,
+        layout,
         layout_config,
         render_config,
         if (maybe_font) |*font| font else null,
@@ -2590,6 +2622,168 @@ fn renderGenericGraphDiagramToFile(
     }
 }
 
+fn renderGenericGraphDiagramToBytes(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    maybe_font: ?*LoadedFont,
+    raster_scale: f64,
+    layout_scale: f64,
+) ![]u8 {
+    var parser = Parser.init(allocator, source) catch |err| {
+        return err;
+    };
+    defer parser.deinit();
+
+    var graph = parser.parse() catch |err| {
+        return err;
+    };
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    const node_ids = graph.allNodes(allocator) catch |err| {
+        return err;
+    };
+    defer {
+        for (node_ids) |id| allocator.free(id);
+        allocator.free(node_ids);
+    }
+
+    for (node_ids) |id| {
+        if (graph.getNodePtr(id)) |node| {
+            if (node.width > 0 or node.is_subgraph) continue;
+            const display_text = node.label orelse id;
+            const size = if (maybe_font) |loaded| measureNodeSize(&loaded.font, display_text, node.shape) else estimateNodeSize(display_text, node.shape);
+            node.width = size.w;
+            node.height = size.h;
+        }
+    }
+
+    const graph_label = graph.getGraphLabel();
+    const rankdir: dagre.RankDir = blk: {
+        if (std.mem.eql(u8, graph_label.rankdir, "LR")) break :blk .LR;
+        if (std.mem.eql(u8, graph_label.rankdir, "RL")) break :blk .RL;
+        if (std.mem.eql(u8, graph_label.rankdir, "BT")) break :blk .BT;
+        break :blk .TB;
+    };
+
+    try dagre.layout(allocator, &graph, .{
+        .rankdir = rankdir,
+        .ranker = .network_simplex,
+        .nodesep = 50,
+        .ranksep = 50,
+    });
+
+    try scaleGraphGeometry(allocator, &graph, layout_scale);
+
+    const config = exportRenderConfig(layout_scale, raster_scale);
+    const maybe_export_font = if (maybe_font) |loaded| &loaded.font else null;
+    return graph_render.renderGraphToPNGBytesWithFont(allocator, &graph, config, maybe_export_font);
+}
+
+pub export fn merrow_studio_render_preview_png_bytes(
+    source_ptr: [*]const u8,
+    source_len: u32,
+    out_png_len: *u32,
+    out_message: [*]u8,
+    out_message_len: u32,
+) callconv(.c) [*c]u8 {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    out_png_len.* = 0;
+    const source = source_ptr[0..source_len];
+
+    var maybe_font = loadFont(allocator) catch |err| {
+        copyCString(out_message, out_message_len, @errorName(err));
+        return null;
+    };
+    defer if (maybe_font) |*loaded| loaded.deinit(allocator);
+
+    var preview_bytes: []u8 = undefined;
+    if (detectSequenceDiagram(source)) {
+        const rendered = renderSequenceDiagramToBytes(
+            allocator,
+            source,
+            if (maybe_font) |*loaded| loaded.data else null,
+            preview_raster_scale,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        preview_bytes = rendered;
+    } else if (detectStateDiagram(source)) {
+        var diagram = StateParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        defer diagram.deinit();
+        const rendered = StatePngRender.renderStateToPNGBytes(
+            allocator,
+            &diagram,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        preview_bytes = rendered;
+    } else if (detectClassDiagram(source)) {
+        var diagram = ClassParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        defer diagram.deinit();
+        const rendered = ClassPngRender.renderClassToPNGBytes(
+            allocator,
+            &diagram,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        preview_bytes = rendered;
+    } else if (detectErDiagram(source)) {
+        var diagram = ErParser.parse(allocator, source) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        defer diagram.deinit();
+        const rendered = ErPngRender.renderErToPNGBytes(
+            allocator,
+            &diagram,
+            if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        preview_bytes = rendered;
+    } else {
+        const rendered = renderGenericGraphDiagramToBytes(
+            allocator,
+            source,
+            if (maybe_font) |*loaded| loaded else null,
+            preview_raster_scale,
+            1.0,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return null;
+        };
+        preview_bytes = rendered;
+    }
+    defer allocator.free(preview_bytes);
+
+    const owned = c_allocator.alloc(u8, preview_bytes.len) catch {
+        copyCString(out_message, out_message_len, "OutOfMemory");
+        return null;
+    };
+    @memcpy(owned, preview_bytes);
+    out_png_len.* = @intCast(preview_bytes.len);
+    copyCString(out_message, out_message_len, "Preview render complete");
+    return owned.ptr;
+}
+
 pub export fn merrow_studio_create_default_scene(out_source_path: [*]u8, out_source_path_len: u32) callconv(.c) ?*StudioScene {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -3060,6 +3254,11 @@ pub export fn merrow_studio_free_string(text: [*c]u8) callconv(.c) void {
     const ptr = text;
     const slice = std.mem.span(ptr);
     c_allocator.free(ptr[0 .. slice.len + 1]);
+}
+
+pub export fn merrow_studio_free_buffer(buffer: [*c]u8, buffer_len: u32) callconv(.c) void {
+    if (buffer == null) return;
+    c_allocator.free(buffer[0..buffer_len]);
 }
 
 pub export fn merrow_studio_free_scene(scene: ?*StudioScene) callconv(.c) void {

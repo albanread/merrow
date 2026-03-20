@@ -36,7 +36,7 @@ const NODESEP: f64 = 80.0;
 const RANKSEP: f64 = 80.0;
 const EDGE_STROKE_WIDTH: i32 = 2;
 const LABEL_FONT_SIZE: f64 = 12.0;
-const SCALE_FACTOR: f64 = 2.0;
+const SCALE_FACTOR: f64 = 4.0;
 
 // -----------------------------------------------------------------------
 // Helper types
@@ -193,6 +193,109 @@ pub fn renderErToPNG(
     }
 
     try canvas.saveToPNG(output_path);
+}
+
+pub fn renderErToPNGBytes(
+    allocator: Allocator,
+    diagram: *const ErDiagram,
+    maybe_font: ?*Font,
+) ![]u8 {
+    const mutable_diagram = @constCast(diagram);
+    const entity_count = mutable_diagram.entities.count();
+
+    if (entity_count == 0) {
+        var canvas = try Canvas.initWithScale(allocator, 400, 200, SCALE_FACTOR);
+        defer canvas.deinit();
+        canvas.fill(255, 255, 255, 255);
+        if (maybe_font) |font| {
+            const msg = "(empty ER diagram)";
+            const tw = font.measureText(msg, @floatCast(ENTITY_NAME_FONT_SIZE));
+            font.drawText(&canvas, msg, @as(f32, @floatCast(200.0 - @as(f64, tw) / 2.0)), 90.0, @floatCast(ENTITY_NAME_FONT_SIZE), 128, 128, 128, 255) catch {};
+        }
+        return canvas.saveToPNGBytes();
+    }
+
+    const sorted_names = try diagram.sortedEntityNames();
+    defer allocator.free(sorted_names);
+
+    var entity_widths = std.StringHashMap(f64).init(allocator);
+    defer entity_widths.deinit();
+    var entity_heights = std.StringHashMap(f64).init(allocator);
+    defer entity_heights.deinit();
+    var col_widths_map = std.StringHashMap([3]f64).init(allocator);
+    defer col_widths_map.deinit();
+
+    for (sorted_names) |name| {
+        if (mutable_diagram.entities.getPtr(name)) |entity| {
+            const dims = computeEntityDimensions(entity, maybe_font);
+            try entity_widths.put(name, dims.width);
+            try entity_heights.put(name, dims.height);
+            try col_widths_map.put(name, dims.col_widths);
+        }
+    }
+
+    var positions = std.StringHashMap(Position).init(allocator);
+    defer positions.deinit();
+    try layoutEntities(allocator, diagram, sorted_names, &entity_widths, &entity_heights, &positions);
+
+    var min_x: f64 = std.math.inf(f64);
+    var min_y: f64 = std.math.inf(f64);
+    var max_x: f64 = -std.math.inf(f64);
+    var max_y: f64 = -std.math.inf(f64);
+
+    for (sorted_names) |name| {
+        if (positions.get(name)) |pos| {
+            const w = entity_widths.get(name) orelse ENTITY_MIN_WIDTH;
+            const h = entity_heights.get(name) orelse HEADER_HEIGHT;
+            if (pos.x < min_x) min_x = pos.x;
+            if (pos.y < min_y) min_y = pos.y;
+            if (pos.x + w > max_x) max_x = pos.x + w;
+            if (pos.y + h > max_y) max_y = pos.y + h;
+        }
+    }
+
+    const title_offset: f64 = if (diagram.title != null) 40.0 else 0.0;
+    const canvas_w_f = @max((max_x - min_x) + MARGIN * 2, 200.0);
+    const canvas_h_f = @max((max_y - min_y) + MARGIN * 2 + title_offset, 150.0);
+    const offset_x = MARGIN - min_x;
+    const offset_y = MARGIN - min_y + title_offset;
+
+    const canvas_w: u32 = @intFromFloat(@ceil(canvas_w_f));
+    const canvas_h: u32 = @intFromFloat(@ceil(canvas_h_f));
+
+    var canvas = try Canvas.initWithScale(allocator, canvas_w, canvas_h, SCALE_FACTOR);
+    defer canvas.deinit();
+    canvas.fill(255, 255, 255, 255);
+
+    if (diagram.title) |title| {
+        if (maybe_font) |font| {
+            const tw = font.measureText(title, @floatCast(TITLE_FONT_SIZE));
+            const tx: f32 = @floatCast(canvas_w_f / 2.0 - @as(f64, tw) / 2.0);
+            font.drawText(&canvas, title, tx, 22.0, @floatCast(TITLE_FONT_SIZE), er_model.entity_name_color[0], er_model.entity_name_color[1], er_model.entity_name_color[2], 255) catch {};
+        }
+    }
+
+    for (diagram.relationships.items) |rel| {
+        const from_pos = positions.get(rel.entity_a) orelse continue;
+        const to_pos = positions.get(rel.entity_b) orelse continue;
+        const from_w = entity_widths.get(rel.entity_a) orelse ENTITY_MIN_WIDTH;
+        const from_h = entity_heights.get(rel.entity_a) orelse HEADER_HEIGHT;
+        const to_w = entity_widths.get(rel.entity_b) orelse ENTITY_MIN_WIDTH;
+        const to_h = entity_heights.get(rel.entity_b) orelse HEADER_HEIGHT;
+
+        renderRelationship(&canvas, maybe_font, from_pos.x + offset_x, from_pos.y + offset_y, from_w, from_h, to_pos.x + offset_x, to_pos.y + offset_y, to_w, to_h, rel.role, rel.rel_spec, std.mem.eql(u8, rel.entity_a, rel.entity_b));
+    }
+
+    for (sorted_names) |name| {
+        const pos = positions.get(name) orelse continue;
+        const entity_ptr = mutable_diagram.entities.getPtr(name) orelse continue;
+        const w = entity_widths.get(name) orelse ENTITY_MIN_WIDTH;
+        const h = entity_heights.get(name) orelse HEADER_HEIGHT;
+        const cols = col_widths_map.get(name) orelse [3]f64{ 65.0, 75.0, 47.0 };
+        renderEntity(&canvas, maybe_font, entity_ptr, pos.x + offset_x, pos.y + offset_y, w, h, cols);
+    }
+
+    return canvas.saveToPNGBytes();
 }
 
 // -----------------------------------------------------------------------

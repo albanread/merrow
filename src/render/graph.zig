@@ -365,6 +365,14 @@ pub fn renderGraphToPNG(
     return renderGraphToPNGWithFont(allocator, graph, filename, config, null);
 }
 
+pub fn renderGraphToPNGBytes(
+    allocator: Allocator,
+    graph: *Graph,
+    config: RenderConfig,
+) ![]u8 {
+    return renderGraphToPNGBytesWithFont(allocator, graph, config, null);
+}
+
 /// Render a graph to a PNG file with optional font
 pub fn renderGraphToPNGWithFont(
     allocator: Allocator,
@@ -398,6 +406,30 @@ pub fn renderGraphToPNGWithFont(
 
     // Save to file
     try canvas.saveToPNG(filename);
+}
+
+pub fn renderGraphToPNGBytesWithFont(
+    allocator: Allocator,
+    graph: *Graph,
+    config: RenderConfig,
+    font: ?*Font,
+) ![]u8 {
+    const bounds = try calculateBounds(allocator, graph, config);
+
+    const canvas_width = @as(usize, @intFromFloat(bounds.width + config.padding * 2));
+    const canvas_height = @as(usize, @intFromFloat(bounds.height + config.padding * 2));
+
+    var canvas = try Canvas.initWithScale(allocator, canvas_width, canvas_height, config.scale_factor);
+    defer canvas.deinit();
+
+    const offset_x = config.padding - bounds.min_x;
+    const offset_y = config.padding - bounds.min_y;
+
+    try drawSubgraphs(allocator, graph, &canvas, offset_x, offset_y, config, font);
+    try drawEdges(allocator, graph, &canvas, offset_x, offset_y, config, font);
+    try drawNodes(allocator, graph, &canvas, offset_x, offset_y, config, font);
+
+    return canvas.saveToPNGBytes();
 }
 
 /// Configuration for rendering

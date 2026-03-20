@@ -12,12 +12,18 @@ fn appendMenuItem(menu: ?ui.HMENU, flags: ui.MENU_ITEM_FLAGS, item_id: usize, te
 
 pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
     const main_menu = ui.CreateMenu() orelse return false;
-    const file_menu = ui.CreatePopupMenu() orelse return false;
 
+    const file_menu = ui.CreatePopupMenu() orelse return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_open, constants.menu_open_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save, constants.menu_save_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save_as, constants.menu_save_as_label)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(file_menu), constants.file_menu_label)) return false;
+
+    const view_menu = ui.CreatePopupMenu() orelse return false;
+    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_mermaid, constants.menu_label_mode_mermaid)) return false;
+    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_freeform, constants.menu_label_mode_freeform)) return false;
+    if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(view_menu), constants.view_menu_label)) return false;
+
     if (ui.SetMenu(hwnd, main_menu) == 0) return false;
     _ = ui.DrawMenuBar(hwnd);
     return true;

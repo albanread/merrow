@@ -514,6 +514,51 @@ pub const Canvas = struct {
             return error.PNGWriteFailed;
         }
     }
+
+    pub fn saveToPNGBytes(self: *Canvas) ![]u8 {
+        const WriteContext = struct {
+            allocator: Allocator,
+            bytes: std.ArrayListUnmanaged(u8) = .{},
+            failed: bool = false,
+        };
+
+        const Callback = struct {
+            fn write(context_ptr: ?*anyopaque, data_ptr: ?*anyopaque, size: c_int) callconv(.c) void {
+                const context: *WriteContext = @ptrCast(@alignCast(context_ptr orelse return));
+                const data = data_ptr orelse {
+                    context.failed = true;
+                    return;
+                };
+                if (size <= 0) return;
+
+                const size_usize: usize = @intCast(size);
+                const bytes: [*]const u8 = @ptrCast(data);
+                context.bytes.appendSlice(context.allocator, bytes[0..size_usize]) catch {
+                    context.failed = true;
+                };
+            }
+        };
+
+        var context = WriteContext{ .allocator = self.allocator };
+        errdefer context.bytes.deinit(self.allocator);
+
+        const result = stbi_write_png_to_func(
+            Callback.write,
+            &context,
+            @as(c_int, @intCast(self.width)),
+            @as(c_int, @intCast(self.height)),
+            4,
+            self.pixels.ptr,
+            @as(c_int, @intCast(self.width * 4)),
+        );
+
+        if (result == 0 or context.failed) {
+            context.bytes.deinit(self.allocator);
+            return error.PNGWriteFailed;
+        }
+
+        return context.bytes.toOwnedSlice(self.allocator);
+    }
 };
 
 /// Helper function: fractional part of x
@@ -524,6 +569,16 @@ fn fpart(x: f64) f64 {
 // C interface to stb_image_write
 extern fn stbi_write_png(
     filename: [*c]const u8,
+    w: c_int,
+    h: c_int,
+    comp: c_int,
+    data: *const anyopaque,
+    stride_in_bytes: c_int,
+) c_int;
+
+extern fn stbi_write_png_to_func(
+    func: *const fn (context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void,
+    context: ?*anyopaque,
     w: c_int,
     h: c_int,
     comp: c_int,

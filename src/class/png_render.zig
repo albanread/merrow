@@ -46,7 +46,7 @@ const HORIZ_PAD: f64 = 16.0;
 const MIN_BOX_WIDTH: f64 = 120.0;
 const MIN_BOX_HEIGHT: f64 = 40.0;
 const TITLE_EXTRA_Y: f64 = 40.0;
-const SCALE_FACTOR: f64 = 2.0;
+const SCALE_FACTOR: f64 = 4.0;
 
 // -----------------------------------------------------------------------
 // Public API
@@ -204,6 +204,145 @@ pub fn renderClassToPNG(
     }
 
     try canvas.saveToPNG(output_path);
+}
+
+pub fn renderClassToPNGBytes(
+    allocator: Allocator,
+    diagram: *const ClassDiagram,
+    maybe_font: ?*Font,
+) ![]u8 {
+    var graph = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var class_ids = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (class_ids.items) |id| allocator.free(id);
+        class_ids.deinit(allocator);
+    }
+
+    var class_iter = diagram.classes.iterator();
+    while (class_iter.next()) |entry| {
+        const cls = entry.value_ptr;
+        const id = entry.key_ptr.*;
+
+        const size = computeClassBoxSize(cls, maybe_font);
+
+        try graph.setNode(id, .{
+            .label = cls.displayName(),
+            .width = size.width,
+            .height = size.height,
+        });
+
+        try class_ids.append(allocator, try allocator.dupe(u8, id));
+    }
+
+    var graph_label = graph.getGraphLabel();
+    if (std.mem.eql(u8, diagram.direction, "LR")) {
+        graph_label.rankdir = "LR";
+    } else if (std.mem.eql(u8, diagram.direction, "RL")) {
+        graph_label.rankdir = "RL";
+    } else if (std.mem.eql(u8, diagram.direction, "BT")) {
+        graph_label.rankdir = "BT";
+    } else {
+        graph_label.rankdir = "TB";
+    }
+    graph_label.nodesep = 60.0;
+    graph_label.ranksep = 60.0;
+
+    for (diagram.relations.items) |rel| {
+        const edge_label = rel.label orelse "";
+        try graph.setEdge(rel.id1, rel.id2, .{
+            .label = if (edge_label.len > 0) edge_label else null,
+            .minlen = 1,
+        }, null);
+    }
+
+    const config = dagre.DagreConfig{
+        .rankdir = blk: {
+            if (std.mem.eql(u8, diagram.direction, "LR")) break :blk .LR;
+            if (std.mem.eql(u8, diagram.direction, "RL")) break :blk .RL;
+            if (std.mem.eql(u8, diagram.direction, "BT")) break :blk .BT;
+            break :blk .TB;
+        },
+        .ranker = .network_simplex,
+        .nodesep = 60,
+        .ranksep = 60,
+    };
+
+    try dagre.layout(allocator, &graph, config);
+
+    var min_x: f64 = std.math.floatMax(f64);
+    var min_y: f64 = std.math.floatMax(f64);
+    var max_x: f64 = -std.math.floatMax(f64);
+    var max_y: f64 = -std.math.floatMax(f64);
+
+    for (class_ids.items) |id| {
+        if (graph.getNode(id)) |node| {
+            const left = node.x - node.width / 2.0;
+            const right = node.x + node.width / 2.0;
+            const top = node.y - node.height / 2.0;
+            const bottom = node.y + node.height / 2.0;
+            if (left < min_x) min_x = left;
+            if (right > max_x) max_x = right;
+            if (top < min_y) min_y = top;
+            if (bottom > max_y) max_y = bottom;
+        }
+    }
+
+    var edge_iter = graph.edgeIterator();
+    while (edge_iter.next()) |entry| {
+        for (entry.data.points.items) |pt| {
+            if (pt.x < min_x) min_x = pt.x;
+            if (pt.x > max_x) max_x = pt.x;
+            if (pt.y < min_y) min_y = pt.y;
+            if (pt.y > max_y) max_y = pt.y;
+        }
+    }
+
+    if (min_x > max_x) {
+        min_x = 0;
+        max_x = 200;
+        min_y = 0;
+        max_y = 100;
+    }
+
+    const has_title = diagram.title != null;
+    const title_offset: f64 = if (has_title) TITLE_EXTRA_Y else 0.0;
+
+    const canvas_width_f = (max_x - min_x) + PADDING * 2;
+    const canvas_height_f = (max_y - min_y) + PADDING * 2 + title_offset;
+    const offset_x = PADDING - min_x;
+    const offset_y = PADDING - min_y + title_offset;
+
+    const canvas_w: u32 = @intFromFloat(@ceil(canvas_width_f));
+    const canvas_h: u32 = @intFromFloat(@ceil(canvas_height_f));
+
+    var canvas = try Canvas.initWithScale(allocator, canvas_w, canvas_h, SCALE_FACTOR);
+    defer canvas.deinit();
+    canvas.fill(255, 255, 255, 255);
+
+    if (diagram.title) |title| {
+        if (maybe_font) |font| {
+            const tw = font.measureText(title, @floatCast(TITLE_FONT_SIZE));
+            const tx: f32 = @floatCast(canvas_width_f / 2.0 - @as(f64, tw) / 2.0);
+            font.drawText(&canvas, title, tx, 10.0, @floatCast(TITLE_FONT_SIZE), 51, 51, 51, 255) catch {};
+        }
+    }
+
+    drawEdges(allocator, diagram, &graph, &canvas, offset_x, offset_y, maybe_font);
+
+    for (class_ids.items) |id| {
+        if (graph.getNode(id)) |node| {
+            if (diagram.classes.getPtr(id)) |cls| {
+                drawClassBox(&canvas, cls, node.x + offset_x, node.y + offset_y, node.width, node.height, maybe_font);
+            }
+        }
+    }
+
+    return canvas.saveToPNGBytes();
 }
 
 // -----------------------------------------------------------------------

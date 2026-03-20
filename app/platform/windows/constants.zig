@@ -5,6 +5,7 @@ const rich_edit = win32.ui.controls.rich_edit;
 
 pub const class_name: [*:0]const u8 = "MerrowStudioWindowClass";
 pub const preview_class_name: [*:0]const u8 = "MerrowStudioPreviewWindowClass";
+pub const canvas_class_name: [*:0]const u8 = "MerrowStudioCanvasWindowClass";
 pub const window_title: [*:0]const u8 = "Merrow Studio (Windows Scaffold)";
 pub const static_class: [*:0]const u8 = "STATIC";
 pub const edit_class: [*:0]const u8 = "EDIT";
@@ -33,6 +34,13 @@ pub const toolbar_id_reserved_1: usize = 2101;
 pub const toolbar_id_reserved_2: usize = 2102;
 pub const toolbar_id_reserved_3: usize = 2103;
 
+/// View menu
+pub const view_menu_label: [*:0]const u8 = "&View";
+pub const menu_id_mode_mermaid: usize = 2010;
+pub const menu_id_mode_freeform: usize = 2011;
+pub const menu_label_mode_mermaid: [*:0]const u8 = "&Mermaid Source Mode";
+pub const menu_label_mode_freeform: [*:0]const u8 = "&Freeform Canvas Mode";
+
 pub const toolbar_slot_1_label: [*:0]const u8 = "Slot 1";
 pub const toolbar_slot_2_label: [*:0]const u8 = "Slot 2";
 pub const toolbar_slot_3_label: [*:0]const u8 = "Slot 3";
@@ -51,6 +59,8 @@ pub const Layout = struct {
     min_command_width: i32 = 220,
     left_ratio_num: i32 = 3,
     left_ratio_den: i32 = 5,
+    /// Width of the freeform-mode inspector panel on the right side.
+    inspector_width: i32 = 260,
 };
 
 pub const ViewAnchor = struct {

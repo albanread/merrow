@@ -3,6 +3,7 @@ const win32 = @import("win32");
 const merrow = @import("merrow");
 const merrow_lexer = merrow.lexer;
 const windows_app_state = @import("windows/app_state.zig");
+const windows_canvas = @import("windows/canvas.zig");
 const windows_common = @import("windows/common.zig");
 const windows_constants = @import("windows/constants.zig");
 const windows_dpi = @import("windows/dpi.zig");
@@ -16,9 +17,11 @@ const com = win32.system.com;
 const foundation = win32.foundation;
 const d2d = win32.graphics.direct2d;
 const d2d_common = win32.graphics.direct2d.common;
-const dw = win32.graphics.direct_write;
 const dxgi_common = win32.graphics.dxgi.common;
+const dwrite = win32.graphics.direct_write;
 const gdi = win32.graphics.gdi;
+const imaging = win32.graphics.imaging;
+const file_system = win32.storage.file_system;
 const loader = win32.system.library_loader;
 const controls = win32.ui.controls;
 const dialogs = win32.ui.controls.dialogs;
@@ -30,6 +33,7 @@ const ui = win32.ui.windows_and_messaging;
 const c_allocator = std.heap.c_allocator;
 const class_name = windows_constants.class_name;
 const preview_class_name = windows_constants.preview_class_name;
+const canvas_class_name = windows_constants.canvas_class_name;
 const window_title = windows_constants.window_title;
 const static_class = windows_constants.static_class;
 const edit_class = windows_constants.edit_class;
@@ -49,6 +53,8 @@ const initial_source = windows_constants.initial_source;
 const menu_id_open = windows_constants.menu_id_open;
 const menu_id_save = windows_constants.menu_id_save;
 const menu_id_save_as = windows_constants.menu_id_save_as;
+const menu_id_mode_mermaid = windows_constants.menu_id_mode_mermaid;
+const menu_id_mode_freeform = windows_constants.menu_id_mode_freeform;
 const toolbar_id_reserved_1 = windows_constants.toolbar_id_reserved_1;
 const toolbar_id_reserved_2 = windows_constants.toolbar_id_reserved_2;
 const toolbar_id_reserved_3 = windows_constants.toolbar_id_reserved_3;
@@ -58,106 +64,24 @@ const toolbar_slot_3_label = windows_constants.toolbar_slot_3_label;
 const Layout = windows_constants.Layout;
 const ViewAnchor = windows_constants.ViewAnchor;
 
+const AppMode = windows_app_state.AppMode;
 const ChildWindows = windows_app_state.ChildWindows;
 const PreviewRenderer = windows_app_state.PreviewRenderer;
-
-const StudioColor = extern struct {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-};
-
-const StudioScene = extern struct {
-    width: f64,
-    height: f64,
-    background: StudioColor,
-    subgraphs: [*c]StudioSubgraph,
-    subgraph_count: usize,
-    nodes: [*c]StudioNode,
-    node_count: usize,
-    edges: [*c]StudioEdge,
-    edge_count: usize,
-    edge_labels: [*c]StudioEdgeLabel,
-    edge_label_count: usize,
-};
-
-const StudioPoint = extern struct {
-    x: f64,
-    y: f64,
-};
-
-const StudioSubgraph = extern struct {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    corner_radius: f64,
-    fill: StudioColor,
-    stroke: StudioColor,
-    stroke_width: f32,
-    title: [*c]const u8,
-    title_x: f64,
-    title_y: f64,
-    title_font_size: f32,
-    title_color: StudioColor,
-};
-
-const StudioNode = extern struct {
-    shape: u32,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    fill: StudioColor,
-    stroke: StudioColor,
-    stroke_width: f32,
-    label: [*c]const u8,
-    label_color: StudioColor,
-    label_font_size: f32,
-    max_text_width: f64,
-    subtitle: [*c]const u8,
-    attributes_text: [*c]const u8,
-    methods_text: [*c]const u8,
-    body_fill: StudioColor,
-    body_text_color: StudioColor,
-};
-
-const StudioEdge = extern struct {
-    points: [*c]StudioPoint,
-    point_count: usize,
-    color: StudioColor,
-    thickness: f32,
-    line_style: u32,
-    has_arrow: u8,
-    has_source_arrow: u8,
-    target_from: StudioPoint,
-    target_tip: StudioPoint,
-    source_from: StudioPoint,
-    source_tip: StudioPoint,
-};
-
-const StudioEdgeLabel = extern struct {
-    text: [*c]const u8,
-    x: f64,
-    y: f64,
-    half_w: f64,
-    half_h: f64,
-    font_size: f32,
-    color: StudioColor,
-};
-
-extern fn merrow_studio_build_scene(source_ptr: [*]const u8, source_len: u32) callconv(.c) ?*StudioScene;
-extern fn merrow_studio_free_scene(scene: ?*StudioScene) callconv(.c) void;
+const CanvasRenderer = windows_app_state.CanvasRenderer;
+extern fn merrow_studio_build_editable_graph(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) ?*windows_canvas.StudioEditableGraph;
 extern fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) c_int;
+extern fn merrow_studio_render_preview_png_bytes(source_ptr: [*]const u8, source_len: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_apply_command(source_ptr: [*]const u8, source_len: u32, command_ptr: [*]const u8, command_len: u32, context_id_ptr: [*]const u8, context_id_len: u32, out_context_id: [*]u8, out_context_id_len: u32, out_context_display: [*]u8, out_context_display_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_shuffle_diagram(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_free_string(text: [*c]u8) callconv(.c) void;
+extern fn merrow_studio_free_buffer(buffer: [*c]u8, buffer_len: u32) callconv(.c) void;
 
+var app_mode: AppMode = .mermaid;
 var child_windows = ChildWindows{};
 var preview_renderer = PreviewRenderer{};
+var canvas_renderer = CanvasRenderer.init(c_allocator);
+var canvas_dwrite_factory: ?*dwrite.IDWriteFactory = null;
 var main_window: ?foundation.HWND = null;
-var current_scene: ?*StudioScene = null;
 var current_document_path: ?[]u8 = null;
 var private_font_path: ?[:0]u8 = null;
 var rich_edit_module: ?@TypeOf(loader.LoadLibraryA("Riched20.dll").?) = null;
@@ -173,8 +97,6 @@ const EditorTokenStyle = windows_editor.EditorTokenStyle;
 const editor_theme = windows_editor.editor_theme;
 
 const empty_c_string = windows_constants.empty_c_string;
-const font_family_name_w = windows_constants.font_family_name_w;
-const locale_name_w = windows_constants.locale_name_w;
 const setPosFlagsBits = windows_common.setPosFlagsBits;
 const redrawFlagsBits = windows_common.redrawFlagsBits;
 const makeRedrawFlags = windows_common.makeRedrawFlags;
@@ -191,6 +113,42 @@ const resolveRepoPathZ = windows_common.resolveRepoPathZ;
 const releaseUnknown = windows_common.releaseUnknown;
 const fileDialogFlagBits = windows_common.fileDialogFlagBits;
 const makeFileDialogFlags = windows_common.makeFileDialogFlags;
+const preview_bitmap_scale: f64 = 4.0;
+// Minimum virtual border around the image in display pixels; actual margin is
+// max(preview_pan_margin, viewport/4) so it grows with window size.
+const preview_pan_margin: i32 = 200;
+
+const PreviewAxisBounds = struct {
+    min: i32,
+    max: i32,
+    default_pos: i32,
+};
+
+fn previewAxisBounds(content: i32, viewport: i32) PreviewAxisBounds {
+    const margin: i32 = @max(preview_pan_margin, @divTrunc(viewport, 4));
+    const raw_min: i32 = -margin;
+    const raw_max: i32 = content - viewport + margin;
+
+    if (raw_max <= raw_min) {
+        // The image plus both margins fits entirely inside the viewport.
+        // Center the image and disable panning (scrollbar appears grayed-out).
+        const centered: i32 = @divTrunc(content - viewport, 2);
+        return .{ .min = centered, .max = centered, .default_pos = centered };
+    }
+
+    // For images that fit the viewport: center as the start position.
+    // For images larger than the viewport: start at the top-left (position 0).
+    const default_pos: i32 = if (content <= viewport) @divTrunc(content - viewport, 2) else 0;
+    return .{ .min = raw_min, .max = raw_max, .default_pos = default_pos };
+}
+
+fn previewLogicalWidth() i32 {
+    return @max(0, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(preview_renderer.bitmap_width)) / preview_bitmap_scale))));
+}
+
+fn previewLogicalHeight() i32 {
+    return @max(0, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(preview_renderer.bitmap_height)) / preview_bitmap_scale))));
+}
 
 fn freeCurrentDocumentPath() void {
     windows_document.freeCurrentDocumentPath(c_allocator, &current_document_path);
@@ -201,6 +159,124 @@ fn freeCurrentStatusMessage() void {
         c_allocator.free(message);
         current_status_message = null;
     }
+}
+
+fn releasePreviewBitmap() void {
+    releaseUnknown(&preview_renderer.bitmap);
+}
+
+fn freePreviewPng() void {
+    if (preview_renderer.preview_png) |png| {
+        c_allocator.free(png);
+        preview_renderer.preview_png = null;
+    }
+}
+
+fn clearPreviewImageState() void {
+    releasePreviewBitmap();
+    freePreviewPng();
+    preview_renderer.bitmap_width = 0;
+    preview_renderer.bitmap_height = 0;
+    preview_renderer.scroll_x = 0;
+    preview_renderer.scroll_y = 0;
+}
+
+fn replacePreviewPng(png_bytes: []const u8) bool {
+    const duplicated = c_allocator.alloc(u8, png_bytes.len) catch return false;
+    @memcpy(duplicated, png_bytes);
+    freePreviewPng();
+    preview_renderer.preview_png = duplicated;
+    return true;
+}
+
+fn ensurePreviewImagingFactory() bool {
+    if (!preview_renderer.com_initialized) {
+        const init_hr = com.CoInitializeEx(null, com.COINIT_APARTMENTTHREADED);
+        if (hrFailed(init_hr) and init_hr != foundation.RPC_E_CHANGED_MODE) return false;
+        preview_renderer.com_initialized = true;
+    }
+
+    if (preview_renderer.wic_factory == null) {
+        var factory: ?*imaging.IWICImagingFactory = null;
+        const create_hr = com.CoCreateInstance(
+            &imaging.CLSID_WICImagingFactory,
+            null,
+            com.CLSCTX_INPROC_SERVER,
+            imaging.IID_IWICImagingFactory,
+            @ptrCast(&factory),
+        );
+        if (hrFailed(create_hr) or factory == null) return false;
+        preview_renderer.wic_factory = factory;
+    }
+
+    return true;
+}
+
+fn syncPreviewBitmapFromMemory(hwnd: ?foundation.HWND) bool {
+    const preview_png = preview_renderer.preview_png orelse {
+        releasePreviewBitmap();
+        preview_renderer.bitmap_width = 0;
+        preview_renderer.bitmap_height = 0;
+        return false;
+    };
+    if (!ensurePreviewImagingFactory()) return false;
+
+    const wic_factory = preview_renderer.wic_factory orelse return false;
+
+    var stream: ?*imaging.IWICStream = null;
+    if (hrFailed(wic_factory.CreateStream(&stream)) or stream == null) return false;
+    defer releaseUnknown(&stream);
+
+    if (hrFailed(stream.?.InitializeFromMemory(@ptrCast(preview_png.ptr), @intCast(preview_png.len)))) return false;
+
+    var decoder: ?*imaging.IWICBitmapDecoder = null;
+    const decoder_hr = wic_factory.CreateDecoderFromStream(
+        @ptrCast(stream.?),
+        null,
+        imaging.WICDecodeMetadataCacheOnLoad,
+        &decoder,
+    );
+    if (hrFailed(decoder_hr) or decoder == null) return false;
+    defer releaseUnknown(&decoder);
+
+    var frame: ?*imaging.IWICBitmapFrameDecode = null;
+    if (hrFailed(decoder.?.GetFrame(0, &frame)) or frame == null) return false;
+    defer releaseUnknown(&frame);
+
+    var converter: ?*imaging.IWICFormatConverter = null;
+    if (hrFailed(wic_factory.CreateFormatConverter(&converter)) or converter == null) return false;
+    defer releaseUnknown(&converter);
+
+    var pixel_format = imaging.GUID_WICPixelFormat32bppPBGRA;
+    if (hrFailed(converter.?.Initialize(
+        @ptrCast(frame.?),
+        &pixel_format,
+        imaging.WICBitmapDitherTypeNone,
+        null,
+        0.0,
+        imaging.WICBitmapPaletteTypeCustom,
+    ))) return false;
+
+    var width: u32 = 0;
+    var height: u32 = 0;
+    if (hrFailed((@as(*imaging.IWICBitmapSource, @ptrCast(converter.?))).GetSize(&width, &height))) return false;
+
+    preview_renderer.bitmap_width = width;
+    preview_renderer.bitmap_height = height;
+    releasePreviewBitmap();
+
+    if (!ensurePreviewRenderTarget(hwnd)) return true;
+    const render_target = preview_renderer.render_target orelse return true;
+
+    var bitmap_raw: *d2d.ID2D1Bitmap = undefined;
+    if (hrFailed(render_target.ID2D1RenderTarget.CreateBitmapFromWicBitmap(@ptrCast(converter.?), null, &bitmap_raw))) {
+        preview_renderer.bitmap_width = 0;
+        preview_renderer.bitmap_height = 0;
+        return false;
+    }
+
+    preview_renderer.bitmap = bitmap_raw;
+    return true;
 }
 
 fn registerPreviewFont() void {
@@ -362,7 +438,7 @@ fn openDocumentFromDialog() void {
 
     setEditorText(source);
     setCurrentDocumentPath(selected_path);
-    updateEditorDerivedState();
+    updateEditorDerivedState(true);
     setDocumentDirty(false);
     setStatusMessage("Opened Mermaid source");
 }
@@ -398,97 +474,13 @@ fn saveDocument(save_as: bool) void {
     _ = saveDocumentToPath(selected_path);
 }
 
-fn replaceCurrentScene(next_scene: ?*StudioScene) void {
-    if (current_scene) |scene| {
-        merrow_studio_free_scene(scene);
-    }
-    current_scene = next_scene;
-}
-
-fn direct2dColor(color: StudioColor) d2d_common.D2D_COLOR_F {
+fn rgba8Color(r: u8, g: u8, b: u8, a: u8) d2d_common.D2D_COLOR_F {
     return .{
-        .r = @as(f32, @floatFromInt(color.r)) / 255.0,
-        .g = @as(f32, @floatFromInt(color.g)) / 255.0,
-        .b = @as(f32, @floatFromInt(color.b)) / 255.0,
-        .a = @as(f32, @floatFromInt(color.a)) / 255.0,
+        .r = @as(f32, @floatFromInt(r)) / 255.0,
+        .g = @as(f32, @floatFromInt(g)) / 255.0,
+        .b = @as(f32, @floatFromInt(b)) / 255.0,
+        .a = @as(f32, @floatFromInt(a)) / 255.0,
     };
-}
-
-fn previewBrush() ?*d2d.ID2D1Brush {
-    const brush = preview_renderer.brush orelse return null;
-    return @ptrCast(brush);
-}
-
-fn setBrushColor(color: StudioColor) void {
-    const brush = preview_renderer.brush orelse return;
-    var d2d_color = direct2dColor(color);
-    brush.SetColor(&d2d_color);
-}
-
-fn scalePoint(x: f64, y: f64, scale: f64, offset_x: f64, offset_y: f64) d2d_common.D2D_POINT_2F {
-    return .{
-        .x = @floatCast(x * scale + offset_x),
-        .y = @floatCast(y * scale + offset_y),
-    };
-}
-
-fn scaleRect(x: f64, y: f64, width: f64, height: f64, scale: f64, offset_x: f64, offset_y: f64) d2d_common.D2D_RECT_F {
-    return .{
-        .left = @floatCast(x * scale + offset_x),
-        .top = @floatCast(y * scale + offset_y),
-        .right = @floatCast((x + width) * scale + offset_x),
-        .bottom = @floatCast((y + height) * scale + offset_y),
-    };
-}
-
-fn drawArrowHead(
-    render_target: *const d2d.ID2D1RenderTarget,
-    brush: *d2d.ID2D1Brush,
-    tip: d2d_common.D2D_POINT_2F,
-    from: d2d_common.D2D_POINT_2F,
-    stroke_width: f32,
-) void {
-    const dx = @as(f64, tip.x) - @as(f64, from.x);
-    const dy = @as(f64, tip.y) - @as(f64, from.y);
-    const length = @sqrt(dx * dx + dy * dy);
-    if (length < 0.001) return;
-
-    const ux = dx / length;
-    const uy = dy / length;
-    const px = -uy;
-    const py = ux;
-    const arrow_len = @max(8.0, @as(f64, stroke_width) * 5.0);
-    const arrow_half_width = @max(4.0, @as(f64, stroke_width) * 2.5);
-    const base_x = @as(f64, tip.x) - ux * arrow_len;
-    const base_y = @as(f64, tip.y) - uy * arrow_len;
-
-    const left = d2d_common.D2D_POINT_2F{
-        .x = @floatCast(base_x + px * arrow_half_width),
-        .y = @floatCast(base_y + py * arrow_half_width),
-    };
-    const right = d2d_common.D2D_POINT_2F{
-        .x = @floatCast(base_x - px * arrow_half_width),
-        .y = @floatCast(base_y - py * arrow_half_width),
-    };
-
-    const factory = preview_renderer.factory orelse return;
-    var path_geometry_raw: *d2d.ID2D1PathGeometry = undefined;
-    if (hrFailed(factory.CreatePathGeometry(&path_geometry_raw))) return;
-    var path_geometry: ?*d2d.ID2D1PathGeometry = path_geometry_raw;
-    defer releaseUnknown(&path_geometry);
-
-    var sink_raw: *d2d.ID2D1GeometrySink = undefined;
-    if (hrFailed(path_geometry_raw.Open(&sink_raw))) return;
-    var sink: ?*d2d.ID2D1GeometrySink = sink_raw;
-    defer releaseUnknown(&sink);
-
-    sink.?.ID2D1SimplifiedGeometrySink.BeginFigure(tip, d2d_common.D2D1_FIGURE_BEGIN_FILLED);
-    sink.?.AddLine(left);
-    sink.?.AddLine(right);
-    sink.?.ID2D1SimplifiedGeometrySink.EndFigure(d2d_common.D2D1_FIGURE_END_CLOSED);
-    if (hrFailed(sink.?.ID2D1SimplifiedGeometrySink.Close())) return;
-
-    render_target.FillGeometry(@ptrCast(path_geometry), brush, null);
 }
 
 fn ensurePreviewFactory() bool {
@@ -502,17 +494,6 @@ fn ensurePreviewFactory() bool {
         );
         if (hrFailed(hr) or factory == null) return false;
         preview_renderer.factory = factory;
-    }
-
-    if (preview_renderer.write_factory == null) {
-        var write_factory: ?*dw.IDWriteFactory = null;
-        const write_hr = dw.DWriteCreateFactory(
-            dw.DWRITE_FACTORY_TYPE_SHARED,
-            dw.IID_IDWriteFactory,
-            @ptrCast(&write_factory),
-        );
-        if (hrFailed(write_hr) or write_factory == null) return false;
-        preview_renderer.write_factory = write_factory;
     }
 
     return true;
@@ -558,88 +539,43 @@ fn viewportAnchorFromWheel(hwnd: ?foundation.HWND, l_param: foundation.LPARAM) V
     };
 }
 
-fn scenePixelWidth() i32 {
-    if (current_scene) |scene| {
-        const extent = sceneContentExtent(scene).width;
-        return @max(0, @as(i32, @intFromFloat(@ceil(extent * preview_renderer.zoom))));
-    }
-    return 0;
+fn previewContentPixelWidth() i32 {
+    return @max(0, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(previewLogicalWidth())) * preview_renderer.zoom))));
 }
 
-fn scenePixelHeight() i32 {
-    if (current_scene) |scene| {
-        const extent = sceneContentExtent(scene).height;
-        return @max(0, @as(i32, @intFromFloat(@ceil(extent * preview_renderer.zoom))));
-    }
-    return 0;
+fn previewContentPixelHeight() i32 {
+    return @max(0, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(previewLogicalHeight())) * preview_renderer.zoom))));
 }
 
-fn sceneContentExtent(scene: *const StudioScene) struct { width: f64, height: f64 } {
-    const content_margin_x = 24.0;
-    const content_margin_y = 56.0;
-
-    var max_x = scene.width;
-    var max_y = scene.height;
-
-    var subgraph_index: usize = 0;
-    while (subgraph_index < scene.subgraph_count) : (subgraph_index += 1) {
-        const subgraph = scene.subgraphs[subgraph_index];
-        max_x = @max(max_x, subgraph.x + subgraph.width + content_margin_x);
-        max_y = @max(max_y, subgraph.y + subgraph.height + content_margin_y);
-        max_x = @max(max_x, subgraph.title_x + 220.0);
-        max_y = @max(max_y, subgraph.title_y + @as(f64, subgraph.title_font_size) * 1.8 + 20.0);
-    }
-
-    var node_index: usize = 0;
-    while (node_index < scene.node_count) : (node_index += 1) {
-        const node = scene.nodes[node_index];
-        max_x = @max(max_x, node.x + node.width / 2.0 + content_margin_x);
-        max_y = @max(max_y, node.y + node.height / 2.0 + content_margin_y);
-    }
-
-    var edge_index: usize = 0;
-    while (edge_index < scene.edge_count) : (edge_index += 1) {
-        const edge = scene.edges[edge_index];
-        var point_index: usize = 0;
-        while (point_index < edge.point_count) : (point_index += 1) {
-            const point = edge.points[point_index];
-            max_x = @max(max_x, point.x + content_margin_x);
-            max_y = @max(max_y, point.y + content_margin_y);
-        }
-        max_x = @max(max_x, edge.target_tip.x + content_margin_x);
-        max_x = @max(max_x, edge.source_tip.x + content_margin_x);
-        max_y = @max(max_y, edge.target_tip.y + content_margin_y);
-        max_y = @max(max_y, edge.source_tip.y + content_margin_y);
-    }
-
-    var label_index: usize = 0;
-    while (label_index < scene.edge_label_count) : (label_index += 1) {
-        const label = scene.edge_labels[label_index];
-        max_x = @max(max_x, label.x + label.half_w + content_margin_x);
-        max_y = @max(max_y, label.y + label.half_h + content_margin_y);
-    }
-
-    return .{ .width = max_x, .height = max_y };
+fn previewBounds(hwnd: ?foundation.HWND) ?struct {
+    x: PreviewAxisBounds,
+    y: PreviewAxisBounds,
+    viewport_width: i32,
+    viewport_height: i32,
+} {
+    const size = currentPreviewPixelSize(hwnd) orelse return null;
+    const viewport_width: i32 = @intCast(size.width);
+    const viewport_height: i32 = @intCast(size.height);
+    return .{
+        .x = previewAxisBounds(previewContentPixelWidth(), viewport_width),
+        .y = previewAxisBounds(previewContentPixelHeight(), viewport_height),
+        .viewport_width = viewport_width,
+        .viewport_height = viewport_height,
+    };
 }
 
 fn updatePreviewScrollbars(hwnd: ?foundation.HWND) void {
-    const size = currentPreviewPixelSize(hwnd) orelse return;
-    const scene_width = scenePixelWidth();
-    const scene_height = scenePixelHeight();
-    const page_x: i32 = @intCast(size.width);
-    const page_y: i32 = @intCast(size.height);
-    const max_x = @max(0, scene_width - page_x);
-    const max_y = @max(0, scene_height - page_y);
+    const bounds = previewBounds(hwnd) orelse return;
 
-    preview_renderer.scroll_x = std.math.clamp(preview_renderer.scroll_x, 0, max_x);
-    preview_renderer.scroll_y = std.math.clamp(preview_renderer.scroll_y, 0, max_y);
+    preview_renderer.scroll_x = std.math.clamp(preview_renderer.scroll_x, bounds.x.min, bounds.x.max);
+    preview_renderer.scroll_y = std.math.clamp(preview_renderer.scroll_y, bounds.y.min, bounds.y.max);
 
     var x_info = ui.SCROLLINFO{
         .cbSize = @sizeOf(ui.SCROLLINFO),
         .fMask = makeScrollMask(scrollMaskBits(ui.SIF_RANGE) | scrollMaskBits(ui.SIF_PAGE) | scrollMaskBits(ui.SIF_POS) | scrollMaskBits(ui.SIF_DISABLENOSCROLL)),
-        .nMin = 0,
-        .nMax = @max(0, scene_width - 1),
-        .nPage = size.width,
+        .nMin = bounds.x.min,
+        .nMax = bounds.x.max + bounds.viewport_width - 1,
+        .nPage = @intCast(bounds.viewport_width),
         .nPos = preview_renderer.scroll_x,
         .nTrackPos = 0,
     };
@@ -648,9 +584,9 @@ fn updatePreviewScrollbars(hwnd: ?foundation.HWND) void {
     var y_info = ui.SCROLLINFO{
         .cbSize = @sizeOf(ui.SCROLLINFO),
         .fMask = makeScrollMask(scrollMaskBits(ui.SIF_RANGE) | scrollMaskBits(ui.SIF_PAGE) | scrollMaskBits(ui.SIF_POS) | scrollMaskBits(ui.SIF_DISABLENOSCROLL)),
-        .nMin = 0,
-        .nMax = @max(0, scene_height - 1),
-        .nPage = size.height,
+        .nMin = bounds.y.min,
+        .nMax = bounds.y.max + bounds.viewport_height - 1,
+        .nPage = @intCast(bounds.viewport_height),
         .nPos = preview_renderer.scroll_y,
         .nTrackPos = 0,
     };
@@ -658,6 +594,7 @@ fn updatePreviewScrollbars(hwnd: ?foundation.HWND) void {
 }
 
 fn applyPreviewScroll(hwnd: ?foundation.HWND, bar: ui.SCROLLBAR_CONSTANTS, request: u16) void {
+    const bounds = previewBounds(hwnd) orelse return;
     var info = ui.SCROLLINFO{
         .cbSize = @sizeOf(ui.SCROLLINFO),
         .fMask = makeScrollMask(scrollMaskBits(ui.SIF_ALL)),
@@ -670,7 +607,8 @@ fn applyPreviewScroll(hwnd: ?foundation.HWND, bar: ui.SCROLLBAR_CONSTANTS, reque
     if (ui.GetScrollInfo(hwnd, bar, &info) == 0) return;
 
     const page: i32 = @intCast(info.nPage);
-    const max_pos = @max(0, info.nMax - page + 1);
+    const axis_min = if (@as(u32, @bitCast(bar)) == @as(u32, @bitCast(ui.SB_HORZ))) bounds.x.min else bounds.y.min;
+    const axis_max = if (@as(u32, @bitCast(bar)) == @as(u32, @bitCast(ui.SB_HORZ))) bounds.x.max else bounds.y.max;
     var next_pos = info.nPos;
     switch (@as(u32, request)) {
         0 => next_pos -= 24,
@@ -681,7 +619,7 @@ fn applyPreviewScroll(hwnd: ?foundation.HWND, bar: ui.SCROLLBAR_CONSTANTS, reque
         else => return,
     }
 
-    next_pos = std.math.clamp(next_pos, 0, max_pos);
+    next_pos = std.math.clamp(next_pos, axis_min, axis_max);
     info.fMask = makeScrollMask(scrollMaskBits(ui.SIF_POS));
     info.nPos = next_pos;
     _ = controls.SetScrollInfo(hwnd, bar, &info, 1);
@@ -695,15 +633,23 @@ fn applyPreviewScroll(hwnd: ?foundation.HWND, bar: ui.SCROLLBAR_CONSTANTS, reque
 }
 
 fn panPreviewBy(hwnd: ?foundation.HWND, delta_x: i32, delta_y: i32) void {
-    const size = currentPreviewPixelSize(hwnd) orelse return;
-    const scene_width = scenePixelWidth();
-    const scene_height = scenePixelHeight();
-    const max_x = @max(0, scene_width - @as(i32, @intCast(size.width)));
-    const max_y = @max(0, scene_height - @as(i32, @intCast(size.height)));
+    const bounds = previewBounds(hwnd) orelse return;
 
-    preview_renderer.scroll_x = std.math.clamp(preview_renderer.scroll_x + delta_x, 0, max_x);
-    preview_renderer.scroll_y = std.math.clamp(preview_renderer.scroll_y + delta_y, 0, max_y);
+    preview_renderer.scroll_x = std.math.clamp(preview_renderer.scroll_x + delta_x, bounds.x.min, bounds.x.max);
+    preview_renderer.scroll_y = std.math.clamp(preview_renderer.scroll_y + delta_y, bounds.y.min, bounds.y.max);
     requestPreviewRefresh();
+}
+
+fn resetPreviewView(hwnd: ?foundation.HWND) void {
+    preview_renderer.zoom = 1.0;
+    if (previewBounds(hwnd)) |bounds| {
+        preview_renderer.scroll_x = bounds.x.default_pos;
+        preview_renderer.scroll_y = bounds.y.default_pos;
+    } else {
+        preview_renderer.scroll_x = 0;
+        preview_renderer.scroll_y = 0;
+    }
+    refreshStatusDisplay();
 }
 
 fn setPreviewZoom(new_zoom: f64, anchor_x: i32, anchor_y: i32) void {
@@ -740,7 +686,7 @@ fn ensurePreviewRenderTarget(hwnd: ?foundation.HWND) bool {
 
     if (preview_renderer.render_target) |render_target| {
         if (hrFailed(render_target.Resize(&pixel_size))) {
-            releaseUnknown(&preview_renderer.brush);
+            releasePreviewBitmap();
             releaseUnknown(&preview_renderer.render_target);
         } else {
             return true;
@@ -769,448 +715,87 @@ fn ensurePreviewRenderTarget(hwnd: ?foundation.HWND) bool {
         return false;
     }
     preview_renderer.render_target = render_target;
-
-    var brush_color = direct2dColor(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
-    var brush: ?*d2d.ID2D1SolidColorBrush = null;
-    if (hrFailed(render_target.?.ID2D1RenderTarget.CreateSolidColorBrush(&brush_color, null, @ptrCast(&brush))) or brush == null) {
-        releaseUnknown(&preview_renderer.render_target);
-        return false;
-    }
-    preview_renderer.brush = brush;
-    preview_renderer.render_target.?.ID2D1RenderTarget.SetTextAntialiasMode(d2d.D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     return true;
 }
 
-fn drawSceneToPreview(hwnd: ?foundation.HWND) void {
+fn drawPreviewBitmap(hwnd: ?foundation.HWND) void {
     if (!ensurePreviewRenderTarget(hwnd)) return;
 
+    if (preview_renderer.bitmap == null and preview_renderer.preview_png != null) {
+        _ = syncPreviewBitmapFromMemory(hwnd);
+    }
+
     const render_target = preview_renderer.render_target orelse return;
-    const brush = previewBrush() orelse return;
     render_target.ID2D1RenderTarget.BeginDraw();
+    var background = rgba8Color(255, 255, 255, 255);
+    render_target.ID2D1RenderTarget.Clear(&background);
 
-    if (current_scene) |scene| {
-        var background = direct2dColor(scene.background);
-        render_target.ID2D1RenderTarget.Clear(&background);
-        const scale = preview_renderer.zoom;
-        const offset_x = -@as(f64, @floatFromInt(preview_renderer.scroll_x));
-        const offset_y = -@as(f64, @floatFromInt(preview_renderer.scroll_y));
-
-        var subgraph_index: usize = 0;
-        while (subgraph_index < scene.subgraph_count) : (subgraph_index += 1) {
-            const subgraph = scene.subgraphs[subgraph_index];
-            var rounded_rect = d2d.D2D1_ROUNDED_RECT{
-                .rect = scaleRect(subgraph.x, subgraph.y, subgraph.width, subgraph.height, scale, offset_x, offset_y),
-                .radiusX = @floatCast(subgraph.corner_radius * scale),
-                .radiusY = @floatCast(subgraph.corner_radius * scale),
-            };
-            setBrushColor(subgraph.fill);
-            render_target.ID2D1RenderTarget.FillRoundedRectangle(&rounded_rect, brush);
-            setBrushColor(subgraph.stroke);
-            render_target.ID2D1RenderTarget.DrawRoundedRectangle(&rounded_rect, brush, @max(1.0, subgraph.stroke_width * @as(f32, @floatCast(scale))), null);
-
-            const title_inset_left = @max(0.0, subgraph.title_x - subgraph.x);
-            const title_width = @max(40.0, subgraph.width - title_inset_left - 12.0);
-            const title_height = @max(18.0, @as(f64, subgraph.title_font_size) * 1.8);
-            const title_rect = scaleRect(
-                subgraph.title_x,
-                subgraph.title_y - @as(f64, subgraph.title_font_size) * 0.9,
-                title_width,
-                title_height,
-                scale,
-                offset_x,
-                offset_y,
-            );
-            drawSceneText(
-                &render_target.ID2D1RenderTarget,
-                subgraph.title,
-                @max(10.0, subgraph.title_font_size * @as(f32, @floatCast(scale))),
-                subgraph.title_color,
-                title_rect,
-                dw.DWRITE_TEXT_ALIGNMENT_LEADING,
-                dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-            );
-        }
-
-        var edge_index: usize = 0;
-        while (edge_index < scene.edge_count) : (edge_index += 1) {
-            const edge = scene.edges[edge_index];
-            setBrushColor(edge.color);
-            const stroke_width = @max(1.0, edge.thickness * @as(f32, @floatCast(scale)));
-
-            if (edge.has_source_arrow != 0) {
-                const source_from = scalePoint(edge.source_from.x, edge.source_from.y, scale, offset_x, offset_y);
-                const source_tip = scalePoint(edge.source_tip.x, edge.source_tip.y, scale, offset_x, offset_y);
-                render_target.ID2D1RenderTarget.DrawLine(
-                    source_from,
-                    source_tip,
-                    brush,
-                    stroke_width,
+    if (preview_renderer.bitmap) |bitmap| {
+        const viewport_size = currentPreviewPixelSize(hwnd) orelse {
+            _ = render_target.ID2D1RenderTarget.EndDraw(null, null);
+            return;
+        };
+        const dest_left = @as(f64, @floatFromInt(@max(0, -preview_renderer.scroll_x)));
+        const dest_top = @as(f64, @floatFromInt(@max(0, -preview_renderer.scroll_y)));
+        const source_left = @as(f64, @floatFromInt(@max(0, preview_renderer.scroll_x))) / preview_renderer.zoom * preview_bitmap_scale;
+        const source_top = @as(f64, @floatFromInt(@max(0, preview_renderer.scroll_y))) / preview_renderer.zoom * preview_bitmap_scale;
+        const visible_display_width = @max(
+            0.0,
+            @min(
+                @as(f64, @floatFromInt(previewContentPixelWidth() - @max(0, preview_renderer.scroll_x))),
+                @as(f64, @floatFromInt(@as(i32, @intCast(viewport_size.width)) - @max(0, -preview_renderer.scroll_x))),
+            ),
+        );
+        const visible_display_height = @max(
+            0.0,
+            @min(
+                @as(f64, @floatFromInt(previewContentPixelHeight() - @max(0, preview_renderer.scroll_y))),
+                @as(f64, @floatFromInt(@as(i32, @intCast(viewport_size.height)) - @max(0, -preview_renderer.scroll_y))),
+            ),
+        );
+        const source_width = visible_display_width / preview_renderer.zoom * preview_bitmap_scale;
+        const source_height = visible_display_height / preview_renderer.zoom * preview_bitmap_scale;
+        const dest_rect = d2d_common.D2D_RECT_F{
+            .left = @floatCast(dest_left),
+            .top = @floatCast(dest_top),
+            .right = @floatCast(dest_left + visible_display_width),
+            .bottom = @floatCast(dest_top + visible_display_height),
+        };
+        const source_rect = d2d_common.D2D_RECT_F{
+            .left = @as(f32, @floatCast(std.math.clamp(source_left, 0.0, @as(f64, @floatFromInt(preview_renderer.bitmap_width))))),
+            .top = @as(f32, @floatCast(std.math.clamp(source_top, 0.0, @as(f64, @floatFromInt(preview_renderer.bitmap_height))))),
+            .right = @as(f32, @floatCast(std.math.clamp(source_left + source_width, 0.0, @as(f64, @floatFromInt(preview_renderer.bitmap_width))))),
+            .bottom = @as(f32, @floatCast(std.math.clamp(source_top + source_height, 0.0, @as(f64, @floatFromInt(preview_renderer.bitmap_height))))),
+        };
+        // Prefer ID2D1DeviceContext.DrawBitmap which supports
+        // HIGH_QUALITY_CUBIC — a proper downsampling filter that avoids
+        // the bilinear jaggies produced by ID2D1RenderTarget.DrawBitmap.
+        var device_ctx: ?*d2d.ID2D1DeviceContext = null;
+        const qi_hr = render_target.IUnknown.QueryInterface(d2d.IID_ID2D1DeviceContext, @ptrCast(&device_ctx));
+        if (!hrFailed(qi_hr)) {
+            if (device_ctx) |dc| {
+                dc.DrawBitmap(
+                    bitmap,
+                    &dest_rect,
+                    1.0,
+                    d2d.D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                    &source_rect,
                     null,
                 );
-                drawArrowHead(&render_target.ID2D1RenderTarget, brush, source_tip, source_from, stroke_width);
+                _ = dc.IUnknown.Release();
             }
-
-            if (edge.point_count >= 2) {
-                var point_index: usize = 1;
-                while (point_index < edge.point_count) : (point_index += 1) {
-                    const start = edge.points[point_index - 1];
-                    const end = edge.points[point_index];
-                    render_target.ID2D1RenderTarget.DrawLine(
-                        scalePoint(start.x, start.y, scale, offset_x, offset_y),
-                        scalePoint(end.x, end.y, scale, offset_x, offset_y),
-                        brush,
-                        stroke_width,
-                        null,
-                    );
-                }
-            }
-
-            if (edge.has_arrow != 0) {
-                const target_from = scalePoint(edge.target_from.x, edge.target_from.y, scale, offset_x, offset_y);
-                const target_tip = scalePoint(edge.target_tip.x, edge.target_tip.y, scale, offset_x, offset_y);
-                render_target.ID2D1RenderTarget.DrawLine(
-                    target_from,
-                    target_tip,
-                    brush,
-                    stroke_width,
-                    null,
-                );
-                drawArrowHead(&render_target.ID2D1RenderTarget, brush, target_tip, target_from, stroke_width);
-            }
-        }
-
-        var node_index: usize = 0;
-        while (node_index < scene.node_count) : (node_index += 1) {
-            const node = scene.nodes[node_index];
-            const left = node.x - node.width / 2.0;
-            const top = node.y - node.height / 2.0;
-            const rect = scaleRect(left, top, node.width, node.height, scale, offset_x, offset_y);
-            const horizontal_text_padding = 10.0;
-            const vertical_text_padding = 12.0;
-
-            if (node.shape == 12) {
-                const annotation_lines = countSceneTextLines(node.subtitle);
-                const member_lines = countSceneTextLines(node.attributes_text);
-                const method_lines = countSceneTextLines(node.methods_text);
-                const line_height = @max(22.0 * scale, @as(f64, node.label_font_size) * @as(f64, @floatCast(scale)) * 1.25);
-                const section_pad = 8.0 * scale;
-                const header_lines = 1 + annotation_lines;
-                const header_height = @max(26.0 * scale, @as(f64, @floatFromInt(header_lines)) * line_height + section_pad * 2.0);
-                const attrs_height = if (member_lines > 0)
-                    @as(f64, @floatFromInt(member_lines)) * line_height + section_pad * 2.0
-                else
-                    section_pad * 2.0;
-                const methods_height = if (method_lines > 0)
-                    @as(f64, @floatFromInt(method_lines)) * line_height + section_pad * 2.0
-                else
-                    section_pad * 2.0;
-                const minimum_total_height = header_height + attrs_height + methods_height;
-                const extra_height = @max(0.0, (@as(f64, rect.bottom) - @as(f64, rect.top)) - minimum_total_height);
-                const attrs_rect_height = attrs_height + extra_height * 0.35;
-                const methods_rect_height = methods_height + extra_height * 0.65;
-
-                var header_rect = d2d_common.D2D_RECT_F{
-                    .left = rect.left,
-                    .top = rect.top,
-                    .right = rect.right,
-                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, rect.top) + header_height)),
-                };
-                var attrs_rect = d2d_common.D2D_RECT_F{
-                    .left = rect.left,
-                    .top = header_rect.bottom,
-                    .right = rect.right,
-                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, header_rect.bottom) + attrs_rect_height)),
-                };
-                var methods_rect = d2d_common.D2D_RECT_F{
-                    .left = rect.left,
-                    .top = attrs_rect.bottom,
-                    .right = rect.right,
-                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, attrs_rect.bottom) + methods_rect_height)),
-                };
-                methods_rect.bottom = rect.bottom;
-
-                setBrushColor(node.fill);
-                render_target.ID2D1RenderTarget.FillRectangle(&header_rect, brush);
-                setBrushColor(node.body_fill);
-                render_target.ID2D1RenderTarget.FillRectangle(&attrs_rect, brush);
-                render_target.ID2D1RenderTarget.FillRectangle(&methods_rect, brush);
-                setBrushColor(node.stroke);
-                var mutable_rect = rect;
-                const stroke_width = @max(1.0, node.stroke_width * @as(f32, @floatCast(scale)));
-                render_target.ID2D1RenderTarget.DrawRectangle(&mutable_rect, brush, stroke_width, null);
-                render_target.ID2D1RenderTarget.DrawLine(
-                    .{ .x = rect.left, .y = header_rect.bottom },
-                    .{ .x = rect.right, .y = header_rect.bottom },
-                    brush,
-                    stroke_width,
-                    null,
-                );
-                render_target.ID2D1RenderTarget.DrawLine(
-                    .{ .x = rect.left, .y = attrs_rect.bottom },
-                    .{ .x = rect.right, .y = attrs_rect.bottom },
-                    brush,
-                    stroke_width,
-                    null,
-                );
-
-                const header_text_rect = insetSceneRect(header_rect, 10.0 * scale, 8.0 * scale);
-                const attrs_text_rect = d2d_common.D2D_RECT_F{
-                    .left = @floatCast(@as(f64, attrs_rect.left) + 10.0 * scale),
-                    .top = @floatCast(@as(f64, attrs_rect.top) + 8.0 * scale),
-                    .right = @floatCast(@max(@as(f64, attrs_rect.left) + 11.0 * scale, @as(f64, attrs_rect.right) - 10.0 * scale)),
-                    .bottom = @floatCast(@max(@as(f64, attrs_rect.top) + 10.0 * scale, @as(f64, attrs_rect.bottom) - 3.0 * scale)),
-                };
-                const methods_text_rect = d2d_common.D2D_RECT_F{
-                    .left = @floatCast(@as(f64, methods_rect.left) + 10.0 * scale),
-                    .top = @floatCast(@as(f64, methods_rect.top) + 8.0 * scale),
-                    .right = @floatCast(@max(@as(f64, methods_rect.left) + 11.0 * scale, @as(f64, methods_rect.right) - 10.0 * scale)),
-                    .bottom = @floatCast(@max(@as(f64, methods_rect.top) + 10.0 * scale, @as(f64, methods_rect.bottom) - 3.0 * scale)),
-                };
-
-                drawSceneText(
-                    &render_target.ID2D1RenderTarget,
-                    node.subtitle,
-                    @max(9.0, (node.label_font_size - 2.0) * @as(f32, @floatCast(scale))),
-                    node.label_color,
-                    d2d_common.D2D_RECT_F{
-                        .left = header_text_rect.left,
-                        .top = header_text_rect.top,
-                        .right = header_text_rect.right,
-                        .bottom = @floatCast(@min(@as(f64, header_text_rect.bottom), @as(f64, header_text_rect.top) + @as(f64, @floatFromInt(annotation_lines)) * line_height + section_pad)),
-                    },
-                    dw.DWRITE_TEXT_ALIGNMENT_CENTER,
-                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                );
-
-                const name_top = if (annotation_lines > 0)
-                    header_text_rect.top + @as(f32, @floatCast(@as(f64, @floatFromInt(annotation_lines)) * line_height))
-                else
-                    header_text_rect.top + @as(f32, @floatCast(section_pad * 0.25));
-                drawSceneText(
-                    &render_target.ID2D1RenderTarget,
-                    node.label,
-                    @max(10.0, node.label_font_size * @as(f32, @floatCast(scale))),
-                    node.label_color,
-                    d2d_common.D2D_RECT_F{
-                        .left = header_text_rect.left,
-                        .top = name_top,
-                        .right = header_text_rect.right,
-                        .bottom = header_text_rect.bottom,
-                    },
-                    dw.DWRITE_TEXT_ALIGNMENT_CENTER,
-                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                );
-
-                drawSceneText(
-                    &render_target.ID2D1RenderTarget,
-                    node.attributes_text,
-                    @max(9.0, (node.label_font_size - 1.0) * @as(f32, @floatCast(scale))),
-                    node.body_text_color,
-                    attrs_text_rect,
-                    dw.DWRITE_TEXT_ALIGNMENT_LEADING,
-                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                );
-                drawSceneText(
-                    &render_target.ID2D1RenderTarget,
-                    node.methods_text,
-                    @max(9.0, (node.label_font_size - 1.0) * @as(f32, @floatCast(scale))),
-                    node.body_text_color,
-                    methods_text_rect,
-                    dw.DWRITE_TEXT_ALIGNMENT_LEADING,
-                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                );
-                continue;
-            }
-
-            switch (node.shape) {
-                1, 5, 6 => {
-                    var rounded_rect = d2d.D2D1_ROUNDED_RECT{
-                        .rect = rect,
-                        .radiusX = @floatCast(@min(node.width, node.height) * scale * 0.2),
-                        .radiusY = @floatCast(@min(node.width, node.height) * scale * 0.2),
-                    };
-                    setBrushColor(node.fill);
-                    render_target.ID2D1RenderTarget.FillRoundedRectangle(&rounded_rect, brush);
-                    setBrushColor(node.stroke);
-                    render_target.ID2D1RenderTarget.DrawRoundedRectangle(&rounded_rect, brush, @max(1.0, node.stroke_width * @as(f32, @floatCast(scale))), null);
-                },
-                3 => {
-                    var ellipse = d2d.D2D1_ELLIPSE{
-                        .point = scalePoint(node.x, node.y, scale, offset_x, offset_y),
-                        .radiusX = @floatCast(node.width * scale * 0.5),
-                        .radiusY = @floatCast(node.height * scale * 0.5),
-                    };
-                    setBrushColor(node.fill);
-                    render_target.ID2D1RenderTarget.FillEllipse(&ellipse, brush);
-                    setBrushColor(node.stroke);
-                    render_target.ID2D1RenderTarget.DrawEllipse(&ellipse, brush, @max(1.0, node.stroke_width * @as(f32, @floatCast(scale))), null);
-                },
-                else => {
-                    var mutable_rect = rect;
-                    setBrushColor(node.fill);
-                    render_target.ID2D1RenderTarget.FillRectangle(&mutable_rect, brush);
-                    setBrushColor(node.stroke);
-                    render_target.ID2D1RenderTarget.DrawRectangle(&mutable_rect, brush, @max(1.0, node.stroke_width * @as(f32, @floatCast(scale))), null);
-                },
-            }
-
-            const max_label_width = if (node.max_text_width > 0)
-                @min(node.max_text_width, node.width - horizontal_text_padding * 2.0)
-            else
-                @max(24.0, node.width - horizontal_text_padding * 2.0);
-            const label_rect = scaleRect(
-                node.x - max_label_width / 2.0,
-                node.y - node.height / 2.0 + vertical_text_padding,
-                max_label_width,
-                @max(18.0, node.height - vertical_text_padding * 2.0),
-                scale,
-                offset_x,
-                offset_y,
-            );
-            drawSceneText(
-                &render_target.ID2D1RenderTarget,
-                node.label,
-                @max(10.0, node.label_font_size * @as(f32, @floatCast(scale))),
-                node.label_color,
-                label_rect,
-                dw.DWRITE_TEXT_ALIGNMENT_CENTER,
-                dw.DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+        } else {
+            render_target.ID2D1RenderTarget.DrawBitmap(
+                bitmap,
+                &dest_rect,
+                1.0,
+                d2d.D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                &source_rect,
             );
         }
-
-        var edge_label_index: usize = 0;
-        while (edge_label_index < scene.edge_label_count) : (edge_label_index += 1) {
-            const edge_label = scene.edge_labels[edge_label_index];
-            const label_rect = scaleRect(
-                edge_label.x - edge_label.half_w,
-                edge_label.y - edge_label.half_h,
-                edge_label.half_w * 2.0,
-                edge_label.half_h * 2.0,
-                scale,
-                offset_x,
-                offset_y,
-            );
-            drawSceneText(
-                &render_target.ID2D1RenderTarget,
-                edge_label.text,
-                @max(9.0, edge_label.font_size * @as(f32, @floatCast(scale))),
-                edge_label.color,
-                label_rect,
-                dw.DWRITE_TEXT_ALIGNMENT_CENTER,
-                dw.DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-            );
-        }
-    } else {
-        var clear = d2d_common.D2D_COLOR_F{ .r = 0.96, .g = 0.97, .b = 0.98, .a = 1.0 };
-        render_target.ID2D1RenderTarget.Clear(&clear);
     }
 
     _ = render_target.ID2D1RenderTarget.EndDraw(null, null);
-}
-
-fn countSceneTextLines(text_ptr: [*c]const u8) usize {
-    if (text_ptr == null) return 0;
-    const text = std.mem.sliceTo(text_ptr, 0);
-    if (text.len == 0) return 0;
-
-    var count: usize = 1;
-    for (text) |ch| {
-        if (ch == '\n') count += 1;
-    }
-    return count;
-}
-
-fn insetSceneRect(rect: d2d_common.D2D_RECT_F, inset_x: f64, inset_y: f64) d2d_common.D2D_RECT_F {
-    return .{
-        .left = @floatCast(@as(f64, rect.left) + inset_x),
-        .top = @floatCast(@as(f64, rect.top) + inset_y),
-        .right = @floatCast(@max(@as(f64, rect.left) + inset_x + 1.0, @as(f64, rect.right) - inset_x)),
-        .bottom = @floatCast(@max(@as(f64, rect.top) + inset_y + 1.0, @as(f64, rect.bottom) - inset_y)),
-    };
-}
-
-fn drawSceneText(
-    render_target: *const d2d.ID2D1RenderTarget,
-    text_ptr: [*c]const u8,
-    requested_font_size: f32,
-    color: StudioColor,
-    layout_rect: d2d_common.D2D_RECT_F,
-    text_alignment: dw.DWRITE_TEXT_ALIGNMENT,
-    paragraph_alignment: dw.DWRITE_PARAGRAPH_ALIGNMENT,
-) void {
-    if (text_ptr == null) return;
-
-    const text = std.mem.sliceTo(text_ptr, 0);
-    if (text.len == 0) return;
-
-    const write_factory = preview_renderer.write_factory orelse return;
-    const utf16_text = std.unicode.utf8ToUtf16LeAllocZ(c_allocator, text) catch return;
-    defer c_allocator.free(utf16_text);
-
-    const layout_width = @max(1.0, layout_rect.right - layout_rect.left);
-    const layout_height = @max(1.0, layout_rect.bottom - layout_rect.top);
-    const has_break_opportunities = std.mem.indexOfAny(u8, text, " \t\r\n-/") != null;
-    const width_factor: f32 = if (has_break_opportunities) 0.88 else 0.98;
-    const height_factor: f32 = if (has_break_opportunities) 0.58 else 0.88;
-    const width_limit = layout_width * width_factor;
-    const height_limit = layout_height * height_factor;
-    const wrapping_mode = if (has_break_opportunities) dw.DWRITE_WORD_WRAPPING_WRAP else dw.DWRITE_WORD_WRAPPING_NO_WRAP;
-
-    var fitted_font_size = requested_font_size;
-    var text_format: ?*dw.IDWriteTextFormat = null;
-    var text_layout: ?*dw.IDWriteTextLayout = null;
-
-    while (fitted_font_size >= 7.0) : (fitted_font_size -= 0.5) {
-        releaseUnknown(&text_layout);
-        releaseUnknown(&text_format);
-
-        const create_hr = write_factory.CreateTextFormat(
-            font_family_name_w[0..font_family_name_w.len :0].ptr,
-            null,
-            dw.DWRITE_FONT_WEIGHT_NORMAL,
-            dw.DWRITE_FONT_STYLE_NORMAL,
-            dw.DWRITE_FONT_STRETCH_NORMAL,
-            fitted_font_size,
-            locale_name_w[0..locale_name_w.len :0].ptr,
-            @ptrCast(&text_format),
-        );
-        if (hrFailed(create_hr) or text_format == null) return;
-
-        _ = text_format.?.SetTextAlignment(text_alignment);
-        _ = text_format.?.SetParagraphAlignment(paragraph_alignment);
-        _ = text_format.?.SetWordWrapping(wrapping_mode);
-
-        const layout_hr = write_factory.CreateTextLayout(
-            utf16_text.ptr,
-            @intCast(utf16_text.len),
-            text_format,
-            layout_width,
-            layout_height,
-            @ptrCast(&text_layout),
-        );
-        if (hrFailed(layout_hr) or text_layout == null) return;
-
-        var metrics = std.mem.zeroes(dw.DWRITE_TEXT_METRICS);
-        if (hrFailed(text_layout.?.GetMetrics(&metrics))) return;
-        const width_ok = metrics.width <= width_limit + 0.5 and metrics.widthIncludingTrailingWhitespace <= layout_width + 0.5;
-        const height_ok = metrics.height <= height_limit + 0.5;
-        const line_count_ok = has_break_opportunities or metrics.lineCount <= 1;
-        if (width_ok and height_ok and line_count_ok) {
-            break;
-        }
-    }
-
-    defer releaseUnknown(&text_layout);
-    defer releaseUnknown(&text_format);
-    if (text_layout == null) return;
-
-    setBrushColor(color);
-    render_target.DrawTextLayout(
-        .{ .x = layout_rect.left, .y = layout_rect.top },
-        text_layout,
-        previewBrush(),
-        d2d.D2D1_DRAW_TEXT_OPTIONS_NONE,
-    );
 }
 
 fn requestPreviewRefresh() void {
@@ -1311,8 +896,256 @@ fn previewWindowProc(
         ui.WM_PAINT => {
             var paint = std.mem.zeroes(gdi.PAINTSTRUCT);
             _ = gdi.BeginPaint(hwnd, &paint);
-            drawSceneToPreview(hwnd);
+            drawPreviewBitmap(hwnd);
             _ = gdi.EndPaint(hwnd, &paint);
+            return 0;
+        },
+        else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas D2D / DWrite helpers
+// ---------------------------------------------------------------------------
+
+fn ensureCanvasD2DFactory() bool {
+    if (canvas_renderer.factory == null) {
+        var factory: ?*d2d.ID2D1Factory = null;
+        const hr = d2d.D2D1CreateFactory(
+            d2d.D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            d2d.IID_ID2D1Factory,
+            null,
+            @ptrCast(&factory),
+        );
+        if (hrFailed(hr) or factory == null) return false;
+        canvas_renderer.factory = factory;
+    }
+    return true;
+}
+
+fn ensureCanvasDWriteFactory() bool {
+    if (canvas_dwrite_factory == null) {
+        var factory: ?*dwrite.IDWriteFactory = null;
+        const hr = dwrite.DWriteCreateFactory(.SHARED, dwrite.IID_IDWriteFactory, @ptrCast(&factory));
+        if (hrFailed(hr) or factory == null) return false;
+        canvas_dwrite_factory = factory;
+    }
+    return true;
+}
+
+fn ensureCanvasRenderTarget(hwnd: ?foundation.HWND) bool {
+    if (!ensureCanvasD2DFactory()) return false;
+    const factory = canvas_renderer.factory orelse return false;
+    const render_dpi: f32 = 96.0;
+
+    var rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &rect) == 0) return false;
+    const w = rect.right - rect.left;
+    const h = rect.bottom - rect.top;
+    if (w <= 0 or h <= 0) return false;
+    const pixel_size = d2d_common.D2D_SIZE_U{ .width = @intCast(w), .height = @intCast(h) };
+
+    if (canvas_renderer.render_target) |rt| {
+        if (hrFailed(rt.Resize(&pixel_size))) {
+            releaseUnknown(&canvas_renderer.render_target);
+        } else {
+            rt.ID2D1RenderTarget.SetDpi(render_dpi, render_dpi);
+            return true;
+        }
+    }
+
+    var target_props = d2d.D2D1_RENDER_TARGET_PROPERTIES{
+        .type = d2d.D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        .pixelFormat = .{
+            .format = dxgi_common.DXGI_FORMAT_UNKNOWN,
+            .alphaMode = d2d_common.D2D1_ALPHA_MODE_IGNORE,
+        },
+        .dpiX = 0,
+        .dpiY = 0,
+        .usage = d2d.D2D1_RENDER_TARGET_USAGE_NONE,
+        .minLevel = d2d.D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    var hwnd_props = d2d.D2D1_HWND_RENDER_TARGET_PROPERTIES{
+        .hwnd = hwnd,
+        .pixelSize = pixel_size,
+        .presentOptions = d2d.D2D1_PRESENT_OPTIONS_NONE,
+    };
+
+    var render_target: ?*d2d.ID2D1HwndRenderTarget = null;
+    if (hrFailed(factory.CreateHwndRenderTarget(&target_props, &hwnd_props, @ptrCast(&render_target))) or render_target == null) {
+        return false;
+    }
+    render_target.?.ID2D1RenderTarget.SetDpi(render_dpi, render_dpi);
+    canvas_renderer.render_target = render_target;
+    return true;
+}
+
+fn drawCanvasFrame(hwnd: ?foundation.HWND) void {
+    if (!ensureCanvasRenderTarget(hwnd) or !ensureCanvasDWriteFactory()) return;
+    const rt = canvas_renderer.render_target orelse return;
+    const dw_factory = canvas_dwrite_factory orelse return;
+
+    var rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &rect) == 0) return;
+    const w: f32 = @floatFromInt(@max(1, rect.right - rect.left));
+    const h: f32 = @floatFromInt(@max(1, rect.bottom - rect.top));
+
+    const ctx = windows_canvas.draw.DrawContext{
+        .render_target = &rt.ID2D1RenderTarget,
+        .dwrite_factory = dw_factory,
+        .viewport_width = w,
+        .viewport_height = h,
+    };
+
+    rt.ID2D1RenderTarget.BeginDraw();
+    if (canvas_renderer.canvas_state.graph) |graph| {
+        windows_canvas.draw.drawCanvas(&ctx, graph, canvas_renderer.canvas_state.viewport, canvas_renderer.canvas_state.selection, canvas_renderer.canvas_state.hover);
+    } else {
+        var bg = rgba8Color(245, 245, 245, 255);
+        rt.ID2D1RenderTarget.Clear(&bg);
+    }
+    _ = rt.ID2D1RenderTarget.EndDraw(null, null);
+}
+
+// ---------------------------------------------------------------------------
+// Canvas child window proc
+// ---------------------------------------------------------------------------
+
+fn canvasWindowProc(
+    hwnd: ?foundation.HWND,
+    message: u32,
+    w_param: foundation.WPARAM,
+    l_param: foundation.LPARAM,
+) callconv(.winapi) foundation.LRESULT {
+    switch (message) {
+        ui.WM_ERASEBKGND => return 1,
+        ui.WM_PAINT => {
+            var paint = std.mem.zeroes(gdi.PAINTSTRUCT);
+            _ = gdi.BeginPaint(hwnd, &paint);
+            drawCanvasFrame(hwnd);
+            _ = gdi.EndPaint(hwnd, &paint);
+            return 0;
+        },
+        ui.WM_SIZE => {
+            if (canvas_renderer.render_target) |rt| {
+                var rect = std.mem.zeroes(foundation.RECT);
+                if (ui.GetClientRect(hwnd, &rect) != 0) {
+                    const pw: u32 = @intCast(@max(0, rect.right - rect.left));
+                    const ph: u32 = @intCast(@max(0, rect.bottom - rect.top));
+                    _ = rt.Resize(&d2d_common.D2D_SIZE_U{ .width = pw, .height = ph });
+                }
+            }
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_LBUTTONDOWN => {
+            _ = mouse.SetFocus(hwnd);
+            const pos = mouseCoordFromLParam(l_param);
+            const result = windows_canvas.interaction.onLeftButtonDown(
+                &canvas_renderer.canvas_state,
+                hwnd,
+                pos.x,
+                pos.y,
+            );
+            if (result.selection_changed) {
+                windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_MOUSEMOVE => {
+            const pos = mouseCoordFromLParam(l_param);
+            const result = windows_canvas.interaction.onMouseMove(
+                &canvas_renderer.canvas_state,
+                pos.x,
+                pos.y,
+            );
+            if (result.selection_changed) {
+                windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_LBUTTONUP => {
+            const pos = mouseCoordFromLParam(l_param);
+            _ = windows_canvas.interaction.onLeftButtonUp(
+                &canvas_renderer.canvas_state,
+                pos.x,
+                pos.y,
+            );
+            return 0;
+        },
+        ui.WM_MOUSEWHEEL => {
+            const delta = wheelDeltaFromWParam(w_param);
+            var pt = foundation.POINT{
+                .x = mouseCoordFromLParam(l_param).x,
+                .y = mouseCoordFromLParam(l_param).y,
+            };
+            _ = gdi.ScreenToClient(hwnd, &pt);
+            const result = windows_canvas.interaction.onMouseWheel(
+                &canvas_renderer.canvas_state,
+                pt.x,
+                pt.y,
+                delta,
+            );
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_RBUTTONDOWN => {
+            const pos = mouseCoordFromLParam(l_param);
+            const result = windows_canvas.interaction.onRightButtonDown(
+                &canvas_renderer.canvas_state,
+                pos.x,
+                pos.y,
+            );
+            if (result.selection_changed) {
+                windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_MBUTTONDOWN => {
+            const pos = mouseCoordFromLParam(l_param);
+            _ = windows_canvas.interaction.onMiddleButtonDown(
+                &canvas_renderer.canvas_state,
+                hwnd,
+                pos.x,
+                pos.y,
+            );
+            return 0;
+        },
+        ui.WM_MBUTTONUP => {
+            const result = windows_canvas.interaction.onMiddleButtonUp(
+                &canvas_renderer.canvas_state,
+            );
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_LBUTTONDBLCLK => {
+            // Double-click selects the object (same as single click for now).
+            // This ensures clicking text feels responsive — the first click
+            // selects, the double-click confirms the selection.
+            _ = mouse.SetFocus(hwnd);
+            const pos = mouseCoordFromLParam(l_param);
+            const result = windows_canvas.interaction.onLeftButtonDown(
+                &canvas_renderer.canvas_state,
+                hwnd,
+                pos.x,
+                pos.y,
+            );
+            if (result.selection_changed) {
+                windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_KEYDOWN, ui.WM_SYSKEYDOWN => {
+            const vkey: u16 = @truncate(w_param);
+            const result = windows_canvas.interaction.onKeyDown(&canvas_renderer.canvas_state, vkey);
+            if (result.selection_changed) {
+                windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
             return 0;
         },
         else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
@@ -1434,6 +1267,28 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
     child_windows.command = command;
     child_windows.apply_button = apply_button;
     child_windows.status = status;
+
+    // Canvas child window — hidden at startup (app starts in mermaid mode).
+    const canvas = ui.CreateWindowExA(
+        .{},
+        canvas_class_name,
+        null,
+        makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_CLIPSIBLINGS) | styleBits(ui.WS_TABSTOP)),
+        0,
+        0,
+        100,
+        100,
+        hwnd,
+        null,
+        h_instance,
+        null,
+    ) orelse return false;
+    child_windows.canvas = canvas;
+
+    // Inspector panel (freeform mode sidebar).
+    canvas_renderer.inspector = windows_canvas.inspector.createInspector(hwnd, h_instance);
+    windows_canvas.inspector.setCanvasRef(&canvas_renderer.canvas_state, child_windows.canvas, &canvas_renderer.inspector);
+
     initializeToolbarControl();
     configureShellFonts();
     configureEditorControl();
@@ -1443,6 +1298,22 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
 
 fn layoutChildWindows(hwnd: ?foundation.HWND) void {
     windows_layout.applyChildLayout(hwnd, child_windows);
+    var client_rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &client_rect) != 0) {
+        const layout = Layout{};
+        const status_y = client_rect.bottom - client_rect.top - layout.status_height;
+        const content_top = layout.padding;
+        const content_height = status_y - content_top - layout.gutter;
+        if (content_height > 0) {
+            windows_canvas.inspector.layoutInspector(
+                &canvas_renderer.inspector,
+                client_rect.right - client_rect.left,
+                content_top,
+                content_height,
+                layout.inspector_width,
+            );
+        }
+    }
 }
 
 fn setWindowText(hwnd: ?foundation.HWND, text: []const u8) void {
@@ -1492,7 +1363,7 @@ fn getEditorText(allocator: std.mem.Allocator) ![:0]u8 {
     return windows_editor.getEditorText(allocator, child_windows.editor);
 }
 
-fn updateEditorDerivedState() void {
+fn updateEditorDerivedState(reset_view: bool) void {
     const editor_text = getEditorText(c_allocator) catch {
         setStatusMessage("Failed to read editor text");
         return;
@@ -1505,7 +1376,7 @@ fn updateEditorDerivedState() void {
     const syntax_text = if (syntax_slice.len > 0) syntax_slice else "Syntax check unavailable";
 
     if (syntax_result != 0) {
-        replaceCurrentScene(null);
+        clearPreviewImageState();
         const status_text = std.fmt.allocPrint(c_allocator, "{s}", .{syntax_text}) catch return;
         defer c_allocator.free(status_text);
         setStatusMessage(status_text);
@@ -1513,29 +1384,52 @@ fn updateEditorDerivedState() void {
         return;
     }
 
-    const next_scene = merrow_studio_build_scene(editor_text.ptr, @intCast(editor_text.len));
-    if (next_scene) |built_scene| {
-        replaceCurrentScene(built_scene);
-        const status_text = std.fmt.allocPrint(
-            c_allocator,
-            "{s} | nodes {d} | edges {d}",
-            .{ syntax_text, built_scene.node_count, built_scene.edge_count },
-        ) catch return;
-        defer c_allocator.free(status_text);
-        setStatusMessage(status_text);
+    var preview_message: [256]u8 = std.mem.zeroes([256]u8);
+    var preview_png_len: u32 = 0;
+    const preview_png_ptr = merrow_studio_render_preview_png_bytes(
+        editor_text.ptr,
+        @intCast(editor_text.len),
+        &preview_png_len,
+        &preview_message,
+        preview_message.len,
+    );
+    const preview_status = std.mem.sliceTo(&preview_message, 0);
+
+    if (preview_png_ptr == null or preview_png_len == 0) {
+        clearPreviewImageState();
+        setStatusMessage(if (preview_status.len > 0) preview_status else syntax_text);
+        requestPreviewRefresh();
+        return;
+    }
+    defer merrow_studio_free_buffer(preview_png_ptr, preview_png_len);
+
+    const preview_png = preview_png_ptr[0..preview_png_len];
+
+    if (!replacePreviewPng(preview_png) or !syncPreviewBitmapFromMemory(child_windows.preview)) {
+        clearPreviewImageState();
+        setStatusMessage("Preview image load failed");
         requestPreviewRefresh();
         return;
     }
 
-    replaceCurrentScene(null);
-    setStatusMessage(syntax_text);
+    if (reset_view) {
+        resetPreviewView(child_windows.preview);
+    }
+
+    const status_text = std.fmt.allocPrint(
+        c_allocator,
+        "{s} | {s}",
+        .{ syntax_text, if (preview_status.len > 0) preview_status else "Preview ready" },
+    ) catch return;
+    defer c_allocator.free(status_text);
+    setStatusMessage(status_text);
     requestPreviewRefresh();
 }
 
 fn applyUpdatedSource(source: []const u8, status_text: []const u8) void {
     setEditorText(source);
     setStatusMessage(status_text);
-    updateEditorDerivedState();
+    updateEditorDerivedState(false);
     setDocumentDirty(true);
 }
 
@@ -1547,6 +1441,87 @@ fn runReservedToolbarAction(slot: u8) void {
         else => "Reserved toolbar slot",
     };
     setStatusMessage(text);
+}
+
+/// Switch the app between Mermaid source mode and Freeform canvas mode.
+/// Shows / hides the appropriate child windows and triggers a layout pass.
+fn switchToMode(new_mode: AppMode) void {
+    if (app_mode == new_mode) return;
+    app_mode = new_mode;
+
+    switch (new_mode) {
+        .mermaid => {
+            // Show Mermaid pane: preview + editor + command bar.
+            if (child_windows.preview) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            if (child_windows.editor) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            if (child_windows.toolbar) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            if (child_windows.command) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            // Hide canvas pane.
+            if (child_windows.canvas) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            windows_canvas.inspector.show(&canvas_renderer.inspector, false);
+            setStatusMessage("Mermaid source mode");
+        },
+        .freeform => {
+            // Build the editable graph from the current source.
+            const source = getEditorText(c_allocator) catch {
+                setStatusMessage("Could not read source for canvas mode");
+                return;
+            };
+            defer c_allocator.free(source);
+
+            var eg_message: [256]u8 = std.mem.zeroes([256]u8);
+            const eg = merrow_studio_build_editable_graph(
+                source.ptr,
+                @intCast(source.len),
+                &eg_message,
+                eg_message.len,
+            );
+            canvas_renderer.canvas_state.setGraph(eg);
+
+            // Show canvas pane; hide Mermaid pane.
+            if (child_windows.canvas) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
+            windows_canvas.inspector.show(&canvas_renderer.inspector, true);
+            if (child_windows.preview) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            if (child_windows.editor) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            if (child_windows.toolbar) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            if (child_windows.command) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+
+            // Layout must happen BEFORE fitToViewport so the canvas window
+            // has its real dimensions (not the 100x100 creation default).
+            layoutChildWindows(main_window);
+
+            // Now fit the viewport using the real canvas size.
+            if (child_windows.canvas) |cw| {
+                var r = std.mem.zeroes(foundation.RECT);
+                if (ui.GetClientRect(cw, &r) != 0) {
+                    canvas_renderer.canvas_state.fitToViewport(
+                        @floatFromInt(r.right - r.left),
+                        @floatFromInt(r.bottom - r.top),
+                    );
+                }
+            }
+
+            windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+
+            const eg_status = std.mem.sliceTo(&eg_message, 0);
+            setStatusMessage(if (eg == null) eg_status else "Freeform canvas mode");
+        },
+    }
+
+    layoutChildWindows(main_window);
+    _ = gdi.RedrawWindow(
+        main_window,
+        null,
+        null,
+        makeRedrawFlags(
+            redrawFlagsBits(gdi.RDW_INVALIDATE) |
+                redrawFlagsBits(gdi.RDW_ERASE) |
+                redrawFlagsBits(gdi.RDW_ALLCHILDREN) |
+                redrawFlagsBits(gdi.RDW_ERASENOW),
+        ),
+    );
 }
 
 fn runDiagramCommand() void {
@@ -1627,7 +1602,7 @@ fn windowProc(
                 return -1;
             }
             layoutChildWindows(hwnd);
-            updateEditorDerivedState();
+            updateEditorDerivedState(true);
             updateWindowTitle();
             return 0;
         },
@@ -1647,6 +1622,14 @@ fn windowProc(
                     },
                     menu_id_save_as => {
                         saveDocument(true);
+                        return 0;
+                    },
+                    menu_id_mode_mermaid => {
+                        switchToMode(.mermaid);
+                        return 0;
+                    },
+                    menu_id_mode_freeform => {
+                        switchToMode(.freeform);
                         return 0;
                     },
                     toolbar_id_reserved_1 => {
@@ -1672,10 +1655,17 @@ fn windowProc(
                 if (!suppress_editor_change) {
                     setDocumentDirty(true);
                 }
-                updateEditorDerivedState();
+                updateEditorDerivedState(false);
                 return 0;
             }
             return ui.DefWindowProcA(hwnd, message, w_param, l_param);
+        },
+        ui.WM_INITMENUPOPUP => {
+            // Tick the active mode in the View menu.
+            const hmenu: ui.HMENU = @ptrFromInt(@as(usize, @bitCast(w_param)));
+            _ = ui.CheckMenuItem(hmenu, menu_id_mode_mermaid, if (app_mode == .mermaid) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
+            _ = ui.CheckMenuItem(hmenu, menu_id_mode_freeform, if (app_mode == .freeform) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
+            return 0;
         },
         ui.WM_SIZE => {
             layoutChildWindows(hwnd);
@@ -1734,16 +1724,19 @@ fn windowProc(
             return 0;
         },
         ui.WM_DESTROY => {
-            replaceCurrentScene(null);
+            clearPreviewImageState();
             freeCurrentDocumentPath();
             freeCurrentStatusMessage();
             releaseShellFont();
             releaseEditorFont();
             unregisterPreviewFont();
-            releaseUnknown(&preview_renderer.brush);
             releaseUnknown(&preview_renderer.render_target);
-            releaseUnknown(&preview_renderer.write_factory);
+            releaseUnknown(&preview_renderer.wic_factory);
             releaseUnknown(&preview_renderer.factory);
+            if (preview_renderer.com_initialized) {
+                com.CoUninitialize();
+                preview_renderer.com_initialized = false;
+            }
             ui.PostQuitMessage(0);
             return 0;
         },
@@ -1785,6 +1778,20 @@ pub export fn merrow_studio_main(argc: c_int, argv: [*]const [*:0]const u8) call
     if (ui.RegisterClassExA(&preview_class) == 0) {
         return 1;
     }
+
+    var canvas_class = std.mem.zeroes(ui.WNDCLASSEXA);
+    canvas_class.cbSize = @sizeOf(ui.WNDCLASSEXA);
+    canvas_class.style = ui.CS_DBLCLKS;
+    canvas_class.lpfnWndProc = canvasWindowProc;
+    canvas_class.hInstance = h_instance;
+    canvas_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
+    canvas_class.lpszClassName = canvas_class_name;
+    if (ui.RegisterClassExA(&canvas_class) == 0) {
+        return 1;
+    }
+
+    // Inspector panel uses its own window class.
+    _ = windows_canvas.inspector.registerInspectorClass(h_instance);
 
     const hwnd = ui.CreateWindowExA(
         .{},

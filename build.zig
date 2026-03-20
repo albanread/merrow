@@ -156,6 +156,8 @@ pub fn build(b: *std.Build) void {
         windows_app_exe.linkSystemLibrary("comdlg32");
         windows_app_exe.linkSystemLibrary("d2d1");
         windows_app_exe.linkSystemLibrary("dwrite");
+        windows_app_exe.linkSystemLibrary("ole32");
+        windows_app_exe.linkSystemLibrary("windowscodecs");
         b.installArtifact(windows_app_exe);
 
         const windows_app_step = b.step("studio", "Run the Windows Mermaid viewer/editor scaffold");

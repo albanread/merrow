@@ -55,7 +55,7 @@ const ARROW_SIZE: f64 = 8.0;
 const EDGE_STROKE_WIDTH: f64 = 2;
 const NODESEP: f64 = 50.0;
 const RANKSEP: f64 = 60.0;
-const SCALE_FACTOR: f64 = 2.0;
+const SCALE_FACTOR: f64 = 4.0;
 
 // Composite state rendering constants
 const COMPOSITE_PADDING: f64 = 16.0;
@@ -539,6 +539,363 @@ pub fn renderStateToPNG(
     }
 
     try canvas.saveToPNG(output_path);
+}
+
+pub fn renderStateToPNGBytes(
+    allocator: Allocator,
+    diagram: *const StateDiagram,
+    maybe_font: ?*Font,
+) ![]u8 {
+    const mutable_diagram = @constCast(diagram);
+    const state_count = mutable_diagram.states.count();
+
+    if (state_count == 0) {
+        var canvas = try Canvas.initWithScale(allocator, 400, 200, SCALE_FACTOR);
+        defer canvas.deinit();
+        canvas.fill(255, 255, 255, 255);
+        if (maybe_font) |font| {
+            const msg = "(empty state diagram)";
+            const tw = font.measureText(msg, @floatCast(LABEL_FONT_SIZE));
+            font.drawText(&canvas, msg, @as(f32, @floatCast(200.0 - @as(f64, tw) / 2.0)), 90.0, @floatCast(LABEL_FONT_SIZE), 128, 128, 128, 255) catch {};
+        }
+        return canvas.saveToPNGBytes();
+    }
+
+    var composite_set = std.StringHashMap(void).init(allocator);
+    defer composite_set.deinit();
+
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                try composite_set.put(p, {});
+            }
+        }
+    }
+
+    var graph = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var node_ids = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (node_ids.items) |id| allocator.free(id);
+        node_ids.deinit(allocator);
+    }
+
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const id = try allocator.dupe(u8, entry.key_ptr.*);
+            try node_ids.append(allocator, id);
+
+            const state = entry.value_ptr;
+            const is_composite = composite_set.contains(entry.key_ptr.*);
+
+            if (is_composite) {
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = 0,
+                    .height = 0,
+                    .is_subgraph = true,
+                    .subgraph_title = state.displayLabel(),
+                    .subgraph_padding = COMPOSITE_PADDING,
+                });
+            } else {
+                const size = computeStateSize(state);
+                var effective_w = size.w;
+                if (state.note) |note| {
+                    const ns = computeNoteSize(note.text);
+                    effective_w += ns.w + NOTE_CALLOUT_GAP;
+                }
+
+                try graph.setNode(entry.key_ptr.*, .{
+                    .label = state.displayLabel(),
+                    .width = effective_w,
+                    .height = size.h,
+                });
+            }
+        }
+    }
+
+    {
+        var iter = mutable_diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr;
+            if (state.parent) |p| {
+                if (graph.getNode(p) != null) {
+                    try graph.setParent(entry.key_ptr.*, p);
+                }
+            }
+        }
+    }
+
+    std.mem.sort([]const u8, node_ids.items, {}, struct {
+        fn cmp(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.cmp);
+
+    var graph_label = graph.getGraphLabel();
+    switch (diagram.direction) {
+        .LR => graph_label.rankdir = "LR",
+        .RL => graph_label.rankdir = "RL",
+        .BT => graph_label.rankdir = "BT",
+        .TB => graph_label.rankdir = "TB",
+    }
+    graph_label.nodesep = NODESEP;
+    graph_label.ranksep = RANKSEP;
+
+    for (diagram.relations.items) |rel| {
+        const edge_label = rel.label;
+        try graph.setEdge(rel.from, rel.to, .{
+            .label = if (edge_label != null and edge_label.?.len > 0) edge_label else null,
+            .minlen = 1,
+        }, null);
+    }
+
+    try dagre.layout(allocator, &graph, .{
+        .rankdir = switch (diagram.direction) {
+            .LR => .LR,
+            .RL => .RL,
+            .BT => .BT,
+            .TB => .TB,
+        },
+        .ranker = .network_simplex,
+        .nodesep = NODESEP,
+        .ranksep = RANKSEP,
+    });
+
+    var min_x: f64 = std.math.floatMax(f64);
+    var min_y: f64 = std.math.floatMax(f64);
+    var max_x: f64 = -std.math.floatMax(f64);
+    var max_y: f64 = -std.math.floatMax(f64);
+
+    for (node_ids.items) |id| {
+        if (graph.getNode(id)) |node| {
+            const left = node.x - node.width / 2.0;
+            const right = node.x + node.width / 2.0;
+            const top = node.y - node.height / 2.0;
+            const bottom = node.y + node.height / 2.0;
+            if (left < min_x) min_x = left;
+            if (right > max_x) max_x = right;
+            if (top < min_y) min_y = top;
+            if (bottom > max_y) max_y = bottom;
+
+            const is_composite = composite_set.contains(id);
+            if (!is_composite) {
+                if (mutable_diagram.states.get(id)) |state| {
+                    if (state.note) |note| {
+                        const shape_size = computeStateSize(&state);
+                        const ns = computeNoteSize(note.text);
+                        const half_shape_w = shape_size.w / 2.0;
+                        if (note.position == .right_of) {
+                            const nr = node.x + half_shape_w + NOTE_CALLOUT_GAP + ns.w;
+                            if (nr > max_x) max_x = nr;
+                        } else {
+                            const nl = node.x - half_shape_w - NOTE_CALLOUT_GAP - ns.w;
+                            if (nl < min_x) min_x = nl;
+                        }
+                        const note_top = node.y - ns.h / 2.0;
+                        const note_bot = node.y + ns.h / 2.0;
+                        if (note_top < min_y) min_y = note_top;
+                        if (note_bot > max_y) max_y = note_bot;
+                    }
+                }
+            }
+        }
+    }
+
+    var edge_iter = graph.edgeIterator();
+    while (edge_iter.next()) |entry| {
+        for (entry.data.points.items) |pt| {
+            if (pt.x < min_x) min_x = pt.x;
+            if (pt.x > max_x) max_x = pt.x;
+            if (pt.y < min_y) min_y = pt.y;
+            if (pt.y > max_y) max_y = pt.y;
+        }
+    }
+
+    if (min_x > max_x) {
+        min_x = 0;
+        max_x = 200;
+        min_y = 0;
+        max_y = 100;
+    }
+
+    const title_offset: f64 = if (diagram.title != null) 40.0 else 0.0;
+    const canvas_width_f = (max_x - min_x) + MARGIN * 2;
+    const canvas_height_f = (max_y - min_y) + MARGIN * 2 + title_offset;
+    const canvas_w: u32 = @intFromFloat(@max(@ceil(canvas_width_f), 200.0));
+    const canvas_h: u32 = @intFromFloat(@max(@ceil(canvas_height_f), 150.0));
+    const offset_x = MARGIN - min_x;
+    const offset_y = MARGIN - min_y + title_offset;
+
+    var canvas = try Canvas.initWithScale(allocator, canvas_w, canvas_h, SCALE_FACTOR);
+    defer canvas.deinit();
+    canvas.fill(255, 255, 255, 255);
+
+    if (diagram.title) |title| {
+        if (maybe_font) |font| {
+            const tw = font.measureText(title, @floatCast(TITLE_FONT_SIZE));
+            const tx: f32 = @floatCast(@as(f64, @floatFromInt(canvas_w)) / 2.0 - @as(f64, tw) / 2.0);
+            font.drawText(&canvas, title, tx, 10.0, @floatCast(TITLE_FONT_SIZE), 51, 51, 51, 255) catch {};
+        }
+    }
+
+    var composite_ids = std.ArrayListUnmanaged([]const u8){};
+    defer composite_ids.deinit(allocator);
+
+    {
+        var cit = composite_set.iterator();
+        while (cit.next()) |entry| {
+            try composite_ids.append(allocator, entry.key_ptr.*);
+        }
+    }
+
+    if (composite_ids.items.len > 1) {
+        const SortCtx = struct {
+            diagram_ptr: *const StateDiagram,
+
+            fn depth(self: @This(), id: []const u8) usize {
+                var d: usize = 0;
+                var current = id;
+                const md = @constCast(self.diagram_ptr);
+                while (true) {
+                    if (md.states.get(current)) |s| {
+                        if (s.parent) |p| {
+                            d += 1;
+                            current = p;
+                        } else break;
+                    } else break;
+                }
+                return d;
+            }
+
+            fn lessThan(self: @This(), a: []const u8, b: []const u8) bool {
+                const da = self.depth(a);
+                const db = self.depth(b);
+                if (da != db) return da < db;
+                return std.mem.order(u8, a, b) == .lt;
+            }
+        };
+        const ctx = SortCtx{ .diagram_ptr = diagram };
+        std.mem.sort([]const u8, composite_ids.items, ctx, SortCtx.lessThan);
+    }
+
+    for (composite_ids.items) |comp_id| {
+        const node = graph.getNode(comp_id) orelse continue;
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+        renderCompositeBox(&canvas, &state, node.x + offset_x, node.y + offset_y, node.width, node.height, maybe_font);
+    }
+
+    for (diagram.relations.items) |rel| {
+        const ed = graph.edge(rel.from, rel.to, null);
+        if (ed == null) continue;
+        const edge_data = ed.?;
+        const points = edge_data.points.items;
+        const src_node = graph.getNode(rel.from);
+        const tgt_node = graph.getNode(rel.to);
+
+        const from_state_type = blk: {
+            if (mutable_diagram.states.get(rel.from)) |s| break :blk s.state_type;
+            break :blk StateType.default;
+        };
+        const to_state_type = blk: {
+            if (mutable_diagram.states.get(rel.to)) |s| break :blk s.state_type;
+            break :blk StateType.default;
+        };
+        const from_is_composite = composite_set.contains(rel.from);
+        const to_is_composite = composite_set.contains(rel.to);
+
+        var path_points = std.ArrayListUnmanaged([2]f64){};
+        defer path_points.deinit(allocator);
+
+        if (src_node) |sn| {
+            const src_w = if (from_is_composite) sn.width else computeStateSizeById(mutable_diagram, rel.from).w;
+            const src_h = if (from_is_composite) sn.height else computeStateSizeById(mutable_diagram, rel.from).h;
+            if (points.len > 0) {
+                const clipped = computeExitPoint(sn.x + offset_x, sn.y + offset_y, src_w, src_h, if (from_is_composite) StateType.default else from_state_type, points[0].x + offset_x, points[0].y + offset_y);
+                try path_points.append(allocator, .{ clipped.x, clipped.y });
+            } else if (tgt_node) |tn| {
+                const clipped = computeExitPoint(sn.x + offset_x, sn.y + offset_y, src_w, src_h, if (from_is_composite) StateType.default else from_state_type, tn.x + offset_x, tn.y + offset_y);
+                try path_points.append(allocator, .{ clipped.x, clipped.y });
+            }
+        }
+
+        for (points) |pt| {
+            try path_points.append(allocator, .{ pt.x + offset_x, pt.y + offset_y });
+        }
+
+        if (tgt_node) |tn| {
+            const tgt_w = if (to_is_composite) tn.width else computeStateSizeById(mutable_diagram, rel.to).w;
+            const tgt_h = if (to_is_composite) tn.height else computeStateSizeById(mutable_diagram, rel.to).h;
+            const last_x = if (points.len > 0) points[points.len - 1].x + offset_x else if (src_node) |sn| sn.x + offset_x else tn.x + offset_x;
+            const last_y = if (points.len > 0) points[points.len - 1].y + offset_y else if (src_node) |sn| sn.y + offset_y else tn.y + offset_y;
+            const clipped = computeEntryPoint(tn.x + offset_x, tn.y + offset_y, tgt_w, tgt_h, if (to_is_composite) StateType.default else to_state_type, last_x, last_y);
+            try path_points.append(allocator, .{ clipped.x, clipped.y });
+        }
+
+        const pp = path_points.items;
+        if (pp.len >= 2) {
+            for (0..pp.len - 1) |i| {
+                canvas.drawLine(pp[i][0], pp[i][1], pp[i + 1][0], pp[i + 1][1], @intFromFloat(EDGE_STROKE_WIDTH), state_model.edge_color[0], state_model.edge_color[1], state_model.edge_color[2], state_model.edge_color[3]);
+            }
+            drawArrowhead(&canvas, pp[pp.len - 2][0], pp[pp.len - 2][1], pp[pp.len - 1][0], pp[pp.len - 1][1]);
+        }
+
+        if (rel.label) |lbl| {
+            if (maybe_font) |font| {
+                const mid_idx = pp.len / 2;
+                var mid_x: f64 = 0;
+                var mid_y: f64 = 0;
+                if (pp.len >= 2 and mid_idx > 0) {
+                    mid_x = (pp[mid_idx - 1][0] + pp[mid_idx][0]) / 2.0;
+                    mid_y = (pp[mid_idx - 1][1] + pp[mid_idx][1]) / 2.0;
+                } else if (pp.len >= 1) {
+                    mid_x = pp[0][0];
+                    mid_y = pp[0][1];
+                }
+                var dx: f64 = 0;
+                var dy: f64 = 1;
+                if (pp.len >= 2 and mid_idx > 0) {
+                    dx = pp[mid_idx][0] - pp[mid_idx - 1][0];
+                    dy = pp[mid_idx][1] - pp[mid_idx - 1][1];
+                }
+                const len = @sqrt(dx * dx + dy * dy);
+                const ox = if (len > 0) -dy / len * 10.0 else 0.0;
+                const oy = if (len > 0) dx / len * 10.0 else 10.0;
+                const lw = font.measureText(lbl, @floatCast(EDGE_LABEL_FONT_SIZE));
+                const lx: f32 = @floatCast(mid_x + ox - @as(f64, lw) / 2.0);
+                const ly: f32 = @floatCast(mid_y + oy - 6.0);
+                font.drawText(&canvas, lbl, lx, ly, @floatCast(EDGE_LABEL_FONT_SIZE), state_model.text_color[0], state_model.text_color[1], state_model.text_color[2], state_model.text_color[3]) catch {};
+            }
+        }
+    }
+
+    for (node_ids.items) |id| {
+        if (composite_set.contains(id)) continue;
+        const node = graph.getNode(id) orelse continue;
+        const state = mutable_diagram.states.get(id) orelse continue;
+        const size = computeStateSize(&state);
+        renderStateNode(&canvas, &state, node.x + offset_x, node.y + offset_y, size.w, size.h, maybe_font);
+        if (state.note) |note| {
+            renderNoteWithCallout(&canvas, note.position, note.text, node.x + offset_x, node.y + offset_y, size.w, size.h, maybe_font);
+        }
+    }
+
+    for (composite_ids.items) |comp_id| {
+        const state = mutable_diagram.states.get(comp_id) orelse continue;
+        if (state.note) |note| {
+            const node = graph.getNode(comp_id) orelse continue;
+            renderNoteWithCallout(&canvas, note.position, note.text, node.x + offset_x, node.y + offset_y, node.width, node.height, maybe_font);
+        }
+    }
+
+    return canvas.saveToPNGBytes();
 }
 
 // -----------------------------------------------------------------------

@@ -45,7 +45,7 @@ pub fn applyChildLayout(hwnd: ?foundation.HWND, child_windows: anytype) void {
     const band_child_height = layout.command_bar_height - 4;
 
     const defer_flags = @as(u32, common.setPosFlagsBits(ui.SWP_NOZORDER)) | @as(u32, common.setPosFlagsBits(ui.SWP_NOACTIVATE)) | @as(u32, common.setPosFlagsBits(ui.SWP_NOREDRAW));
-    var dwp = ui.BeginDeferWindowPos(6);
+    var dwp = ui.BeginDeferWindowPos(7);
     if (dwp == 0) return;
     dwp = ui.DeferWindowPos(dwp, child_windows.preview, null, layout.padding, content_top, preview_width, content_height, @bitCast(defer_flags));
     if (dwp == 0) return;
@@ -59,6 +59,12 @@ pub fn applyChildLayout(hwnd: ?foundation.HWND, child_windows: anytype) void {
     if (dwp == 0) return;
     dwp = ui.DeferWindowPos(dwp, child_windows.status, null, 0, status_y, client_width, layout.status_height, @bitCast(defer_flags));
     if (dwp == 0) return;
+    // Canvas (freeform mode) — always positioned so show/hide controls visibility.
+    if (child_windows.canvas) |cw| {
+        const canvas_width = @max(0, content_width - layout.inspector_width - layout.gutter);
+        dwp = ui.DeferWindowPos(dwp, cw, null, layout.padding, content_top, canvas_width, content_height, @bitCast(defer_flags));
+        if (dwp == 0) return;
+    }
     _ = ui.EndDeferWindowPos(dwp);
     status_bar.updateStatusBarParts(child_windows.status, client_width);
 }

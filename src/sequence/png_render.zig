@@ -45,7 +45,7 @@ const LayoutResult = seq_layout.LayoutResult;
 
 pub const SeqPngRenderConfig = struct {
     /// Scale factor for HD rendering (2.0 = retina).
-    scale_factor: f64 = 2.0,
+    scale_factor: f64 = 4.0,
 
     /// Font size for participant labels.
     participant_font_size: f32 = 14.0,
@@ -152,6 +152,39 @@ pub fn renderToPNGFile(
 
     // Save to file
     try canvas.saveToPNG(filename);
+}
+
+pub fn renderToPNGBytes(
+    allocator: Allocator,
+    diag: *const SequenceDiagram,
+    layout_result: LayoutResult,
+    layout_config: LayoutConfig,
+    render_config: SeqPngRenderConfig,
+    font: ?*Font,
+) ![]u8 {
+    const canvas_w = @as(usize, @intFromFloat(@ceil(layout_result.width)));
+    const canvas_h = @as(usize, @intFromFloat(@ceil(layout_result.height)));
+
+    if (canvas_w == 0 or canvas_h == 0) return error.InvalidDimensions;
+
+    var canvas = try Canvas.initWithScale(allocator, canvas_w, canvas_h, render_config.scale_factor);
+    defer canvas.deinit();
+
+    const bg = render_config.background_color;
+    canvas.fill(bg[0], bg[1], bg[2], bg[3]);
+
+    if (diag.title) |title_text| {
+        drawTitle(&canvas, title_text, layout_result, render_config, font);
+    }
+
+    try drawFragments(allocator, &canvas, diag, layout_config, render_config, font);
+    drawLifelines(&canvas, diag, layout_result, layout_config, render_config);
+    drawActivations(&canvas, diag, layout_config, render_config);
+    try drawMessages(allocator, &canvas, diag, layout_config, render_config, font);
+    try drawNotes(allocator, &canvas, diag, layout_config, render_config, font);
+    drawParticipantBoxes(&canvas, diag, layout_result, layout_config, render_config, font);
+
+    return canvas.saveToPNGBytes();
 }
 
 // -----------------------------------------------------------------------
