@@ -56,6 +56,20 @@ For an optimised build:
 zig build -Doptimize=ReleaseSafe
 ```
 
+On Windows PowerShell, build and stage a ready-to-run CLI bundle with `merrow.exe` plus the required `fonts/` directory:
+
+```powershell
+.\scripts\build_windows_cli.ps1
+```
+
+To cross-build a specific Windows target triple:
+
+```powershell
+.\scripts\build_windows_cli.ps1 -Target x86_64-windows-gnu
+```
+
+The script writes a versioned folder and `.zip` archive under `release/`.
+
 ### macOS Studio App
 
 On macOS, you can package the native studio target as an `.app` bundle in `release/` and also produce a versioned `.zip` archive:

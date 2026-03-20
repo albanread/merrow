@@ -1,8 +1,12 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const preview = @import("preview.zig");
 
 comptime {
     _ = preview;
+    if (builtin.os.tag == .windows) {
+        _ = @import("platform/windows_main.zig");
+    }
 }
 
 extern fn merrow_studio_main(argc: c_int, argv: [*]const [*:0]const u8) callconv(.c) c_int;

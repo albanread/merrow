@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
     const target_query = target.result;
+    const win32_dep = if (target_query.os.tag == .windows) b.dependency("zigwin32", .{}) else null;
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -133,6 +134,37 @@ pub fn build(b: *std.Build) void {
             macos_app_cmd.addArgs(args);
         }
         macos_app_step.dependOn(&macos_app_cmd.step);
+    } else if (target_query.os.tag == .windows) {
+        const windows_app_exe = b.addExecutable(.{
+            .name = "merrow-studio",
+            .win32_manifest = b.path("app/platform/windows_app.manifest"),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("app/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "merrow", .module = mod },
+                    .{ .name = "win32", .module = win32_dep.?.module("win32") },
+                },
+            }),
+        });
+        windows_app_exe.linkLibC();
+        windows_app_exe.linkSystemLibrary("kernel32");
+        windows_app_exe.linkSystemLibrary("user32");
+        windows_app_exe.linkSystemLibrary("gdi32");
+        windows_app_exe.linkSystemLibrary("comctl32");
+        windows_app_exe.linkSystemLibrary("comdlg32");
+        windows_app_exe.linkSystemLibrary("d2d1");
+        windows_app_exe.linkSystemLibrary("dwrite");
+        b.installArtifact(windows_app_exe);
+
+        const windows_app_step = b.step("studio", "Run the Windows Mermaid viewer/editor scaffold");
+        const windows_app_cmd = b.addRunArtifact(windows_app_exe);
+        windows_app_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            windows_app_cmd.addArgs(args);
+        }
+        windows_app_step.dependOn(&windows_app_cmd.step);
     }
 
     // This creates a top level step. Top level steps have a name and can be

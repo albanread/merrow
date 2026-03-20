@@ -296,6 +296,7 @@ pub const Parser = struct {
     curr: Token,
     peeked: Token,
     graph: FlowchartGraph,
+    graph_owned: bool,
     current_subgraph: ?[]const u8,
 
     /// Stack of nested subgraph IDs (outermost first).
@@ -325,6 +326,7 @@ pub const Parser = struct {
             .curr = first,
             .peeked = second,
             .graph = FlowchartGraph.init(allocator),
+            .graph_owned = true,
             .current_subgraph = null,
             .subgraph_stack_len = 0,
             .class_count = 0,
@@ -333,10 +335,10 @@ pub const Parser = struct {
 
     pub fn deinit(self: *Parser) void {
         self.edge_order.deinit(self.allocator);
-        // We do not deinit the graph here because we usually want to return it.
-        // The caller is responsible for the graph.
-        // If parsing fails, the caller should deinit the graph if they retrieved it,
-        // or we should handle cleanup on error.
+        if (self.graph_owned) {
+            self.graph.deinitDeep();
+            self.graph_owned = false;
+        }
     }
 
     fn advance(self: *Parser) void {
@@ -385,6 +387,7 @@ pub const Parser = struct {
             try self.parseStatement();
         }
 
+        self.graph_owned = false;
         return self.graph;
     }
 

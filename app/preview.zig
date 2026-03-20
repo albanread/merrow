@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const merrow = @import("merrow");
 
@@ -538,8 +539,33 @@ fn bestShuffleDirection(allocator: std.mem.Allocator, source: []const u8) !dagre
 }
 
 fn createTempPreviewPath(allocator: std.mem.Allocator, suffix: []const u8) ![]u8 {
+    const temp_dir = try getTempDirectoryPath(allocator);
+    defer allocator.free(temp_dir);
+
     const stamp = @as(u64, @intCast(@abs(std.time.nanoTimestamp())));
-    return std.fmt.allocPrint(allocator, "/tmp/merrow-studio-preview-{d}{s}", .{ stamp, suffix });
+    const file_name = try std.fmt.allocPrint(allocator, "merrow-studio-preview-{d}{s}", .{ stamp, suffix });
+    defer allocator.free(file_name);
+
+    return std.fs.path.join(allocator, &.{ temp_dir, file_name });
+}
+
+fn getTempDirectoryPath(allocator: std.mem.Allocator) ![]u8 {
+    const env_vars = switch (builtin.os.tag) {
+        .windows => [_][]const u8{ "TEMP", "TMP" },
+        else => [_][]const u8{ "TMPDIR", "TMP", "TEMP" },
+    };
+
+    for (env_vars) |name| {
+        return std.process.getEnvVarOwned(allocator, name) catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => continue,
+            else => return err,
+        };
+    }
+
+    return allocator.dupe(u8, switch (builtin.os.tag) {
+        .windows => ".",
+        else => "/tmp",
+    });
 }
 
 fn renderSequenceDiagramToFile(

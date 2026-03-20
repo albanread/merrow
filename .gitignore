@@ -39,3 +39,5 @@ zig-out/
 test-diagrams/*.png
 test-diagrams/*.svg
 visual-checks/
+
+.fake
