@@ -106,6 +106,11 @@ pub const StudioNode = extern struct {
     label_color: StudioColor,
     label_font_size: f32,
     max_text_width: f64,
+    subtitle: [*c]const u8,
+    attributes_text: [*c]const u8,
+    methods_text: [*c]const u8,
+    body_fill: StudioColor,
+    body_text_color: StudioColor,
 };
 
 pub const StudioEdge = extern struct {
@@ -221,6 +226,11 @@ const SceneBuffers = struct {
         self.subgraphs.deinit(allocator);
 
         for (self.nodes.items) |item| freeCString(allocator, item.label);
+        for (self.nodes.items) |item| {
+            freeCString(allocator, item.subtitle);
+            freeCString(allocator, item.attributes_text);
+            freeCString(allocator, item.methods_text);
+        }
         self.nodes.deinit(allocator);
 
         for (self.edges.items) |item| {
@@ -1082,6 +1092,38 @@ fn dupJoinedClassAnnotations(allocator: std.mem.Allocator, cls: *const class_mod
     return try dupCString(c_allocator, buffer.items);
 }
 
+fn joinedClassAnnotationsText(allocator: std.mem.Allocator, cls: *const class_model.ClassNode) !?[]u8 {
+    if (cls.annotations.items.len == 0) return null;
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    for (cls.annotations.items, 0..) |ann, idx| {
+        if (idx > 0) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, "<<");
+        try buffer.appendSlice(allocator, ann);
+        try buffer.appendSlice(allocator, ">>");
+    }
+
+    const text = try buffer.toOwnedSlice(allocator);
+    return text;
+}
+
+fn joinedClassMembersTextOwned(allocator: std.mem.Allocator, items: []const class_model.ClassMember) !?[]u8 {
+    if (items.len == 0) return null;
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+
+    for (items, 0..) |item, idx| {
+        if (idx > 0) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, item.text);
+    }
+
+    const text = try buffer.toOwnedSlice(allocator);
+    return text;
+}
+
 fn dupJoinedClassMembers(allocator: std.mem.Allocator, items: []const class_model.ClassMember) ![*c]const u8 {
     if (items.len == 0) return null;
 
@@ -1094,6 +1136,147 @@ fn dupJoinedClassMembers(allocator: std.mem.Allocator, items: []const class_mode
     }
 
     return try dupCString(c_allocator, buffer.items);
+}
+
+fn buildClassSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioScene {
+    var diagram = try ClassParser.parse(temp_allocator, source);
+    defer diagram.deinit();
+
+    var graph = Graph.init(temp_allocator);
+    defer {
+        normalize.freeDummyIds(temp_allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var class_ids = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (class_ids.items) |id| temp_allocator.free(id);
+        class_ids.deinit(temp_allocator);
+    }
+
+    var class_iter = diagram.classes.iterator();
+    while (class_iter.next()) |entry| {
+        const cls = entry.value_ptr;
+        const id = entry.key_ptr.*;
+        const size = classBoxSizeForEditable(cls);
+
+        try graph.setNode(id, .{
+            .label = id,
+            .width = size.w,
+            .height = size.h,
+            .shape = .box,
+            .fill_color = class_model.class_body_color,
+            .stroke_color = class_model.class_border_color,
+            .text_color = class_model.class_text_color,
+            .stroke_width = 2,
+        });
+        try class_ids.append(temp_allocator, try temp_allocator.dupe(u8, id));
+    }
+
+    var graph_label = graph.getGraphLabel();
+    graph_label.rankdir = diagram.direction;
+    graph_label.nodesep = 60.0;
+    graph_label.ranksep = 60.0;
+
+    for (diagram.relations.items) |rel| {
+        const edge_label = rel.label orelse "";
+        try graph.setEdge(rel.id1, rel.id2, .{
+            .label = if (edge_label.len > 0) edge_label else null,
+            .minlen = 1,
+            .line_style = if (rel.relation.line_type == .dotted) .dotted else .solid,
+            .color = class_model.relation_color,
+            .thickness = 2,
+            .arrowhead = if (rel.relation.type2 != .none) "normal" else "none",
+            .arrowtail = if (rel.relation.type1 != .none) "normal" else "none",
+        }, null);
+    }
+
+    try dagre.layout(temp_allocator, &graph, .{
+        .rankdir = rankDirFromText(diagram.direction),
+        .ranker = .network_simplex,
+        .nodesep = 60,
+        .ranksep = 60,
+    });
+
+    var min_x: f64 = std.math.floatMax(f64);
+    var min_y: f64 = std.math.floatMax(f64);
+    var max_x: f64 = -std.math.floatMax(f64);
+    var max_y: f64 = -std.math.floatMax(f64);
+
+    for (class_ids.items) |id| {
+        if (graph.getNode(id)) |node| {
+            const left = node.x - node.width / 2.0;
+            const right = node.x + node.width / 2.0;
+            const top = node.y - node.height / 2.0;
+            const bottom = node.y + node.height / 2.0;
+            if (left < min_x) min_x = left;
+            if (right > max_x) max_x = right;
+            if (top < min_y) min_y = top;
+            if (bottom > max_y) max_y = bottom;
+        }
+    }
+
+    var edge_iter = graph.edgeIterator();
+    while (edge_iter.next()) |entry| {
+        for (entry.data.points.items) |pt| {
+            if (pt.x < min_x) min_x = pt.x;
+            if (pt.x > max_x) max_x = pt.x;
+            if (pt.y < min_y) min_y = pt.y;
+            if (pt.y > max_y) max_y = pt.y;
+        }
+    }
+
+    if (min_x > max_x) {
+        min_x = 0.0;
+        min_y = 0.0;
+        max_x = 200.0;
+        max_y = 100.0;
+    }
+
+    const config = defaultRenderConfig();
+    const offset_x = config.padding - min_x;
+    const offset_y = config.padding - min_y;
+
+    var buffers = SceneBuffers{};
+    errdefer buffers.deinit(c_allocator);
+
+    try appendEdges(temp_allocator, c_allocator, &graph, &buffers, null, offset_x, offset_y, config);
+
+    for (class_ids.items) |id| {
+        const node = graph.getNode(id) orelse continue;
+        const cls = diagram.classes.getPtr(id) orelse continue;
+
+        const subtitle_text = try joinedClassAnnotationsText(temp_allocator, cls);
+        defer if (subtitle_text) |text| temp_allocator.free(text);
+
+        const attributes_text = try joinedClassMembersTextOwned(temp_allocator, cls.members.items);
+        defer if (attributes_text) |text| temp_allocator.free(text);
+
+        const methods_text = try joinedClassMembersTextOwned(temp_allocator, cls.methods.items);
+        defer if (methods_text) |text| temp_allocator.free(text);
+
+        try buffers.nodes.append(c_allocator, .{
+            .shape = 12,
+            .x = node.x + offset_x,
+            .y = node.y + offset_y,
+            .width = node.width,
+            .height = node.height,
+            .fill = studioColor(class_model.class_header_color),
+            .stroke = studioColor(class_model.class_border_color),
+            .stroke_width = 2.0,
+            .label = try dupCString(c_allocator, cls.displayName()),
+            .label_color = studioColor(class_model.class_header_text_color),
+            .label_font_size = 15.0,
+            .max_text_width = @max(40.0, node.width - 32.0),
+            .subtitle = if (subtitle_text) |text| try dupCString(c_allocator, text) else null,
+            .attributes_text = if (attributes_text) |text| try dupCString(c_allocator, text) else null,
+            .methods_text = if (methods_text) |text| try dupCString(c_allocator, text) else null,
+            .body_fill = studioColor(class_model.class_body_color),
+            .body_text_color = studioColor(class_model.class_text_color),
+        });
+    }
+
+    return finalizeScene(c_allocator, &buffers, (max_x - min_x) + config.padding * 2.0, (max_y - min_y) + config.padding * 2.0);
 }
 
 fn appendClassEditableGraph(
@@ -1725,6 +1908,11 @@ fn appendNodes(temp_allocator: std.mem.Allocator, scene_allocator: std.mem.Alloc
             .label_color = studioColor(label_color),
             .label_font_size = config.text_size,
             .max_text_width = max_text_w,
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
+            .body_fill = studioColor(fill_color),
+            .body_text_color = studioColor(label_color),
         });
     }
 }
@@ -2271,7 +2459,11 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
 }
 
 fn buildSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioScene {
-    if (detectSequenceDiagram(source) or detectClassDiagram(source) or detectErDiagram(source)) return error.UnsupportedPreviewScene;
+    if (detectSequenceDiagram(source) or detectErDiagram(source)) return error.UnsupportedPreviewScene;
+
+    if (detectClassDiagram(source)) {
+        return buildClassSceneFromSource(temp_allocator, source);
+    }
 
     var parser = try Parser.init(temp_allocator, source);
     defer parser.deinit();
@@ -2331,6 +2523,73 @@ fn buildSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !
     return finalizeScene(c_allocator, &buffers, bounds.width + config.padding * 2.0, bounds.height + config.padding * 2.0);
 }
 
+fn renderGenericGraphDiagramToFile(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    output_path: []const u8,
+    export_svg: bool,
+    maybe_font: ?*LoadedFont,
+    raster_scale: f64,
+    layout_scale: f64,
+) !void {
+    var parser = Parser.init(allocator, source) catch |err| {
+        return err;
+    };
+    defer parser.deinit();
+
+    var graph = parser.parse() catch |err| {
+        return err;
+    };
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    const node_ids = graph.allNodes(allocator) catch |err| {
+        return err;
+    };
+    defer {
+        for (node_ids) |id| allocator.free(id);
+        allocator.free(node_ids);
+    }
+
+    for (node_ids) |id| {
+        if (graph.getNodePtr(id)) |node| {
+            if (node.width > 0 or node.is_subgraph) continue;
+            const display_text = node.label orelse id;
+            const size = if (maybe_font) |loaded| measureNodeSize(&loaded.font, display_text, node.shape) else estimateNodeSize(display_text, node.shape);
+            node.width = size.w;
+            node.height = size.h;
+        }
+    }
+
+    const graph_label = graph.getGraphLabel();
+    const rankdir: dagre.RankDir = blk: {
+        if (std.mem.eql(u8, graph_label.rankdir, "LR")) break :blk .LR;
+        if (std.mem.eql(u8, graph_label.rankdir, "RL")) break :blk .RL;
+        if (std.mem.eql(u8, graph_label.rankdir, "BT")) break :blk .BT;
+        break :blk .TB;
+    };
+
+    try dagre.layout(allocator, &graph, .{
+        .rankdir = rankdir,
+        .ranker = .network_simplex,
+        .nodesep = 50,
+        .ranksep = 50,
+    });
+
+    try scaleGraphGeometry(allocator, &graph, layout_scale);
+
+    const config = exportRenderConfig(layout_scale, raster_scale);
+    const maybe_export_font = if (maybe_font) |loaded| &loaded.font else null;
+
+    if (export_svg) {
+        try svg_render.renderGraphToSVGWithFont(allocator, &graph, output_path, config, maybe_export_font);
+    } else {
+        try graph_render.renderGraphToPNGWithFont(allocator, &graph, output_path, config, maybe_export_font);
+    }
+}
+
 pub export fn merrow_studio_create_default_scene(out_source_path: [*]u8, out_source_path_len: u32) callconv(.c) ?*StudioScene {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -2386,10 +2645,6 @@ pub export fn merrow_studio_render_preview_png(
     const allocator = gpa.allocator();
 
     const source = source_ptr[0..source_len];
-    if (!detectSequenceDiagram(source) and !detectClassDiagram(source) and !detectErDiagram(source) and !detectStateDiagram(source)) {
-        copyCString(out_message, out_message_len, "No fallback preview renderer for this diagram type");
-        return 2;
-    }
 
     const preview_path = createTempPreviewPath(allocator, ".png") catch |err| {
         copyCString(out_message, out_message_len, @errorName(err));
@@ -2447,7 +2702,7 @@ pub export fn merrow_studio_render_preview_png(
             copyCString(out_message, out_message_len, @errorName(err));
             return 4;
         };
-    } else {
+    } else if (detectErDiagram(source)) {
         var diagram = ErParser.parse(allocator, source) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
             return 1;
@@ -2459,6 +2714,19 @@ pub export fn merrow_studio_render_preview_png(
             &diagram,
             preview_path,
             if (maybe_font) |*loaded| &loaded.font else null,
+        ) catch |err| {
+            copyCString(out_message, out_message_len, @errorName(err));
+            return 4;
+        };
+    } else {
+        renderGenericGraphDiagramToFile(
+            allocator,
+            source,
+            preview_path,
+            false,
+            if (maybe_font) |*loaded| loaded else null,
+            1.0,
+            1.0,
         ) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
             return 4;
@@ -2623,80 +2891,23 @@ pub export fn merrow_studio_export_diagram(
 
     const safe_layout_scale = if (layout_scale > 0.0) layout_scale else 1.0;
 
-    var parser = Parser.init(allocator, source) catch |err| {
-        copyCString(out_message, out_message_len, @errorName(err));
+    if (format != 0 and format != 1) {
+        copyCString(out_message, out_message_len, "Unsupported export format");
         return 2;
-    };
-    defer parser.deinit();
-
-    var graph = parser.parse() catch |err| {
-        copyCString(out_message, out_message_len, @errorName(err));
-        return 1;
-    };
-    defer {
-        normalize.freeDummyIds(allocator, &graph);
-        graph.deinitDeep();
     }
 
-    const node_ids = graph.allNodes(allocator) catch |err| {
+    renderGenericGraphDiagramToFile(
+        allocator,
+        source,
+        output_path,
+        format == 1,
+        if (maybe_font) |*loaded| loaded else null,
+        safe_raster_scale,
+        safe_layout_scale,
+    ) catch |err| {
         copyCString(out_message, out_message_len, @errorName(err));
-        return 3;
+        return 4;
     };
-    defer {
-        for (node_ids) |id| allocator.free(id);
-        allocator.free(node_ids);
-    }
-
-    for (node_ids) |id| {
-        if (graph.getNodePtr(id)) |node| {
-            if (node.width > 0 or node.is_subgraph) continue;
-            const display_text = node.label orelse id;
-            const size = if (maybe_font) |*loaded| measureNodeSize(&loaded.font, display_text, node.shape) else estimateNodeSize(display_text, node.shape);
-            node.width = size.w;
-            node.height = size.h;
-        }
-    }
-
-    const graph_label = graph.getGraphLabel();
-    const rankdir: dagre.RankDir = blk: {
-        if (std.mem.eql(u8, graph_label.rankdir, "LR")) break :blk .LR;
-        if (std.mem.eql(u8, graph_label.rankdir, "RL")) break :blk .RL;
-        if (std.mem.eql(u8, graph_label.rankdir, "BT")) break :blk .BT;
-        break :blk .TB;
-    };
-
-    dagre.layout(allocator, &graph, .{
-        .rankdir = rankdir,
-        .ranker = .network_simplex,
-        .nodesep = 50,
-        .ranksep = 50,
-    }) catch |err| {
-        copyCString(out_message, out_message_len, @errorName(err));
-        return 3;
-    };
-
-    scaleGraphGeometry(allocator, &graph, safe_layout_scale) catch |err| {
-        copyCString(out_message, out_message_len, @errorName(err));
-        return 3;
-    };
-
-    const config = exportRenderConfig(safe_layout_scale, safe_raster_scale);
-    const maybe_export_font = if (maybe_font) |*loaded| &loaded.font else null;
-
-    switch (format) {
-        0 => graph_render.renderGraphToPNGWithFont(allocator, &graph, output_path, config, maybe_export_font) catch |err| {
-            copyCString(out_message, out_message_len, @errorName(err));
-            return 4;
-        },
-        1 => svg_render.renderGraphToSVGWithFont(allocator, &graph, output_path, config, maybe_export_font) catch |err| {
-            copyCString(out_message, out_message_len, @errorName(err));
-            return 4;
-        },
-        else => {
-            copyCString(out_message, out_message_len, "Unsupported export format");
-            return 2;
-        },
-    }
 
     copyCString(out_message, out_message_len, if (format == 0) "PNG export complete" else "SVG export complete");
     return 0;
@@ -2860,7 +3071,12 @@ pub export fn merrow_studio_free_scene(scene: ?*StudioScene) callconv(.c) void {
     }
 
     if (s.nodes) |nodes| {
-        for (nodes[0..s.node_count]) |item| freeCString(c_allocator, item.label);
+        for (nodes[0..s.node_count]) |item| {
+            freeCString(c_allocator, item.label);
+            freeCString(c_allocator, item.subtitle);
+            freeCString(c_allocator, item.attributes_text);
+            freeCString(c_allocator, item.methods_text);
+        }
         c_allocator.free(nodes[0..s.node_count]);
     }
 

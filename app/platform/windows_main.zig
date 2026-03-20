@@ -2,6 +2,15 @@ const std = @import("std");
 const win32 = @import("win32");
 const merrow = @import("merrow");
 const merrow_lexer = merrow.lexer;
+const windows_app_state = @import("windows/app_state.zig");
+const windows_common = @import("windows/common.zig");
+const windows_constants = @import("windows/constants.zig");
+const windows_dpi = @import("windows/dpi.zig");
+const windows_document = @import("windows/document.zig");
+const windows_editor = @import("windows/editor.zig");
+const windows_layout = @import("windows/layout.zig");
+const windows_status_bar = @import("windows/status_bar.zig");
+const windows_toolbar = @import("windows/toolbar.zig");
 
 const com = win32.system.com;
 const foundation = win32.foundation;
@@ -19,82 +28,38 @@ const mouse = win32.ui.input.keyboard_and_mouse;
 const ui = win32.ui.windows_and_messaging;
 
 const c_allocator = std.heap.c_allocator;
-const class_name: [*:0]const u8 = "MerrowStudioWindowClass";
-const preview_class_name: [*:0]const u8 = "MerrowStudioPreviewWindowClass";
-const window_title: [*:0]const u8 = "Merrow Studio (Windows Scaffold)";
-const static_class: [*:0]const u8 = "STATIC";
-const edit_class: [*:0]const u8 = "EDIT";
-const rich_edit_class: [*:0]const u8 = rich_edit.RICHEDIT_CLASSA;
-const button_class: [*:0]const u8 = "BUTTON";
-const toolbar_class: [*:0]const u8 = controls.TOOLBARCLASSNAMEA;
-const status_placeholder: [*:0]const u8 = "Windows scaffold ready";
-const file_menu_label: [*:0]const u8 = "&File";
-const menu_open_label: [*:0]const u8 = "&Open...";
-const menu_save_label: [*:0]const u8 = "&Save";
-const menu_save_as_label: [*:0]const u8 = "Save &As...";
-const open_dialog_title: [*:0]const u8 = "Open Mermaid Source";
-const save_dialog_title: [*:0]const u8 = "Save Mermaid Source";
-const default_extension: [*:0]const u8 = "mmd";
-const mermaid_dialog_filter: [*:0]const u8 = "Mermaid Files (*.mmd)\x00*.mmd\x00All Files (*.*)\x00*.*\x00\x00";
-const initial_source: [*:0]const u8 =
-    "flowchart TD\r\n" ++
-    "    Start([Start])\r\n" ++
-    "    Step[Windows scaffold]\r\n" ++
-    "    Start --> Step\r\n";
+const class_name = windows_constants.class_name;
+const preview_class_name = windows_constants.preview_class_name;
+const window_title = windows_constants.window_title;
+const static_class = windows_constants.static_class;
+const edit_class = windows_constants.edit_class;
+const rich_edit_class = windows_constants.rich_edit_class;
+const button_class = windows_constants.button_class;
+const toolbar_class = windows_constants.toolbar_class;
+const status_placeholder = windows_constants.status_placeholder;
+const file_menu_label = windows_constants.file_menu_label;
+const menu_open_label = windows_constants.menu_open_label;
+const menu_save_label = windows_constants.menu_save_label;
+const menu_save_as_label = windows_constants.menu_save_as_label;
+const open_dialog_title = windows_constants.open_dialog_title;
+const save_dialog_title = windows_constants.save_dialog_title;
+const default_extension = windows_constants.default_extension;
+const mermaid_dialog_filter = windows_constants.mermaid_dialog_filter;
+const initial_source = windows_constants.initial_source;
+const menu_id_open = windows_constants.menu_id_open;
+const menu_id_save = windows_constants.menu_id_save;
+const menu_id_save_as = windows_constants.menu_id_save_as;
+const toolbar_id_reserved_1 = windows_constants.toolbar_id_reserved_1;
+const toolbar_id_reserved_2 = windows_constants.toolbar_id_reserved_2;
+const toolbar_id_reserved_3 = windows_constants.toolbar_id_reserved_3;
+const toolbar_slot_1_label = windows_constants.toolbar_slot_1_label;
+const toolbar_slot_2_label = windows_constants.toolbar_slot_2_label;
+const toolbar_slot_3_label = windows_constants.toolbar_slot_3_label;
+const Layout = windows_constants.Layout;
+const ViewAnchor = windows_constants.ViewAnchor;
 
-const menu_id_open: usize = 2001;
-const menu_id_save: usize = 2002;
-const menu_id_save_as: usize = 2003;
-const toolbar_id_reserved_1: usize = 2101;
-const toolbar_id_reserved_2: usize = 2102;
-const toolbar_id_reserved_3: usize = 2103;
-
-const toolbar_slot_1_label: [*:0]const u8 = "Slot 1";
-const toolbar_slot_2_label: [*:0]const u8 = "Slot 2";
-const toolbar_slot_3_label: [*:0]const u8 = "Slot 3";
-
-const Layout = struct {
-    padding: i32 = 12,
-    gutter: i32 = 12,
-    status_height: i32 = 22,
-    command_bar_height: i32 = 40,
-    command_button_width: i32 = 88,
-    toolbar_button_width: i32 = 76,
-    toolbar_inner_padding: i32 = 6,
-    min_preview_width: i32 = 420,
-    min_editor_width: i32 = 560,
-    min_content_height: i32 = 320,
-    min_command_width: i32 = 220,
-    left_ratio_num: i32 = 3,
-    left_ratio_den: i32 = 5,
-};
-
-const ViewAnchor = struct {
-    x: i32,
-    y: i32,
-};
-
-const ChildWindows = struct {
-    preview: ?foundation.HWND = null,
-    editor: ?foundation.HWND = null,
-    toolbar: ?foundation.HWND = null,
-    command: ?foundation.HWND = null,
-    apply_button: ?foundation.HWND = null,
-    status: ?foundation.HWND = null,
-};
-
-const PreviewRenderer = struct {
-    factory: ?*d2d.ID2D1Factory = null,
-    write_factory: ?*dw.IDWriteFactory = null,
-    render_target: ?*d2d.ID2D1HwndRenderTarget = null,
-    brush: ?*d2d.ID2D1SolidColorBrush = null,
-    zoom: f64 = 1.0,
-    scroll_x: i32 = 0,
-    scroll_y: i32 = 0,
-    is_dragging: bool = false,
-    drag_last_x: i32 = 0,
-    drag_last_y: i32 = 0,
-};
+const ChildWindows = windows_app_state.ChildWindows;
+const PreviewRenderer = windows_app_state.PreviewRenderer;
 
 const StudioColor = extern struct {
     r: u8,
@@ -151,6 +116,11 @@ const StudioNode = extern struct {
     label_color: StudioColor,
     label_font_size: f32,
     max_text_width: f64,
+    subtitle: [*c]const u8,
+    attributes_text: [*c]const u8,
+    methods_text: [*c]const u8,
+    body_fill: StudioColor,
+    body_text_color: StudioColor,
 };
 
 const StudioEdge = extern struct {
@@ -198,127 +168,32 @@ var current_status_message: ?[]u8 = null;
 var is_document_dirty = false;
 var suppress_editor_change = false;
 
-const EditorTheme = struct {
-    background: u32,
-    default_text: u32,
-    keyword_text: u32,
-    direction_text: u32,
-    comment_text: u32,
-    string_text: u32,
-    symbol_text: u32,
-    identifier_text: u32,
-    error_background: u32,
-};
+const EditorTheme = windows_editor.EditorTheme;
+const EditorTokenStyle = windows_editor.EditorTokenStyle;
+const editor_theme = windows_editor.editor_theme;
 
-const EditorTokenStyle = struct {
-    color: u32,
-    bold: bool,
-};
-
-const editor_theme = EditorTheme{
-    .background = 0x00f7f7f4,
-    .default_text = 0x00262b33,
-    .keyword_text = 0x00a33b1f,
-    .direction_text = 0x009f5a00,
-    .comment_text = 0x0080705f,
-    .string_text = 0x001f6fb2,
-    .symbol_text = 0x00584fbf,
-    .identifier_text = 0x00262b33,
-    .error_background = 0x00e6f0ff,
-};
-
-fn setPosFlagsBits(flags: ui.SET_WINDOW_POS_FLAGS) u32 {
-    return @bitCast(flags);
-}
-
-fn redrawFlagsBits(flags: gdi.REDRAW_WINDOW_FLAGS) u32 {
-    return @bitCast(flags);
-}
-
-fn makeRedrawFlags(bits: u32) gdi.REDRAW_WINDOW_FLAGS {
-    return @bitCast(bits);
-}
-
-const empty_c_string: [1]u8 = .{0};
-const font_family_name_w = [_:0]u16{ 'L', 'a', 't', 'o' };
-const locale_name_w = [_:0]u16{ 'e', 'n', '-', 'U', 'S' };
-
-fn styleBits(style: ui.WINDOW_STYLE) u32 {
-    return @bitCast(style);
-}
-
-fn exStyleBits(style: ui.WINDOW_EX_STYLE) u32 {
-    return @bitCast(style);
-}
-
-fn makeStyle(bits: u32) ui.WINDOW_STYLE {
-    return @bitCast(bits);
-}
-
-fn makeExStyle(bits: u32) ui.WINDOW_EX_STYLE {
-    return @bitCast(bits);
-}
-
-fn scrollMaskBits(mask: ui.SCROLLINFO_MASK) u32 {
-    return @bitCast(mask);
-}
-
-fn makeScrollMask(bits: u32) ui.SCROLLINFO_MASK {
-    return @bitCast(bits);
-}
-
-fn hrFailed(hr: foundation.HRESULT) bool {
-    return hr < 0;
-}
-
-fn dupeSentinel(allocator: std.mem.Allocator, bytes: []const u8) ![:0]u8 {
-    const out = try allocator.allocSentinel(u8, bytes.len, 0);
-    @memcpy(out[0..bytes.len], bytes);
-    return out;
-}
-
-fn fileExistsAbsolute(path: []const u8) bool {
-    const file = std.fs.openFileAbsolute(path, .{}) catch return false;
-    file.close();
-    return true;
-}
-
-fn resolveRepoPathZ(allocator: std.mem.Allocator, relative_path: []const u8) ![:0]u8 {
-    var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_dir = try std.fs.selfExeDirPath(&exe_dir_buf);
-    const prefixes = [_][]const u8{ "/../../", "/../", "/" };
-
-    for (prefixes) |prefix| {
-        const candidate = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ exe_dir, prefix, relative_path });
-        defer allocator.free(candidate);
-        if (fileExistsAbsolute(candidate)) {
-            return dupeSentinel(allocator, candidate);
-        }
-    }
-
-    return error.FileNotFound;
-}
-
-fn releaseUnknown(ptr: anytype) void {
-    if (ptr.*) |value| {
-        _ = value.IUnknown.Release();
-        ptr.* = null;
-    }
-}
-
-fn fileDialogFlagBits(flags: dialogs.OPEN_FILENAME_FLAGS) u32 {
-    return @bitCast(flags);
-}
-
-fn makeFileDialogFlags(bits: u32) dialogs.OPEN_FILENAME_FLAGS {
-    return @bitCast(bits);
-}
+const empty_c_string = windows_constants.empty_c_string;
+const font_family_name_w = windows_constants.font_family_name_w;
+const locale_name_w = windows_constants.locale_name_w;
+const setPosFlagsBits = windows_common.setPosFlagsBits;
+const redrawFlagsBits = windows_common.redrawFlagsBits;
+const makeRedrawFlags = windows_common.makeRedrawFlags;
+const styleBits = windows_common.styleBits;
+const exStyleBits = windows_common.exStyleBits;
+const makeStyle = windows_common.makeStyle;
+const makeExStyle = windows_common.makeExStyle;
+const scrollMaskBits = windows_common.scrollMaskBits;
+const makeScrollMask = windows_common.makeScrollMask;
+const hrFailed = windows_common.hrFailed;
+const dupeSentinel = windows_common.dupeSentinel;
+const fileExistsAbsolute = windows_common.fileExistsAbsolute;
+const resolveRepoPathZ = windows_common.resolveRepoPathZ;
+const releaseUnknown = windows_common.releaseUnknown;
+const fileDialogFlagBits = windows_common.fileDialogFlagBits;
+const makeFileDialogFlags = windows_common.makeFileDialogFlags;
 
 fn freeCurrentDocumentPath() void {
-    if (current_document_path) |path| {
-        c_allocator.free(path);
-        current_document_path = null;
-    }
+    windows_document.freeCurrentDocumentPath(c_allocator, &current_document_path);
 }
 
 fn freeCurrentStatusMessage() void {
@@ -351,70 +226,23 @@ fn unregisterPreviewFont() void {
 }
 
 fn ensureRichEditLibrary() bool {
-    if (rich_edit_module != null) return true;
-    rich_edit_module = loader.LoadLibraryA("Riched20.dll");
-    return rich_edit_module != null;
+    return windows_editor.ensureRichEditLibrary(&rich_edit_module);
 }
 
 fn releaseEditorFont() void {
-    if (editor_font) |font| {
-        _ = gdi.DeleteObject(font);
-        editor_font = null;
-    }
+    windows_editor.releaseEditorFont(&editor_font);
 }
 
 fn releaseShellFont() void {
-    if (shell_font) |font| {
-        _ = gdi.DeleteObject(font);
-        shell_font = null;
-    }
-    if (status_font) |font| {
-        _ = gdi.DeleteObject(font);
-        status_font = null;
-    }
+    windows_dpi.releaseShellFont(&shell_font, &status_font);
 }
 
 fn ensureEditorFont() ?gdi.HFONT {
-    if (editor_font != null) return editor_font;
-
-    editor_font = gdi.CreateFontA(
-        -20,
-        0,
-        0,
-        0,
-        400,
-        0,
-        0,
-        0,
-        0,
-        gdi.OUT_DEFAULT_PRECIS,
-        gdi.CLIP_DEFAULT_PRECIS,
-        gdi.CLEARTYPE_QUALITY,
-        @enumFromInt(0),
-        "Consolas",
-    );
-    return editor_font;
+    return windows_editor.ensureEditorFont(&editor_font);
 }
 
 fn ensureShellFont() ?gdi.HFONT {
-    if (shell_font != null) return shell_font;
-
-    var metrics = std.mem.zeroes(ui.NONCLIENTMETRICSA);
-    metrics.cbSize = @sizeOf(ui.NONCLIENTMETRICSA);
-    if (ui.SystemParametersInfoA(ui.SPI_GETNONCLIENTMETRICS, metrics.cbSize, @ptrCast(&metrics), .{}) == 0) {
-        return null;
-    }
-
-    var toolbar_logfont = metrics.lfMenuFont;
-    if (toolbar_logfont.lfHeight < 0) {
-        toolbar_logfont.lfHeight += 1;
-    } else if (toolbar_logfont.lfHeight > 0) {
-        toolbar_logfont.lfHeight -= 1;
-    }
-
-    shell_font = gdi.CreateFontIndirectA(&toolbar_logfont);
-    status_font = gdi.CreateFontIndirectA(&metrics.lfStatusFont);
-    return shell_font;
+    return windows_dpi.ensureShellFont(&shell_font, &status_font);
 }
 
 fn sendEditorMessage(message: u32, w_param: usize, l_param: isize) foundation.LRESULT {
@@ -475,166 +303,51 @@ fn applyEditorBaseStyle() void {
 }
 
 fn applyEditorSyntaxHighlight(text: []const u8, syntax_ok: bool) void {
-    _ = text;
-    if (child_windows.editor == null) return;
-    _ = sendEditorMessage(rich_edit.EM_HIDESELECTION, 1, 0);
-    _ = sendEditorMessage(rich_edit.EM_SETBKGNDCOLOR, 0, @intCast(if (syntax_ok) editor_theme.background else editor_theme.error_background));
-    applyEditorBaseStyle();
+    windows_editor.applyEditorSyntaxHighlight(child_windows.editor, text, syntax_ok);
 }
 
 fn configureEditorControl() void {
-    if (child_windows.editor == null) return;
-    if (ensureEditorFont()) |font| {
-        _ = ui.SendMessageA(child_windows.editor, ui.WM_SETFONT, @intFromPtr(font), 1);
-    }
+    windows_editor.configureEditorControl(child_windows.editor, &editor_font);
 }
 
 fn configureShellFonts() void {
-    const toolbar_font = ensureShellFont() orelse return;
-    if (child_windows.toolbar) |toolbar| {
-        _ = ui.SendMessageA(toolbar, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
-    }
-    if (child_windows.status) |status| {
-        _ = ui.SendMessageA(status, ui.WM_SETFONT, @intFromPtr(status_font orelse toolbar_font), 1);
-    }
-    if (child_windows.apply_button) |apply_button| {
-        _ = ui.SendMessageA(apply_button, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
-    }
-    if (child_windows.command) |command| {
-        _ = ui.SendMessageA(command, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
-    }
+    windows_dpi.configureShellFonts(child_windows, &shell_font, &status_font);
 }
 
 fn initializeToolbarControl() void {
-    const toolbar = child_windows.toolbar orelse return;
-    const layout = Layout{};
-
-    _ = ui.SendMessageA(toolbar, controls.TB_BUTTONSTRUCTSIZE, @sizeOf(controls.TBBUTTON), 0);
-    _ = ui.SendMessageA(
-        toolbar,
-        controls.TB_SETBUTTONSIZE,
-        0,
-        (@as(isize, layout.command_bar_height - 6) << 16) | @as(isize, layout.toolbar_button_width),
-    );
-
-    var buttons = [_]controls.TBBUTTON{
-        .{
-            .iBitmap = controls.I_IMAGENONE,
-            .idCommand = @intCast(toolbar_id_reserved_1),
-            .fsState = @intCast(controls.TBSTATE_ENABLED),
-            .fsStyle = @intCast(controls.BTNS_BUTTON | controls.BTNS_SHOWTEXT),
-            .bReserved = std.mem.zeroes(@FieldType(controls.TBBUTTON, "bReserved")),
-            .dwData = 0,
-            .iString = @bitCast(@intFromPtr(toolbar_slot_1_label)),
-        },
-        .{
-            .iBitmap = controls.I_IMAGENONE,
-            .idCommand = @intCast(toolbar_id_reserved_2),
-            .fsState = @intCast(controls.TBSTATE_ENABLED),
-            .fsStyle = @intCast(controls.BTNS_BUTTON | controls.BTNS_SHOWTEXT),
-            .bReserved = std.mem.zeroes(@FieldType(controls.TBBUTTON, "bReserved")),
-            .dwData = 0,
-            .iString = @bitCast(@intFromPtr(toolbar_slot_2_label)),
-        },
-        .{
-            .iBitmap = controls.I_IMAGENONE,
-            .idCommand = @intCast(toolbar_id_reserved_3),
-            .fsState = @intCast(controls.TBSTATE_ENABLED),
-            .fsStyle = @intCast(controls.BTNS_BUTTON | controls.BTNS_SHOWTEXT),
-            .bReserved = std.mem.zeroes(@FieldType(controls.TBBUTTON, "bReserved")),
-            .dwData = 0,
-            .iString = @bitCast(@intFromPtr(toolbar_slot_3_label)),
-        },
-    };
-
-    _ = ui.SendMessageA(toolbar, controls.TB_ADDBUTTONSA, buttons.len, @bitCast(@intFromPtr(&buttons[0])));
-    _ = ui.SendMessageA(toolbar, controls.TB_AUTOSIZE, 0, 0);
+    windows_toolbar.initializeToolbarControl(child_windows.toolbar);
 }
 
 fn setCurrentDocumentPath(path: ?[]const u8) void {
-    freeCurrentDocumentPath();
-    if (path) |value| {
-        current_document_path = c_allocator.dupe(u8, value) catch null;
-    }
-    updateWindowTitle();
+    windows_document.setCurrentDocumentPath(c_allocator, &current_document_path, path, main_window, is_document_dirty);
 }
 
 fn setDocumentDirty(dirty: bool) void {
-    is_document_dirty = dirty;
-    updateWindowTitle();
+    windows_document.setDocumentDirty(c_allocator, &is_document_dirty, dirty, main_window, current_document_path);
 }
 
 fn updateWindowTitle() void {
-    const base_name = if (current_document_path) |path| std.fs.path.basename(path) else "Untitled";
-    const title_text = std.fmt.allocPrint(
-        c_allocator,
-        "Merrow Studio (Windows Scaffold) - {s}{s}",
-        .{ base_name, if (is_document_dirty) " *" else "" },
-    ) catch return;
-    defer c_allocator.free(title_text);
-    setWindowText(main_window, title_text);
+    windows_document.updateWindowTitle(c_allocator, main_window, current_document_path, is_document_dirty);
 }
 
 fn setEditorText(text: []const u8) void {
-    suppress_editor_change = true;
-    defer suppress_editor_change = false;
-    setWindowText(child_windows.editor, text);
-}
-
-fn appendMenuItem(menu: ?ui.HMENU, flags: ui.MENU_ITEM_FLAGS, item_id: usize, text: ?[*:0]const u8) bool {
-    return ui.AppendMenuA(menu, flags, item_id, text) != 0;
+    windows_editor.setEditorText(c_allocator, child_windows.editor, &suppress_editor_change, text);
 }
 
 fn installMenuBar(hwnd: ?foundation.HWND) bool {
-    const main_menu = ui.CreateMenu() orelse return false;
-    const file_menu = ui.CreatePopupMenu() orelse return false;
-
-    if (!appendMenuItem(file_menu, ui.MF_STRING, menu_id_open, menu_open_label)) return false;
-    if (!appendMenuItem(file_menu, ui.MF_STRING, menu_id_save, menu_save_label)) return false;
-    if (!appendMenuItem(file_menu, ui.MF_STRING, menu_id_save_as, menu_save_as_label)) return false;
-    if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(file_menu), file_menu_label)) return false;
-    if (ui.SetMenu(hwnd, main_menu) == 0) return false;
-    _ = ui.DrawMenuBar(hwnd);
-    return true;
+    return windows_toolbar.installMenuBar(hwnd);
 }
 
 fn chooseDocumentPath(save: bool) ?[]u8 {
-    var path_buffer = [_]u8{0} ** 1024;
-    if (current_document_path) |path| {
-        const copy_len = @min(path.len, path_buffer.len - 1);
-        @memcpy(path_buffer[0..copy_len], path[0..copy_len]);
-        path_buffer[copy_len] = 0;
-    }
-
-    var dialog = std.mem.zeroes(dialogs.OPENFILENAMEA);
-    dialog.lStructSize = @sizeOf(dialogs.OPENFILENAMEA);
-    dialog.hwndOwner = main_window;
-    dialog.lpstrFilter = mermaid_dialog_filter;
-    dialog.lpstrFile = @ptrCast(path_buffer[0..].ptr);
-    dialog.nMaxFile = path_buffer.len;
-    dialog.lpstrTitle = if (save) save_dialog_title else open_dialog_title;
-    dialog.lpstrDefExt = default_extension;
-    dialog.Flags = makeFileDialogFlags(
-        fileDialogFlagBits(dialogs.OFN_PATHMUSTEXIST) |
-            if (save) fileDialogFlagBits(dialogs.OFN_OVERWRITEPROMPT) else fileDialogFlagBits(dialogs.OFN_FILEMUSTEXIST),
-    );
-
-    const ok = if (save) dialogs.GetSaveFileNameA(&dialog) else dialogs.GetOpenFileNameA(&dialog);
-    if (ok == 0) return null;
-    const selected = std.mem.sliceTo(&path_buffer, 0);
-    return c_allocator.dupe(u8, selected) catch null;
+    return windows_document.chooseDocumentPath(c_allocator, main_window, current_document_path, save);
 }
 
 fn loadSourceFromPath(path: []const u8) ![]u8 {
-    const file = try std.fs.openFileAbsolute(path, .{});
-    defer file.close();
-    return file.readToEndAlloc(c_allocator, 16 * 1024 * 1024);
+    return windows_document.loadSourceFromPath(c_allocator, path);
 }
 
 fn saveSourceToPath(path: []const u8, source: []const u8) !void {
-    const file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(source);
+    return windows_document.saveSourceToPath(path, source);
 }
 
 fn openDocumentFromDialog() void {
@@ -1175,6 +888,140 @@ fn drawSceneToPreview(hwnd: ?foundation.HWND) void {
             const horizontal_text_padding = 10.0;
             const vertical_text_padding = 12.0;
 
+            if (node.shape == 12) {
+                const annotation_lines = countSceneTextLines(node.subtitle);
+                const member_lines = countSceneTextLines(node.attributes_text);
+                const method_lines = countSceneTextLines(node.methods_text);
+                const line_height = @max(22.0 * scale, @as(f64, node.label_font_size) * @as(f64, @floatCast(scale)) * 1.25);
+                const section_pad = 8.0 * scale;
+                const header_lines = 1 + annotation_lines;
+                const header_height = @max(26.0 * scale, @as(f64, @floatFromInt(header_lines)) * line_height + section_pad * 2.0);
+                const attrs_height = if (member_lines > 0)
+                    @as(f64, @floatFromInt(member_lines)) * line_height + section_pad * 2.0
+                else
+                    section_pad * 2.0;
+                const methods_height = if (method_lines > 0)
+                    @as(f64, @floatFromInt(method_lines)) * line_height + section_pad * 2.0
+                else
+                    section_pad * 2.0;
+                const minimum_total_height = header_height + attrs_height + methods_height;
+                const extra_height = @max(0.0, (@as(f64, rect.bottom) - @as(f64, rect.top)) - minimum_total_height);
+                const attrs_rect_height = attrs_height + extra_height * 0.35;
+                const methods_rect_height = methods_height + extra_height * 0.65;
+
+                var header_rect = d2d_common.D2D_RECT_F{
+                    .left = rect.left,
+                    .top = rect.top,
+                    .right = rect.right,
+                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, rect.top) + header_height)),
+                };
+                var attrs_rect = d2d_common.D2D_RECT_F{
+                    .left = rect.left,
+                    .top = header_rect.bottom,
+                    .right = rect.right,
+                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, header_rect.bottom) + attrs_rect_height)),
+                };
+                var methods_rect = d2d_common.D2D_RECT_F{
+                    .left = rect.left,
+                    .top = attrs_rect.bottom,
+                    .right = rect.right,
+                    .bottom = @floatCast(@min(@as(f64, rect.bottom), @as(f64, attrs_rect.bottom) + methods_rect_height)),
+                };
+                methods_rect.bottom = rect.bottom;
+
+                setBrushColor(node.fill);
+                render_target.ID2D1RenderTarget.FillRectangle(&header_rect, brush);
+                setBrushColor(node.body_fill);
+                render_target.ID2D1RenderTarget.FillRectangle(&attrs_rect, brush);
+                render_target.ID2D1RenderTarget.FillRectangle(&methods_rect, brush);
+                setBrushColor(node.stroke);
+                var mutable_rect = rect;
+                const stroke_width = @max(1.0, node.stroke_width * @as(f32, @floatCast(scale)));
+                render_target.ID2D1RenderTarget.DrawRectangle(&mutable_rect, brush, stroke_width, null);
+                render_target.ID2D1RenderTarget.DrawLine(
+                    .{ .x = rect.left, .y = header_rect.bottom },
+                    .{ .x = rect.right, .y = header_rect.bottom },
+                    brush,
+                    stroke_width,
+                    null,
+                );
+                render_target.ID2D1RenderTarget.DrawLine(
+                    .{ .x = rect.left, .y = attrs_rect.bottom },
+                    .{ .x = rect.right, .y = attrs_rect.bottom },
+                    brush,
+                    stroke_width,
+                    null,
+                );
+
+                const header_text_rect = insetSceneRect(header_rect, 10.0 * scale, 8.0 * scale);
+                const attrs_text_rect = d2d_common.D2D_RECT_F{
+                    .left = @floatCast(@as(f64, attrs_rect.left) + 10.0 * scale),
+                    .top = @floatCast(@as(f64, attrs_rect.top) + 8.0 * scale),
+                    .right = @floatCast(@max(@as(f64, attrs_rect.left) + 11.0 * scale, @as(f64, attrs_rect.right) - 10.0 * scale)),
+                    .bottom = @floatCast(@max(@as(f64, attrs_rect.top) + 10.0 * scale, @as(f64, attrs_rect.bottom) - 3.0 * scale)),
+                };
+                const methods_text_rect = d2d_common.D2D_RECT_F{
+                    .left = @floatCast(@as(f64, methods_rect.left) + 10.0 * scale),
+                    .top = @floatCast(@as(f64, methods_rect.top) + 8.0 * scale),
+                    .right = @floatCast(@max(@as(f64, methods_rect.left) + 11.0 * scale, @as(f64, methods_rect.right) - 10.0 * scale)),
+                    .bottom = @floatCast(@max(@as(f64, methods_rect.top) + 10.0 * scale, @as(f64, methods_rect.bottom) - 3.0 * scale)),
+                };
+
+                drawSceneText(
+                    &render_target.ID2D1RenderTarget,
+                    node.subtitle,
+                    @max(9.0, (node.label_font_size - 2.0) * @as(f32, @floatCast(scale))),
+                    node.label_color,
+                    d2d_common.D2D_RECT_F{
+                        .left = header_text_rect.left,
+                        .top = header_text_rect.top,
+                        .right = header_text_rect.right,
+                        .bottom = @floatCast(@min(@as(f64, header_text_rect.bottom), @as(f64, header_text_rect.top) + @as(f64, @floatFromInt(annotation_lines)) * line_height + section_pad)),
+                    },
+                    dw.DWRITE_TEXT_ALIGNMENT_CENTER,
+                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+                );
+
+                const name_top = if (annotation_lines > 0)
+                    header_text_rect.top + @as(f32, @floatCast(@as(f64, @floatFromInt(annotation_lines)) * line_height))
+                else
+                    header_text_rect.top + @as(f32, @floatCast(section_pad * 0.25));
+                drawSceneText(
+                    &render_target.ID2D1RenderTarget,
+                    node.label,
+                    @max(10.0, node.label_font_size * @as(f32, @floatCast(scale))),
+                    node.label_color,
+                    d2d_common.D2D_RECT_F{
+                        .left = header_text_rect.left,
+                        .top = name_top,
+                        .right = header_text_rect.right,
+                        .bottom = header_text_rect.bottom,
+                    },
+                    dw.DWRITE_TEXT_ALIGNMENT_CENTER,
+                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+                );
+
+                drawSceneText(
+                    &render_target.ID2D1RenderTarget,
+                    node.attributes_text,
+                    @max(9.0, (node.label_font_size - 1.0) * @as(f32, @floatCast(scale))),
+                    node.body_text_color,
+                    attrs_text_rect,
+                    dw.DWRITE_TEXT_ALIGNMENT_LEADING,
+                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+                );
+                drawSceneText(
+                    &render_target.ID2D1RenderTarget,
+                    node.methods_text,
+                    @max(9.0, (node.label_font_size - 1.0) * @as(f32, @floatCast(scale))),
+                    node.body_text_color,
+                    methods_text_rect,
+                    dw.DWRITE_TEXT_ALIGNMENT_LEADING,
+                    dw.DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+                );
+                continue;
+            }
+
             switch (node.shape) {
                 1, 5, 6 => {
                     var rounded_rect = d2d.D2D1_ROUNDED_RECT{
@@ -1259,6 +1106,27 @@ fn drawSceneToPreview(hwnd: ?foundation.HWND) void {
     }
 
     _ = render_target.ID2D1RenderTarget.EndDraw(null, null);
+}
+
+fn countSceneTextLines(text_ptr: [*c]const u8) usize {
+    if (text_ptr == null) return 0;
+    const text = std.mem.sliceTo(text_ptr, 0);
+    if (text.len == 0) return 0;
+
+    var count: usize = 1;
+    for (text) |ch| {
+        if (ch == '\n') count += 1;
+    }
+    return count;
+}
+
+fn insetSceneRect(rect: d2d_common.D2D_RECT_F, inset_x: f64, inset_y: f64) d2d_common.D2D_RECT_F {
+    return .{
+        .left = @floatCast(@as(f64, rect.left) + inset_x),
+        .top = @floatCast(@as(f64, rect.top) + inset_y),
+        .right = @floatCast(@max(@as(f64, rect.left) + inset_x + 1.0, @as(f64, rect.right) - inset_x)),
+        .bottom = @floatCast(@max(@as(f64, rect.top) + inset_y + 1.0, @as(f64, rect.bottom) - inset_y)),
+    };
 }
 
 fn drawSceneText(
@@ -1574,59 +1442,7 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
 }
 
 fn layoutChildWindows(hwnd: ?foundation.HWND) void {
-    if (child_windows.preview == null or child_windows.editor == null or child_windows.toolbar == null or child_windows.command == null or child_windows.apply_button == null or child_windows.status == null) return;
-
-    var rect = std.mem.zeroes(foundation.RECT);
-    if (ui.GetClientRect(hwnd, &rect) == 0) return;
-
-    const layout = Layout{};
-    const client_width = rect.right - rect.left;
-    const client_height = rect.bottom - rect.top;
-    if (client_width <= 0 or client_height <= 0) return;
-
-    const status_y = client_height - layout.status_height;
-    const content_top = layout.padding;
-    const content_height = status_y - content_top - layout.gutter;
-    if (content_height <= 0) return;
-
-    const content_width = client_width - (layout.padding * 2);
-    if (content_width <= layout.gutter) return;
-
-    const split_width = content_width - layout.gutter;
-    if (split_width < layout.min_preview_width + layout.min_editor_width) return;
-
-    const preferred_preview_width = @divTrunc(content_width * layout.left_ratio_num, layout.left_ratio_den) - @divTrunc(layout.gutter, 2);
-    const preview_width = std.math.clamp(preferred_preview_width, layout.min_preview_width, split_width - layout.min_editor_width);
-    const editor_width = split_width - preview_width;
-    const editor_x = layout.padding + preview_width + layout.gutter;
-    const toolbar_y = content_top;
-    const editor_y = toolbar_y + layout.command_bar_height + layout.gutter;
-    const editor_height = content_height - layout.command_bar_height - layout.gutter;
-    const reserved_width = layout.toolbar_button_width * 3;
-    const toolbar_width = reserved_width;
-    const apply_x = editor_x + toolbar_width + layout.gutter;
-    const command_x = apply_x + layout.command_button_width + layout.gutter;
-    const command_width = @max(layout.min_command_width, editor_x + editor_width - command_x - layout.toolbar_inner_padding);
-    const band_child_y = toolbar_y + 2;
-    const band_child_height = layout.command_bar_height - 4;
-
-    const defer_flags = @as(u32, setPosFlagsBits(ui.SWP_NOZORDER)) | @as(u32, setPosFlagsBits(ui.SWP_NOACTIVATE)) | @as(u32, setPosFlagsBits(ui.SWP_NOREDRAW));
-    var dwp = ui.BeginDeferWindowPos(6);
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.preview, null, layout.padding, content_top, preview_width, content_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.toolbar, null, editor_x, toolbar_y, toolbar_width, layout.command_bar_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.apply_button, null, apply_x, band_child_y, layout.command_button_width, band_child_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.command, null, command_x, band_child_y, command_width, band_child_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.editor, null, editor_x, editor_y, editor_width, editor_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    dwp = ui.DeferWindowPos(dwp, child_windows.status, null, 0, status_y, client_width, layout.status_height, @bitCast(defer_flags));
-    if (dwp == 0) return;
-    _ = ui.EndDeferWindowPos(dwp);
-    updateStatusBarParts(client_width);
+    windows_layout.applyChildLayout(hwnd, child_windows);
 }
 
 fn setWindowText(hwnd: ?foundation.HWND, text: []const u8) void {
@@ -1637,31 +1453,19 @@ fn setWindowText(hwnd: ?foundation.HWND, text: []const u8) void {
 }
 
 fn setStatusBarPartText(part: usize, text: []const u8) void {
-    const hwnd = child_windows.status orelse return;
-    const z_text = c_allocator.allocSentinel(u8, text.len, 0) catch return;
-    defer c_allocator.free(z_text);
-    @memcpy(z_text[0..text.len], text);
-    _ = ui.SendMessageA(hwnd, controls.SB_SETTEXTA, part, @bitCast(@intFromPtr(z_text.ptr)));
+    windows_status_bar.setStatusBarPartText(c_allocator, child_windows.status, part, text);
 }
 
 fn updateStatusBarParts(total_width: i32) void {
-    const hwnd = child_windows.status orelse return;
-    var parts = [_]i32{ @max(0, total_width - 116), -1 };
-    _ = ui.SendMessageA(hwnd, controls.SB_SETPARTS, parts.len, @bitCast(@intFromPtr(&parts)));
+    windows_status_bar.updateStatusBarParts(child_windows.status, total_width);
 }
 
-fn minimumClientSize() struct { width: i32, height: i32 } {
-    const layout = Layout{};
-    const min_width = layout.padding * 2 + layout.gutter + layout.min_preview_width + layout.min_editor_width;
-    const min_height = layout.padding + layout.gutter + layout.command_bar_height + layout.gutter + layout.min_content_height + layout.status_height;
-    return .{ .width = min_width, .height = min_height };
+fn minimumClientSize() windows_constants.WindowSize {
+    return windows_layout.minimumClientSize();
 }
 
-fn minimumWindowTrackSize() struct { width: i32, height: i32 } {
-    const client = minimumClientSize();
-    var rect = foundation.RECT{ .left = 0, .top = 0, .right = client.width, .bottom = client.height };
-    _ = ui.AdjustWindowRectEx(&rect, makeStyle(styleBits(ui.WS_OVERLAPPEDWINDOW) | styleBits(ui.WS_CLIPCHILDREN)), 1, .{});
-    return .{ .width = rect.right - rect.left, .height = rect.bottom - rect.top };
+fn minimumWindowTrackSize() windows_constants.WindowSize {
+    return windows_layout.minimumWindowTrackSize();
 }
 
 fn paintMainBackground(hdc: gdi.HDC, rect: *const foundation.RECT) void {
@@ -1671,13 +1475,7 @@ fn paintMainBackground(hdc: gdi.HDC, rect: *const foundation.RECT) void {
 }
 
 fn refreshStatusDisplay() void {
-    if (child_windows.status == null) return;
-    const base = current_status_message orelse status_placeholder[0..std.mem.len(status_placeholder)];
-    const zoom_pct: i32 = @intFromFloat(@round(preview_renderer.zoom * 100.0));
-    const zoom_text = std.fmt.allocPrint(c_allocator, "Zoom {d}%", .{zoom_pct}) catch return;
-    defer c_allocator.free(zoom_text);
-    setStatusBarPartText(0, base);
-    setStatusBarPartText(1, zoom_text);
+    windows_status_bar.refreshStatusDisplay(c_allocator, child_windows.status, current_status_message, preview_renderer.zoom);
 }
 
 fn setStatusMessage(text: []const u8) void {
@@ -1687,19 +1485,11 @@ fn setStatusMessage(text: []const u8) void {
 }
 
 fn getWindowText(allocator: std.mem.Allocator, hwnd: ?foundation.HWND) ![:0]u8 {
-    const handle = hwnd orelse return error.WindowNotReady;
-    const text_len = ui.GetWindowTextLengthA(handle);
-    const safe_len: usize = if (text_len > 0) @intCast(text_len) else 0;
-    const buffer = try allocator.allocSentinel(u8, safe_len, 0);
-    errdefer allocator.free(buffer);
-
-    const copied_len = ui.GetWindowTextA(handle, buffer.ptr, @intCast(buffer.len + 1));
-    if (copied_len < 0) return error.Unexpected;
-    return buffer;
+    return windows_editor.getWindowText(allocator, hwnd);
 }
 
 fn getEditorText(allocator: std.mem.Allocator) ![:0]u8 {
-    return getWindowText(allocator, child_windows.editor);
+    return windows_editor.getEditorText(allocator, child_windows.editor);
 }
 
 fn updateEditorDerivedState() void {
