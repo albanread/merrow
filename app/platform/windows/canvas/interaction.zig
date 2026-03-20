@@ -127,6 +127,12 @@ fn updateHover(canvas: *CanvasState, screen_x: i32, screen_y: i32) bool {
     return prev.kind != canvas.hover.kind or prev.index != canvas.hover.index;
 }
 
+pub fn onMouseLeave(canvas: *CanvasState) InteractionResult {
+    var result = InteractionResult{};
+    clearHover(canvas, &result);
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // WM_LBUTTONDOWN
 // ---------------------------------------------------------------------------

@@ -19,6 +19,10 @@ pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save_as, constants.menu_save_as_label)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(file_menu), constants.file_menu_label)) return false;
 
+    const settings_menu = ui.CreatePopupMenu() orelse return false;
+    if (!appendMenuItem(settings_menu, ui.MF_STRING, constants.menu_id_font_settings, constants.menu_font_settings_label)) return false;
+    if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(settings_menu), constants.settings_menu_label)) return false;
+
     const view_menu = ui.CreatePopupMenu() orelse return false;
     if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_mermaid, constants.menu_label_mode_mermaid)) return false;
     if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_freeform, constants.menu_label_mode_freeform)) return false;

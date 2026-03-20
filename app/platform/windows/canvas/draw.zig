@@ -2,6 +2,7 @@
 /// Renders nodes, subgraphs, edges, labels, selection outlines, and resize handles.
 const std = @import("std");
 const win32 = @import("win32");
+const project_settings = @import("../project_settings.zig");
 const state = @import("state.zig");
 const hit_test = @import("hit_test.zig");
 
@@ -19,6 +20,14 @@ const Viewport = state.Viewport;
 const Selection = state.Selection;
 const SelectionKind = state.SelectionKind;
 const HandlePos = state.HandlePos;
+const d2d_factory_type = d2d.ID2D1Factory;
+const FontFamily = project_settings.FontFamily;
+
+const font_family_lato_w = [_:0]u16{ 'L', 'a', 't', 'o' };
+const font_family_segoe_ui_w = [_:0]u16{ 'S', 'e', 'g', 'o', 'e', ' ', 'U', 'I' };
+const font_family_arial_w = [_:0]u16{ 'A', 'r', 'i', 'a', 'l' };
+const font_family_consolas_w = [_:0]u16{ 'C', 'o', 'n', 's', 'o', 'l', 'a', 's' };
+const locale_name_w = [_:0]u16{ 'e', 'n', '-', 'U', 'S' };
 
 // ---------------------------------------------------------------------------
 // Color helpers
@@ -103,16 +112,58 @@ fn makeBrush(
 const Shape = enum(u32) {
     rectangle = 0,
     rounded_rectangle = 1,
-    parallelogram = 2,
-    diamond = 3,
-    stadium = 4, // pill / capsule
+    diamond = 2,
+    circle = 3,
+    hexagon = 4,
     cylinder = 5,
-    circle = 6,
+    stadium = 6, // pill / capsule
+    trapezoid = 7,
+    trapezoid_alt = 8,
+    parallelogram = 9,
+    parallelogram_alt = 10,
+    subroutine = 11,
     other = 0xffff_ffff,
     _,
 };
 
+fn drawClosedPolygon(
+    factory: *d2d_factory_type,
+    rt: *d2d.ID2D1RenderTarget,
+    points: []const d2d_common.D2D_POINT_2F,
+    fill_brush: *d2d.ID2D1SolidColorBrush,
+    stroke_brush: *d2d.ID2D1SolidColorBrush,
+    stroke_w: f32,
+) void {
+    if (points.len < 3) return;
+
+    var path_raw: *d2d.ID2D1PathGeometry = undefined;
+    if (factory.CreatePathGeometry(&path_raw) < 0) return;
+    const path_geometry: ?*d2d.ID2D1PathGeometry = path_raw;
+    defer {
+        if (path_geometry) |g| _ = g.IUnknown.Release();
+    }
+
+    var sink_raw: *d2d.ID2D1GeometrySink = undefined;
+    if (path_raw.Open(&sink_raw) < 0) return;
+    const sink: ?*d2d.ID2D1GeometrySink = sink_raw;
+    defer {
+        if (sink) |s| _ = s.IUnknown.Release();
+    }
+
+    sink.?.ID2D1SimplifiedGeometrySink.BeginFigure(points[0], d2d_common.D2D1_FIGURE_BEGIN_FILLED);
+    var idx: usize = 1;
+    while (idx < points.len) : (idx += 1) {
+        sink.?.AddLine(points[idx]);
+    }
+    sink.?.ID2D1SimplifiedGeometrySink.EndFigure(d2d_common.D2D1_FIGURE_END_CLOSED);
+    if (sink.?.ID2D1SimplifiedGeometrySink.Close() < 0) return;
+
+    rt.FillGeometry(@ptrCast(path_geometry), @ptrCast(fill_brush), null);
+    rt.DrawGeometry(@ptrCast(path_geometry), @ptrCast(stroke_brush), stroke_w, null);
+}
+
 fn drawNodeShape(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     fill_brush: *d2d.ID2D1SolidColorBrush,
     stroke_brush: *d2d.ID2D1SolidColorBrush,
@@ -134,14 +185,27 @@ fn drawNodeShape(
             rt.DrawEllipse(&el, @ptrCast(stroke_brush), stroke_w, null);
         },
         .diamond => {
-            // Draw a diamond as a rotated square approximated with 4 lines.
             const cx = (sr.l + sr.r) / 2.0;
             const cy = (sr.t + sr.b) / 2.0;
-            // Use a path geometry via 4 DrawLine calls.
-            rt.DrawLine(point2F(cx, sr.t), point2F(sr.r, cy), @ptrCast(stroke_brush), stroke_w, null);
-            rt.DrawLine(point2F(sr.r, cy), point2F(cx, sr.b), @ptrCast(stroke_brush), stroke_w, null);
-            rt.DrawLine(point2F(cx, sr.b), point2F(sr.l, cy), @ptrCast(stroke_brush), stroke_w, null);
-            rt.DrawLine(point2F(sr.l, cy), point2F(cx, sr.t), @ptrCast(stroke_brush), stroke_w, null);
+            const points = [_]d2d_common.D2D_POINT_2F{
+                point2F(cx, sr.t),
+                point2F(sr.r, cy),
+                point2F(cx, sr.b),
+                point2F(sr.l, cy),
+            };
+            drawClosedPolygon(factory, rt, &points, fill_brush, stroke_brush, stroke_w);
+        },
+        .hexagon => {
+            const inset = (sr.r - sr.l) * 0.22;
+            const points = [_]d2d_common.D2D_POINT_2F{
+                point2F(sr.l + inset, sr.t),
+                point2F(sr.r - inset, sr.t),
+                point2F(sr.r, (sr.t + sr.b) / 2.0),
+                point2F(sr.r - inset, sr.b),
+                point2F(sr.l + inset, sr.b),
+                point2F(sr.l, (sr.t + sr.b) / 2.0),
+            };
+            drawClosedPolygon(factory, rt, &points, fill_brush, stroke_brush, stroke_w);
         },
         .rounded_rectangle, .stadium => {
             const radius: f32 = if (shape == .stadium)
@@ -151,6 +215,63 @@ fn drawNodeShape(
             const rr = rounded_rect(sr.l, sr.t, sr.r, sr.b, radius);
             rt.FillRoundedRectangle(&rr, @ptrCast(fill_brush));
             rt.DrawRoundedRectangle(&rr, @ptrCast(stroke_brush), stroke_w, null);
+        },
+        .parallelogram, .parallelogram_alt => {
+            const inset = (sr.r - sr.l) * 0.18;
+            const points = if (shape == .parallelogram)
+                [_]d2d_common.D2D_POINT_2F{
+                    point2F(sr.l + inset, sr.t),
+                    point2F(sr.r, sr.t),
+                    point2F(sr.r - inset, sr.b),
+                    point2F(sr.l, sr.b),
+                }
+            else
+                [_]d2d_common.D2D_POINT_2F{
+                    point2F(sr.l, sr.t),
+                    point2F(sr.r - inset, sr.t),
+                    point2F(sr.r, sr.b),
+                    point2F(sr.l + inset, sr.b),
+                };
+            drawClosedPolygon(factory, rt, &points, fill_brush, stroke_brush, stroke_w);
+        },
+        .trapezoid, .trapezoid_alt => {
+            const inset = (sr.r - sr.l) * 0.18;
+            const points = if (shape == .trapezoid)
+                [_]d2d_common.D2D_POINT_2F{
+                    point2F(sr.l + inset, sr.t),
+                    point2F(sr.r - inset, sr.t),
+                    point2F(sr.r, sr.b),
+                    point2F(sr.l, sr.b),
+                }
+            else
+                [_]d2d_common.D2D_POINT_2F{
+                    point2F(sr.l, sr.t),
+                    point2F(sr.r, sr.t),
+                    point2F(sr.r - inset, sr.b),
+                    point2F(sr.l + inset, sr.b),
+                };
+            drawClosedPolygon(factory, rt, &points, fill_brush, stroke_brush, stroke_w);
+        },
+        .cylinder => {
+            const cap_h = @min((sr.b - sr.t) * 0.22, 18.0 * @as(f32, @floatCast(vp.zoom)));
+            const body = rectF(sr.l, sr.t + cap_h * 0.5, sr.r, sr.b - cap_h * 0.5);
+            const top = ellipseF((sr.l + sr.r) / 2.0, sr.t + cap_h * 0.5, (sr.r - sr.l) / 2.0, cap_h * 0.5);
+            const bottom = ellipseF((sr.l + sr.r) / 2.0, sr.b - cap_h * 0.5, (sr.r - sr.l) / 2.0, cap_h * 0.5);
+            rt.FillRectangle(&body, @ptrCast(fill_brush));
+            rt.FillEllipse(&top, @ptrCast(fill_brush));
+            rt.FillEllipse(&bottom, @ptrCast(fill_brush));
+            rt.DrawEllipse(&top, @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawEllipse(&bottom, @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(sr.l, sr.t + cap_h * 0.5), point2F(sr.l, sr.b - cap_h * 0.5), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(sr.r, sr.t + cap_h * 0.5), point2F(sr.r, sr.b - cap_h * 0.5), @ptrCast(stroke_brush), stroke_w, null);
+        },
+        .subroutine => {
+            const rc = rectF(sr.l, sr.t, sr.r, sr.b);
+            const inset = @max(8.0, (sr.r - sr.l) * 0.1);
+            rt.FillRectangle(&rc, @ptrCast(fill_brush));
+            rt.DrawRectangle(&rc, @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(sr.l + inset, sr.t), point2F(sr.l + inset, sr.b), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(sr.r - inset, sr.t), point2F(sr.r - inset, sr.b), @ptrCast(stroke_brush), stroke_w, null);
         },
         else => {
             // Default: rectangle.
@@ -168,6 +289,7 @@ fn drawNodeShape(
 fn drawLabel(
     rt: *d2d.ID2D1RenderTarget,
     dwrite_factory: *dwrite.IDWriteFactory,
+    font_family: FontFamily,
     text_brush: *d2d.ID2D1SolidColorBrush,
     text: [*c]const u8,
     font_size_pt: f32,
@@ -188,13 +310,13 @@ fn drawLabel(
 
     var format: ?*dwrite.IDWriteTextFormat = null;
     const hr = dwrite_factory.CreateTextFormat(
-        &[_:0]u16{ 'L', 'a', 't', 'o' },
+        fontFamilyNameW(font_family),
         null,
         dwrite.DWRITE_FONT_WEIGHT_NORMAL,
         dwrite.DWRITE_FONT_STYLE_NORMAL,
         dwrite.DWRITE_FONT_STRETCH_NORMAL,
         font_size_pt,
-        &[_:0]u16{ 'e', 'n', '-', 'U', 'S' },
+        &locale_name_w,
         @ptrCast(&format),
     );
     if (hr < 0 or format == null) return;
@@ -216,6 +338,15 @@ fn drawLabel(
         d2d.D2D1_DRAW_TEXT_OPTIONS_NONE,
         dwrite.DWRITE_MEASURING_MODE_NATURAL,
     );
+}
+
+fn fontFamilyNameW(family: FontFamily) [*:0]const u16 {
+    return switch (family) {
+        .lato => &font_family_lato_w,
+        .segoe_ui => &font_family_segoe_ui_w,
+        .arial => &font_family_arial_w,
+        .consolas => &font_family_consolas_w,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,13 +412,18 @@ fn drawPointHandle(
 
 fn drawEdge(
     rt: *d2d.ID2D1RenderTarget,
+    dwrite_factory: *dwrite.IDWriteFactory,
+    font_family: FontFamily,
     graph: *const StudioEditableGraph,
     edge: *const StudioEditableEdge,
     vp: Viewport,
     stroke_brush: *d2d.ID2D1SolidColorBrush,
+    label_fill_brush: *d2d.ID2D1SolidColorBrush,
+    text_brush: *d2d.ID2D1SolidColorBrush,
 ) void {
     const points = edgeScreenEndpoints(graph, edge, vp) orelse return;
-    drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0);
+    drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0, vp.zoom);
+    drawEdgeLabel(rt, dwrite_factory, font_family, edge, points, label_fill_brush, text_brush);
 }
 
 const EdgeScreenEndpoints = struct {
@@ -333,8 +469,10 @@ fn drawEdgeSegment(
     edge: *const StudioEditableEdge,
     stroke_brush: *d2d.ID2D1SolidColorBrush,
     stroke_scale: f32,
+    zoom: f64,
 ) void {
-    const stroke_w: f32 = @max(1.0, @as(f32, @floatCast(edge.thickness)) * stroke_scale);
+    const zoom_scale: f32 = @floatCast(@max(zoom, 0.25));
+    const stroke_w: f32 = @max(1.0, edge.thickness * zoom_scale * stroke_scale);
     rt.DrawLine(
         point2F(src_x, src_y),
         point2F(dst_x, dst_y),
@@ -367,6 +505,49 @@ fn drawEdgeSegment(
             stroke_w,
         );
     }
+}
+
+fn drawEdgeLabel(
+    rt: *d2d.ID2D1RenderTarget,
+    dwrite_factory: *dwrite.IDWriteFactory,
+    font_family: FontFamily,
+    edge: *const StudioEditableEdge,
+    points: EdgeScreenEndpoints,
+    label_fill_brush: *d2d.ID2D1SolidColorBrush,
+    text_brush: *d2d.ID2D1SolidColorBrush,
+) void {
+    if (edge.label == null) return;
+
+    const text = std.mem.trim(u8, std.mem.span(edge.label), " \t\r\n");
+    if (text.len == 0) return;
+
+    const dx = points.dst_x - points.src_x;
+    const dy = points.dst_y - points.src_y;
+    const seg_len = @sqrt(dx * dx + dy * dy);
+    if (seg_len < 1.0) return;
+
+    const nx = -dy / seg_len;
+    const ny = dx / seg_len;
+    const center_x = (points.src_x + points.dst_x) / 2.0 + nx * 12.0;
+    const center_y = (points.src_y + points.dst_y) / 2.0 + ny * 12.0;
+
+    const font_size: f32 = std.math.clamp(edge.label_font_size, 6.0, 48.0);
+    const text_w = @max(26.0, @as(f32, @floatFromInt(text.len)) * font_size * 0.56);
+    const text_h: f32 = font_size * 1.55;
+    const pad_x: f32 = 7.0;
+    const pad_y: f32 = 3.0;
+    const bg = rectF(
+        center_x - text_w / 2.0 - pad_x,
+        center_y - text_h / 2.0 - pad_y,
+        center_x + text_w / 2.0 + pad_x,
+        center_y + text_h / 2.0 + pad_y,
+    );
+
+    label_fill_brush.SetColor(&d2dColorRgba(255, 255, 255, 235));
+    rt.FillRectangle(&bg, @ptrCast(label_fill_brush));
+    text_brush.SetColor(&d2dColorRgb(32, 32, 32));
+
+    drawLabel(rt, dwrite_factory, font_family, text_brush, edge.label, font_size, center_x, center_y, text_w);
 }
 
 fn drawSelectionPass(
@@ -403,7 +584,7 @@ fn drawSelectionPass(
             const edge = &graph.edges[selection.index];
             const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse return;
             sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 220));
-            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.8);
+            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.8, vp.zoom);
             handle_fill_brush.SetColor(&d2dColorRgb(255, 255, 255));
             sel_brush.SetColor(&d2dColorRgb(0, 120, 215));
             drawPointHandle(rt, points.src_x, points.src_y, handle_fill_brush, sel_brush);
@@ -444,7 +625,7 @@ fn drawHoverPass(
             const edge = &graph.edges[hover.index];
             const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse return;
             hover_brush.SetColor(&d2dColorRgba(0, 120, 215, 150));
-            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), hover_brush, 1.35);
+            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), hover_brush, 1.35, vp.zoom);
         },
         else => {},
     }
@@ -500,8 +681,10 @@ fn findNodeOrSubgraphCentre(graph: *const StudioEditableGraph, id: [*c]const u8)
 // ---------------------------------------------------------------------------
 
 pub const DrawContext = struct {
+    d2d_factory: *d2d_factory_type,
     render_target: *d2d.ID2D1RenderTarget,
     dwrite_factory: *dwrite.IDWriteFactory,
+    font_family: FontFamily,
     viewport_width: f32,
     viewport_height: f32,
 };
@@ -571,7 +754,7 @@ pub fn drawCanvas(
             if (sg.title != null) {
                 tb.SetColor(&d2dColor(sg.title_color));
                 const title_s = vp.canvasToScreen(sg.title_x, sg.title_y);
-                drawLabel(rt, ctx.dwrite_factory, tb, sg.title, sg.title_font_size * @as(f32, @floatCast(vp.zoom)), @floatCast(title_s.x), @floatCast(title_s.y), sr.r - sr.l);
+                drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, sg.title, std.math.clamp(sg.title_font_size, 6.0, 48.0), @floatCast(title_s.x), @floatCast(title_s.y), sr.r - sr.l);
             }
         }
     }
@@ -584,7 +767,7 @@ pub fn drawCanvas(
             color.a = 1.0;
             sb.SetColor(&color);
             _ = idx;
-            drawEdge(rt, graph, edge, vp, sb);
+            drawEdge(rt, ctx.dwrite_factory, ctx.font_family, graph, edge, vp, sb, fb, tb);
         }
     }
 
@@ -594,14 +777,14 @@ pub fn drawCanvas(
         for (nodes, 0..) |*node, idx| {
             fb.SetColor(&d2dColor(node.fill));
             sb.SetColor(&d2dColor(node.stroke));
-            drawNodeShape(rt, fb, sb, node, vp);
+            drawNodeShape(ctx.d2d_factory, rt, fb, sb, node, vp);
 
             // Label.
             if (node.label != null) {
                 tb.SetColor(&d2dColor(node.label_color));
                 const centre_s = vp.canvasToScreen(node.x + node.width / 2.0, node.y + node.height / 2.0);
                 const max_w: f32 = @floatCast(node.width * vp.zoom);
-                drawLabel(rt, ctx.dwrite_factory, tb, node.label, node.label_font_size * @as(f32, @floatCast(vp.zoom)), @floatCast(centre_s.x), @floatCast(centre_s.y), max_w);
+                drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, std.math.clamp(node.label_font_size, 6.0, 48.0), @floatCast(centre_s.x), @floatCast(centre_s.y), max_w);
             }
             _ = idx;
         }

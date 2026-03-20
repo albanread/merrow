@@ -10,6 +10,7 @@ const windows_dpi = @import("windows/dpi.zig");
 const windows_document = @import("windows/document.zig");
 const windows_editor = @import("windows/editor.zig");
 const windows_layout = @import("windows/layout.zig");
+const windows_project_settings = @import("windows/project_settings.zig");
 const windows_status_bar = @import("windows/status_bar.zig");
 const windows_toolbar = @import("windows/toolbar.zig");
 
@@ -53,6 +54,7 @@ const initial_source = windows_constants.initial_source;
 const menu_id_open = windows_constants.menu_id_open;
 const menu_id_save = windows_constants.menu_id_save;
 const menu_id_save_as = windows_constants.menu_id_save_as;
+const menu_id_font_settings = windows_constants.menu_id_font_settings;
 const menu_id_mode_mermaid = windows_constants.menu_id_mode_mermaid;
 const menu_id_mode_freeform = windows_constants.menu_id_mode_freeform;
 const toolbar_id_reserved_1 = windows_constants.toolbar_id_reserved_1;
@@ -63,11 +65,23 @@ const toolbar_slot_2_label = windows_constants.toolbar_slot_2_label;
 const toolbar_slot_3_label = windows_constants.toolbar_slot_3_label;
 const Layout = windows_constants.Layout;
 const ViewAnchor = windows_constants.ViewAnchor;
+const wm_mouseleave: u32 = 0x02A3;
+const tme_leave: u32 = 0x00000002;
+
+const TRACKMOUSEEVENT = extern struct {
+    cbSize: u32,
+    dwFlags: u32,
+    hwndTrack: ?foundation.HWND,
+    dwHoverTime: u32,
+};
+
+extern "user32" fn TrackMouseEvent(event_track: *TRACKMOUSEEVENT) callconv(.winapi) i32;
 
 const AppMode = windows_app_state.AppMode;
 const ChildWindows = windows_app_state.ChildWindows;
 const PreviewRenderer = windows_app_state.PreviewRenderer;
 const CanvasRenderer = windows_app_state.CanvasRenderer;
+const ProjectFontSettings = windows_project_settings.ProjectFontSettings;
 extern fn merrow_studio_build_editable_graph(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) ?*windows_canvas.StudioEditableGraph;
 extern fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) c_int;
 extern fn merrow_studio_render_preview_png_bytes(source_ptr: [*]const u8, source_len: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
@@ -83,6 +97,7 @@ var canvas_renderer = CanvasRenderer.init(c_allocator);
 var canvas_dwrite_factory: ?*dwrite.IDWriteFactory = null;
 var main_window: ?foundation.HWND = null;
 var current_document_path: ?[]u8 = null;
+var project_font_settings = ProjectFontSettings{};
 var private_font_path: ?[:0]u8 = null;
 var rich_edit_module: ?@TypeOf(loader.LoadLibraryA("Riched20.dll").?) = null;
 var editor_font: ?gdi.HFONT = null;
@@ -426,6 +441,103 @@ fn saveSourceToPath(path: []const u8, source: []const u8) !void {
     return windows_document.saveSourceToPath(path, source);
 }
 
+fn applyProjectFontSettingsToGraph(graph: *windows_canvas.StudioEditableGraph) void {
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count]) |*node| {
+            node.label_font_size = project_font_settings.node_label_size;
+        }
+    }
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count]) |*subgraph| {
+            subgraph.title_font_size = project_font_settings.group_title_size;
+        }
+    }
+    if (graph.edges != null) {
+        for (graph.edges[0..graph.edge_count]) |*edge| {
+            edge.label_font_size = project_font_settings.edge_label_size;
+        }
+    }
+}
+
+fn applyProjectFontSettingsToCanvas(refresh_inspector: bool) void {
+    const graph = canvas_renderer.canvas_state.graph orelse return;
+    applyProjectFontSettingsToGraph(graph);
+
+    if (child_windows.canvas) |canvas_hwnd| {
+        _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
+    }
+    if (refresh_inspector and app_mode == .freeform) {
+        windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+    }
+}
+
+fn onProjectFontSettingsChanged() void {
+    applyProjectFontSettingsToCanvas(true);
+    setDocumentDirty(true);
+    setStatusMessage("Updated project font settings");
+}
+
+fn loadProjectFontSettingsForPath(path: []const u8) void {
+    project_font_settings = windows_project_settings.loadProjectFontSettings(c_allocator, path) catch null orelse ProjectFontSettings{};
+    applyProjectFontSettingsToCanvas(true);
+}
+
+fn saveProjectFontSettingsForPath(path: []const u8) bool {
+    windows_project_settings.saveProjectFontSettings(c_allocator, path, project_font_settings) catch {
+        setStatusMessage("Failed to save project font settings");
+        return false;
+    };
+    return true;
+}
+
+fn rebuildFreeformCanvas(fit_view: bool) void {
+    const source = getEditorText(c_allocator) catch {
+        setStatusMessage("Could not read source for canvas mode");
+        return;
+    };
+    defer c_allocator.free(source);
+
+    var eg_message: [256]u8 = std.mem.zeroes([256]u8);
+    const eg = merrow_studio_build_editable_graph(
+        source.ptr,
+        @intCast(source.len),
+        &eg_message,
+        eg_message.len,
+    );
+    canvas_renderer.canvas_state.setGraph(eg);
+    if (eg) |graph| applyProjectFontSettingsToGraph(graph);
+
+    if (fit_view) {
+        if (child_windows.canvas) |cw| {
+            var r = std.mem.zeroes(foundation.RECT);
+            if (ui.GetClientRect(cw, &r) != 0) {
+                canvas_renderer.canvas_state.fitToViewport(
+                    @floatFromInt(r.right - r.left),
+                    @floatFromInt(r.bottom - r.top),
+                );
+            }
+        }
+    }
+
+    windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+    if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
+
+    const eg_status = std.mem.sliceTo(&eg_message, 0);
+    setStatusMessage(if (eg == null and eg_status.len > 0) eg_status else if (eg == null) "Failed to build freeform canvas" else "Freeform canvas mode");
+}
+
+fn toggleFontInspector() void {
+    if (app_mode != .freeform) {
+        setStatusMessage("Font inspector is only available in freeform mode");
+        return;
+    }
+
+    const active = !windows_canvas.inspector.fontInspectorActive();
+    windows_canvas.inspector.setFontInspectorActive(active);
+    windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+    setStatusMessage(if (active) "Font inspector" else "Selection inspector");
+}
+
 fn openDocumentFromDialog() void {
     const selected_path = chooseDocumentPath(false) orelse return;
     defer c_allocator.free(selected_path);
@@ -437,8 +549,10 @@ fn openDocumentFromDialog() void {
     defer c_allocator.free(source);
 
     setEditorText(source);
+    loadProjectFontSettingsForPath(selected_path);
     setCurrentDocumentPath(selected_path);
     updateEditorDerivedState(true);
+    if (app_mode == .freeform) rebuildFreeformCanvas(true);
     setDocumentDirty(false);
     setStatusMessage("Opened Mermaid source");
 }
@@ -454,6 +568,7 @@ fn saveDocumentToPath(path: []const u8) bool {
         setStatusMessage("Failed to save file");
         return false;
     };
+    if (!saveProjectFontSettingsForPath(path)) return false;
 
     setCurrentDocumentPath(path);
     setDocumentDirty(false);
@@ -991,8 +1106,10 @@ fn drawCanvasFrame(hwnd: ?foundation.HWND) void {
     const h: f32 = @floatFromInt(@max(1, rect.bottom - rect.top));
 
     const ctx = windows_canvas.draw.DrawContext{
+        .d2d_factory = canvas_renderer.factory orelse return,
         .render_target = &rt.ID2D1RenderTarget,
         .dwrite_factory = dw_factory,
+        .font_family = project_font_settings.font_family,
         .viewport_width = w,
         .viewport_height = h,
     };
@@ -1054,6 +1171,12 @@ fn canvasWindowProc(
             return 0;
         },
         ui.WM_MOUSEMOVE => {
+            var track = std.mem.zeroes(TRACKMOUSEEVENT);
+            track.cbSize = @sizeOf(TRACKMOUSEEVENT);
+            track.dwFlags = tme_leave;
+            track.hwndTrack = hwnd;
+            _ = TrackMouseEvent(&track);
+
             const pos = mouseCoordFromLParam(l_param);
             const result = windows_canvas.interaction.onMouseMove(
                 &canvas_renderer.canvas_state,
@@ -1063,6 +1186,11 @@ fn canvasWindowProc(
             if (result.selection_changed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
             }
+            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        wm_mouseleave => {
+            const result = windows_canvas.interaction.onMouseLeave(&canvas_renderer.canvas_state);
             if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -1287,7 +1415,7 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
 
     // Inspector panel (freeform mode sidebar).
     canvas_renderer.inspector = windows_canvas.inspector.createInspector(hwnd, h_instance);
-    windows_canvas.inspector.setCanvasRef(&canvas_renderer.canvas_state, child_windows.canvas, &canvas_renderer.inspector);
+    windows_canvas.inspector.setCanvasRef(&canvas_renderer.canvas_state, child_windows.canvas, &canvas_renderer.inspector, &project_font_settings, onProjectFontSettingsChanged);
 
     initializeToolbarControl();
     configureShellFonts();
@@ -1459,26 +1587,11 @@ fn switchToMode(new_mode: AppMode) void {
             if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
             // Hide canvas pane.
             if (child_windows.canvas) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+            windows_canvas.inspector.setFontInspectorActive(false);
             windows_canvas.inspector.show(&canvas_renderer.inspector, false);
             setStatusMessage("Mermaid source mode");
         },
         .freeform => {
-            // Build the editable graph from the current source.
-            const source = getEditorText(c_allocator) catch {
-                setStatusMessage("Could not read source for canvas mode");
-                return;
-            };
-            defer c_allocator.free(source);
-
-            var eg_message: [256]u8 = std.mem.zeroes([256]u8);
-            const eg = merrow_studio_build_editable_graph(
-                source.ptr,
-                @intCast(source.len),
-                &eg_message,
-                eg_message.len,
-            );
-            canvas_renderer.canvas_state.setGraph(eg);
-
             // Show canvas pane; hide Mermaid pane.
             if (child_windows.canvas) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
             windows_canvas.inspector.show(&canvas_renderer.inspector, true);
@@ -1491,22 +1604,7 @@ fn switchToMode(new_mode: AppMode) void {
             // Layout must happen BEFORE fitToViewport so the canvas window
             // has its real dimensions (not the 100x100 creation default).
             layoutChildWindows(main_window);
-
-            // Now fit the viewport using the real canvas size.
-            if (child_windows.canvas) |cw| {
-                var r = std.mem.zeroes(foundation.RECT);
-                if (ui.GetClientRect(cw, &r) != 0) {
-                    canvas_renderer.canvas_state.fitToViewport(
-                        @floatFromInt(r.right - r.left),
-                        @floatFromInt(r.bottom - r.top),
-                    );
-                }
-            }
-
-            windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
-
-            const eg_status = std.mem.sliceTo(&eg_message, 0);
-            setStatusMessage(if (eg == null) eg_status else "Freeform canvas mode");
+            rebuildFreeformCanvas(true);
         },
     }
 
@@ -1624,6 +1722,10 @@ fn windowProc(
                         saveDocument(true);
                         return 0;
                     },
+                    menu_id_font_settings => {
+                        toggleFontInspector();
+                        return 0;
+                    },
                     menu_id_mode_mermaid => {
                         switchToMode(.mermaid);
                         return 0;
@@ -1661,10 +1763,11 @@ fn windowProc(
             return ui.DefWindowProcA(hwnd, message, w_param, l_param);
         },
         ui.WM_INITMENUPOPUP => {
-            // Tick the active mode in the View menu.
+            // Tick the active mode in the View menu and keep the font inspector command freeform-only.
             const hmenu: ui.HMENU = @ptrFromInt(@as(usize, @bitCast(w_param)));
             _ = ui.CheckMenuItem(hmenu, menu_id_mode_mermaid, if (app_mode == .mermaid) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
             _ = ui.CheckMenuItem(hmenu, menu_id_mode_freeform, if (app_mode == .freeform) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
+            _ = ui.CheckMenuItem(hmenu, menu_id_font_settings, if (app_mode == .freeform and windows_canvas.inspector.fontInspectorActive()) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
             return 0;
         },
         ui.WM_SIZE => {

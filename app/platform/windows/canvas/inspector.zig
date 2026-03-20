@@ -6,6 +6,7 @@
 const std = @import("std");
 const win32 = @import("win32");
 const common = @import("../common.zig");
+const project_settings = @import("../project_settings.zig");
 const state = @import("state.zig");
 
 const foundation = win32.foundation;
@@ -16,6 +17,8 @@ const dialogs = win32.ui.controls.dialogs;
 const CanvasState = state.CanvasState;
 const SelectionKind = state.SelectionKind;
 const StudioColor = state.StudioColor;
+const ProjectFontSettings = project_settings.ProjectFontSettings;
+const FontFamily = project_settings.FontFamily;
 
 // Class-specific style bits (zigwin32 defines these as i32).
 const cbs_dropdownlist: u32 = @intCast(ui.CBS_DROPDOWNLIST);
@@ -31,6 +34,11 @@ const inspector_class_name: [*:0]const u8 = "MerrowInspectorPanel";
 
 const ID = struct {
     const btn_fit: u16 = 4001;
+    // Project font inspector
+    const cmb_font_family: u16 = 4002;
+    const edt_font_node: u16 = 4003;
+    const edt_font_group: u16 = 4004;
+    const edt_font_edge: u16 = 4005;
     // Node / Subgraph
     const edt_ns_label: u16 = 4010;
     const cmb_ns_shape: u16 = 4011;
@@ -56,6 +64,9 @@ const ID = struct {
 var g_canvas_state: ?*CanvasState = null;
 var g_canvas_hwnd: ?foundation.HWND = null;
 var g_controls: ?*const InspectorControls = null;
+var g_project_font_settings: ?*ProjectFontSettings = null;
+var g_on_project_font_settings_changed: ?*const fn () void = null;
+var g_font_inspector_active: bool = false;
 var g_suppress: bool = false;
 var g_custom_colors: [16]u32 = [_]u32{0x00FFFFFF} ** 16;
 
@@ -68,6 +79,16 @@ pub const InspectorControls = struct {
     // Header
     lbl_header: ?foundation.HWND = null,
     btn_fit: ?foundation.HWND = null,
+    // -- Project font section --
+    lbl_font_section: ?foundation.HWND = null,
+    lbl_font_family: ?foundation.HWND = null,
+    cmb_font_family: ?foundation.HWND = null,
+    lbl_font_node: ?foundation.HWND = null,
+    edt_font_node: ?foundation.HWND = null,
+    lbl_font_group: ?foundation.HWND = null,
+    edt_font_group: ?foundation.HWND = null,
+    lbl_font_edge: ?foundation.HWND = null,
+    edt_font_edge: ?foundation.HWND = null,
     // -- Node / Subgraph section --
     lbl_ns_label: ?foundation.HWND = null,
     edt_ns_label: ?foundation.HWND = null,
@@ -163,7 +184,9 @@ fn mkLabel(
     w: i32,
     h: i32,
 ) ?foundation.HWND {
-    return ui.CreateWindowExA(.{}, "STATIC", text, @bitCast(vis_child), x, y, w, h, p, null, hi, null);
+    const hwnd = ui.CreateWindowExA(.{}, "STATIC", text, @bitCast(vis_child), x, y, w, h, p, null, hi, null);
+    setControlFont(hwnd);
+    return hwnd;
 }
 
 fn mkEdit(
@@ -178,7 +201,7 @@ fn mkEdit(
 ) ?foundation.HWND {
     var style = vis_child | common.styleBits(ui.WS_BORDER) | common.styleBits(ui.WS_TABSTOP);
     if (readonly) style |= es_readonly;
-    return ui.CreateWindowExA(
+    const hwnd = ui.CreateWindowExA(
         common.makeExStyle(common.exStyleBits(ui.WS_EX_CLIENTEDGE)),
         "EDIT",
         "",
@@ -192,6 +215,8 @@ fn mkEdit(
         hi,
         null,
     );
+    setControlFont(hwnd);
+    return hwnd;
 }
 
 fn mkButton(
@@ -204,7 +229,7 @@ fn mkButton(
     h: i32,
     id: u16,
 ) ?foundation.HWND {
-    return ui.CreateWindowExA(
+    const hwnd = ui.CreateWindowExA(
         .{},
         "BUTTON",
         text,
@@ -218,6 +243,8 @@ fn mkButton(
         hi,
         null,
     );
+    setControlFont(hwnd);
+    return hwnd;
 }
 
 fn mkCombo(
@@ -230,7 +257,7 @@ fn mkCombo(
     id: u16,
 ) ?foundation.HWND {
     const style = vis_child | common.styleBits(ui.WS_TABSTOP) | common.styleBits(ui.WS_VSCROLL) | cbs_dropdownlist;
-    return ui.CreateWindowExA(
+    const hwnd = ui.CreateWindowExA(
         .{},
         "COMBOBOX",
         null,
@@ -244,6 +271,14 @@ fn mkCombo(
         hi,
         null,
     );
+    setControlFont(hwnd);
+    return hwnd;
+}
+
+fn setControlFont(hwnd: ?foundation.HWND) void {
+    const control = hwnd orelse return;
+    const font = gdi.GetStockObject(gdi.DEFAULT_GUI_FONT) orelse return;
+    _ = ui.SendMessageA(control, ui.WM_SETFONT, @intFromPtr(font), 1);
 }
 
 fn addComboItem(combo: ?foundation.HWND, text: [*:0]const u8) void {
@@ -299,10 +334,8 @@ pub fn createInspector(
     const btn_h: i32 = 24;
     const lbl_h: i32 = 16;
     const sect_h: i32 = 16;
-    const short_lbl: i32 = 20;
-    const short_edt: i32 = 84;
-    const col_gap: i32 = 12;
-    const col2_x: i32 = pad + short_lbl + 4 + short_edt + col_gap;
+    const half_w: i32 = @divTrunc(full_w - 8, 2);
+    const right_x: i32 = pad + half_w + 8;
 
     var y: i32 = 8;
 
@@ -314,7 +347,27 @@ pub fn createInspector(
 
     const section_start: i32 = y;
 
+    // ===== PROJECT FONT SECTION =====
+    c.lbl_font_section = mkLabel(pnl, hi, "PROJECT FONTS", pad, y, full_w, sect_h);
+    y += sect_h + 6;
+    c.lbl_font_family = mkLabel(pnl, hi, "Font Family", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.cmb_font_family = mkCombo(pnl, hi, pad, y, full_w, 120, ID.cmb_font_family);
+    y += row_h + 8;
+    c.lbl_font_node = mkLabel(pnl, hi, "Node Text Size", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_font_node = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_font_node, false);
+    y += row_h + 8;
+    c.lbl_font_group = mkLabel(pnl, hi, "Group Title Size", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_font_group = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_font_group, false);
+    y += row_h + 8;
+    c.lbl_font_edge = mkLabel(pnl, hi, "Edge Label Size", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_font_edge = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_font_edge, false);
+
     // ===== NODE / SUBGRAPH SECTION =====
+    y = section_start;
 
     // Label
     c.lbl_ns_label = mkLabel(pnl, hi, "Label", pad, y, 50, lbl_h);
@@ -323,42 +376,48 @@ pub fn createInspector(
     y += row_h + 6;
 
     // Shape combo (node only)
-    c.lbl_ns_shape = mkLabel(pnl, hi, "Shape", pad, y + 2, 50, lbl_h);
-    c.cmb_ns_shape = mkCombo(pnl, hi, pad + 54, y, full_w - 54, 200, ID.cmb_ns_shape);
+    c.lbl_ns_shape = mkLabel(pnl, hi, "Shape", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.cmb_ns_shape = mkCombo(pnl, hi, pad, y, full_w, 200, ID.cmb_ns_shape);
     y += row_h + 8;
 
     // POSITION header
     c.lbl_ns_pos = mkLabel(pnl, hi, "POSITION", pad, y, full_w, sect_h);
-    y += sect_h + 2;
-    c.lbl_ns_x = mkLabel(pnl, hi, "X", pad, y + 2, short_lbl, lbl_h);
-    c.edt_ns_x = mkEdit(pnl, hi, pad + short_lbl + 4, y, short_edt, row_h, ID.edt_ns_x, false);
-    c.lbl_ns_y = mkLabel(pnl, hi, "Y", col2_x, y + 2, short_lbl, lbl_h);
-    c.edt_ns_y = mkEdit(pnl, hi, col2_x + short_lbl + 4, y, short_edt, row_h, ID.edt_ns_y, false);
-    y += row_h + 6;
+    y += sect_h + 4;
+    c.lbl_ns_x = mkLabel(pnl, hi, "X", pad, y, half_w, lbl_h);
+    c.lbl_ns_y = mkLabel(pnl, hi, "Y", right_x, y, half_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_ns_x = mkEdit(pnl, hi, pad, y, half_w, row_h, ID.edt_ns_x, false);
+    c.edt_ns_y = mkEdit(pnl, hi, right_x, y, half_w, row_h, ID.edt_ns_y, false);
+    y += row_h + 8;
 
     // SIZE header
     c.lbl_ns_size = mkLabel(pnl, hi, "SIZE", pad, y, full_w, sect_h);
-    y += sect_h + 2;
-    c.lbl_ns_w = mkLabel(pnl, hi, "W", pad, y + 2, short_lbl, lbl_h);
-    c.edt_ns_w = mkEdit(pnl, hi, pad + short_lbl + 4, y, short_edt, row_h, ID.edt_ns_w, false);
-    c.lbl_ns_h = mkLabel(pnl, hi, "H", col2_x, y + 2, short_lbl, lbl_h);
-    c.edt_ns_h = mkEdit(pnl, hi, col2_x + short_lbl + 4, y, short_edt, row_h, ID.edt_ns_h, false);
+    y += sect_h + 4;
+    c.lbl_ns_w = mkLabel(pnl, hi, "Width", pad, y, half_w, lbl_h);
+    c.lbl_ns_h = mkLabel(pnl, hi, "Height", right_x, y, half_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_ns_w = mkEdit(pnl, hi, pad, y, half_w, row_h, ID.edt_ns_w, false);
+    c.edt_ns_h = mkEdit(pnl, hi, right_x, y, half_w, row_h, ID.edt_ns_h, false);
     y += row_h + 8;
 
     // APPEARANCE header
     c.lbl_ns_appear = mkLabel(pnl, hi, "APPEARANCE", pad, y, full_w, sect_h);
     y += sect_h + 4;
     // Fill colour
-    c.lbl_ns_fill = mkLabel(pnl, hi, "Fill", pad, y + 2, 44, lbl_h);
-    c.btn_ns_fill = mkButton(pnl, hi, "#FFFFFF", pad + 48, y, full_w - 48, btn_h, ID.btn_ns_fill);
-    y += btn_h + 4;
+    c.lbl_ns_fill = mkLabel(pnl, hi, "Fill", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.btn_ns_fill = mkButton(pnl, hi, "#FFFFFF", pad, y, full_w, btn_h, ID.btn_ns_fill);
+    y += btn_h + 6;
     // Stroke colour
-    c.lbl_ns_stroke = mkLabel(pnl, hi, "Stroke", pad, y + 2, 44, lbl_h);
-    c.btn_ns_stroke = mkButton(pnl, hi, "#000000", pad + 48, y, full_w - 48, btn_h, ID.btn_ns_stroke);
-    y += btn_h + 4;
+    c.lbl_ns_stroke = mkLabel(pnl, hi, "Stroke", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.btn_ns_stroke = mkButton(pnl, hi, "#000000", pad, y, full_w, btn_h, ID.btn_ns_stroke);
+    y += btn_h + 6;
     // Border width
-    c.lbl_ns_border = mkLabel(pnl, hi, "Border", pad, y + 2, 44, lbl_h);
-    c.edt_ns_border = mkEdit(pnl, hi, pad + 48, y, 60, row_h, ID.edt_ns_border, false);
+    c.lbl_ns_border = mkLabel(pnl, hi, "Border Width", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_ns_border = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_ns_border, false);
 
     // ===== EDGE SECTION (same vertical origin as node section) =====
     y = section_start;
@@ -372,20 +431,24 @@ pub fn createInspector(
     c.lbl_e_style = mkLabel(pnl, hi, "STYLE", pad, y, full_w, sect_h);
     y += sect_h + 4;
     // Colour
-    c.lbl_e_color = mkLabel(pnl, hi, "Color", pad, y + 2, 44, lbl_h);
-    c.btn_e_color = mkButton(pnl, hi, "#000000", pad + 48, y, full_w - 48, btn_h, ID.btn_e_color);
-    y += btn_h + 4;
+    c.lbl_e_color = mkLabel(pnl, hi, "Color", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.btn_e_color = mkButton(pnl, hi, "#000000", pad, y, full_w, btn_h, ID.btn_e_color);
+    y += btn_h + 6;
     // Thickness
-    c.lbl_e_thick = mkLabel(pnl, hi, "Thickness", pad, y + 2, 60, lbl_h);
-    c.edt_e_thick = mkEdit(pnl, hi, pad + 64, y, 60, row_h, ID.edt_e_thick, false);
-    y += row_h + 6;
+    c.lbl_e_thick = mkLabel(pnl, hi, "Thickness", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.edt_e_thick = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_e_thick, false);
+    y += row_h + 8;
     // Line style combo
-    c.lbl_e_line = mkLabel(pnl, hi, "Line", pad, y + 2, 44, lbl_h);
-    c.cmb_e_line = mkCombo(pnl, hi, pad + 48, y, full_w - 48, 120, ID.cmb_e_line);
-    y += row_h + 6;
+    c.lbl_e_line = mkLabel(pnl, hi, "Line Style", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.cmb_e_line = mkCombo(pnl, hi, pad, y, full_w, 120, ID.cmb_e_line);
+    y += row_h + 8;
     // Arrow mode combo
-    c.lbl_e_arrows = mkLabel(pnl, hi, "Arrows", pad, y + 2, 44, lbl_h);
-    c.cmb_e_arrows = mkCombo(pnl, hi, pad + 48, y, full_w - 48, 160, ID.cmb_e_arrows);
+    c.lbl_e_arrows = mkLabel(pnl, hi, "Arrowheads", pad, y, full_w, lbl_h);
+    y += lbl_h + 2;
+    c.cmb_e_arrows = mkCombo(pnl, hi, pad, y, full_w, 160, ID.cmb_e_arrows);
 
     populateCombos(&c);
     return c;
@@ -393,9 +456,9 @@ pub fn createInspector(
 
 fn populateCombos(c: *InspectorControls) void {
     const shapes = [_][*:0]const u8{
-        "Rectangle", "Rounded Rect",  "Diamond",    "Circle",
-        "Hexagon",   "Parallelogram", "Trapezoid",  "Cylinder",
-        "Stadium",   "Subroutine",    "Asymmetric", "Double Circle",
+        "Rectangle",     "Rounded Rect",  "Diamond",           "Circle",
+        "Hexagon",       "Cylinder",      "Stadium",           "Trapezoid",
+        "Trapezoid Alt", "Parallelogram", "Parallelogram Alt", "Subroutine",
     };
     for (shapes) |s| addComboItem(c.cmb_ns_shape, s);
 
@@ -407,6 +470,11 @@ fn populateCombos(c: *InspectorControls) void {
     addComboItem(c.cmb_e_arrows, "Target -->");
     addComboItem(c.cmb_e_arrows, "<-- Source");
     addComboItem(c.cmb_e_arrows, "<-- Both -->");
+
+    addComboItem(c.cmb_font_family, "Lato");
+    addComboItem(c.cmb_font_family, "Segoe UI");
+    addComboItem(c.cmb_font_family, "Arial");
+    addComboItem(c.cmb_font_family, "Consolas");
 }
 
 // ---------------------------------------------------------------------------
@@ -417,10 +485,23 @@ pub fn setCanvasRef(
     canvas_state: *CanvasState,
     canvas_hwnd: ?foundation.HWND,
     controls: *const InspectorControls,
+    project_font_settings: *ProjectFontSettings,
+    on_project_font_settings_changed: *const fn () void,
 ) void {
     g_canvas_state = canvas_state;
     g_canvas_hwnd = canvas_hwnd;
     g_controls = controls;
+    g_project_font_settings = project_font_settings;
+    g_on_project_font_settings_changed = on_project_font_settings_changed;
+}
+
+pub fn setFontInspectorActive(active: bool) void {
+    g_font_inspector_active = active;
+    refreshSelf();
+}
+
+pub fn fontInspectorActive() bool {
+    return g_font_inspector_active;
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +570,19 @@ fn showNodeSection(c: *const InspectorControls, vis: bool, is_node: bool) void {
     swShow(c.edt_ns_border, cmd);
 }
 
+fn showFontSection(c: *const InspectorControls, vis: bool) void {
+    const cmd = if (vis) ui.SW_SHOWNA else ui.SW_HIDE;
+    swShow(c.lbl_font_section, cmd);
+    swShow(c.lbl_font_family, cmd);
+    swShow(c.cmb_font_family, cmd);
+    swShow(c.lbl_font_node, cmd);
+    swShow(c.edt_font_node, cmd);
+    swShow(c.lbl_font_group, cmd);
+    swShow(c.edt_font_group, cmd);
+    swShow(c.lbl_font_edge, cmd);
+    swShow(c.edt_font_edge, cmd);
+}
+
 fn showEdgeSection(c: *const InspectorControls, vis: bool) void {
     const cmd = if (vis) ui.SW_SHOWNA else ui.SW_HIDE;
     swShow(c.lbl_e_label, cmd);
@@ -508,6 +602,27 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
     g_suppress = true;
     defer g_suppress = false;
 
+    // The selection inspector has priority. If the user clicks a shape/edge/
+    // subgraph, return to the object inspector immediately.
+    if (g_font_inspector_active and canvas.selection.kind != .none) {
+        g_font_inspector_active = false;
+    }
+
+    if (g_font_inspector_active) {
+        const settings = g_project_font_settings orelse return;
+        setLabelText(controls_ref.lbl_header, "Project Font Inspector");
+        showFontSection(controls_ref, true);
+        showNodeSection(controls_ref, false, false);
+        showEdgeSection(controls_ref, false);
+        setComboSel(controls_ref.cmb_font_family, fontFamilyIndex(settings.font_family));
+        setEditF32(controls_ref.edt_font_node, settings.node_label_size);
+        setEditF32(controls_ref.edt_font_group, settings.group_title_size);
+        setEditF32(controls_ref.edt_font_edge, settings.edge_label_size);
+        return;
+    }
+
+    showFontSection(controls_ref, false);
+
     switch (canvas.selection.kind) {
         .none => {
             setLabelText(controls_ref.lbl_header, "No selection");
@@ -516,7 +631,7 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
         },
         .node => {
             const n = canvas.selectedNode() orelse return;
-            setLabelText(controls_ref.lbl_header, "Node");
+            setHeaderWithSlice(controls_ref.lbl_header, "Node", cstrToSlice(n.label));
             showNodeSection(controls_ref, true, true);
             showEdgeSection(controls_ref, false);
             setEditSlice(controls_ref.edt_ns_label, cstrToSlice(n.label));
@@ -531,7 +646,7 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
         },
         .subgraph => {
             const sg = canvas.selectedSubgraph() orelse return;
-            setLabelText(controls_ref.lbl_header, "Subgraph / Group");
+            setHeaderWithSlice(controls_ref.lbl_header, "Subgraph", cstrToSlice(sg.title));
             showNodeSection(controls_ref, true, false);
             showEdgeSection(controls_ref, false);
             setEditSlice(controls_ref.edt_ns_label, cstrToSlice(sg.title));
@@ -545,7 +660,7 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
         },
         .edge => {
             const e = canvas.selectedEdge() orelse return;
-            setLabelText(controls_ref.lbl_header, "Edge");
+            setHeaderWithSlice(controls_ref.lbl_header, "Edge", cstrToSlice(e.label));
             showNodeSection(controls_ref, false, false);
             showEdgeSection(controls_ref, true);
             setEditSlice(controls_ref.edt_e_label, cstrToSlice(e.label));
@@ -576,6 +691,7 @@ fn handleCommand(id: u16, code: u32, owner: ?foundation.HWND) void {
     // Combo box selection change
     if (code == ui.CBN_SELCHANGE) {
         switch (id) {
+            ID.cmb_font_family => applyProjectFontFamily(),
             ID.cmb_ns_shape => applyShape(),
             ID.cmb_e_line => applyLineStyle(),
             ID.cmb_e_arrows => applyArrowMode(),
@@ -586,6 +702,7 @@ fn handleCommand(id: u16, code: u32, owner: ?foundation.HWND) void {
     // Edit control lost focus — commit numeric values
     if (code == ui.EN_KILLFOCUS) {
         switch (id) {
+            ID.edt_font_node, ID.edt_font_group, ID.edt_font_edge => applyProjectFontNumeric(id),
             ID.edt_ns_label, ID.edt_e_label => applySelectedLabel(id),
             ID.edt_ns_x, ID.edt_ns_y, ID.edt_ns_w, ID.edt_ns_h, ID.edt_ns_border => applyNodeNumeric(id),
             ID.edt_e_thick => applyEdgeThickness(),
@@ -655,6 +772,34 @@ fn applyShape() void {
     const sel = getComboSel(ctrl.cmb_ns_shape) orelse return;
     n.shape = @intCast(sel);
     invalidateCanvas();
+}
+
+fn applyProjectFontFamily() void {
+    const settings = g_project_font_settings orelse return;
+    const ctrl = g_controls orelse return;
+    const sel = getComboSel(ctrl.cmb_font_family) orelse return;
+    settings.font_family = fontFamilyFromIndex(sel);
+    projectFontSettingsChanged();
+}
+
+fn applyProjectFontNumeric(id: u16) void {
+    const settings = g_project_font_settings orelse return;
+    const ctrl = g_controls orelse return;
+    const value = std.math.clamp(@as(f32, @floatCast(readEditF64(switch (id) {
+        ID.edt_font_node => ctrl.edt_font_node,
+        ID.edt_font_group => ctrl.edt_font_group,
+        ID.edt_font_edge => ctrl.edt_font_edge,
+        else => return,
+    }) orelse return)), 6.0, 48.0);
+
+    switch (id) {
+        ID.edt_font_node => settings.node_label_size = value,
+        ID.edt_font_group => settings.group_title_size = value,
+        ID.edt_font_edge => settings.edge_label_size = value,
+        else => return,
+    }
+
+    projectFontSettingsChanged();
 }
 
 fn applySelectedLabel(id: u16) void {
@@ -790,6 +935,22 @@ fn setLabelText(hwnd: ?foundation.HWND, text: [*:0]const u8) void {
     _ = ui.SetWindowTextA(hwnd, text);
 }
 
+fn setHeaderWithSlice(hwnd: ?foundation.HWND, prefix: []const u8, label: []const u8) void {
+    var buf: [160]u8 = undefined;
+    const trimmed = std.mem.trim(u8, label, " \t\r\n");
+    if (trimmed.len == 0) {
+        const s = std.fmt.bufPrint(&buf, "{s}: (unnamed)", .{prefix}) catch return;
+        setEditSlice(hwnd, s);
+        return;
+    }
+
+    const max_label_len: usize = 40;
+    const clipped = if (trimmed.len > max_label_len) trimmed[0..max_label_len] else trimmed;
+    const suffix = if (trimmed.len > max_label_len) "..." else "";
+    const s = std.fmt.bufPrint(&buf, "{s}: {s}{s}", .{ prefix, clipped, suffix }) catch return;
+    setEditSlice(hwnd, s);
+}
+
 fn setColorButtonText(hwnd: ?foundation.HWND, color: StudioColor) void {
     var buf: [10]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "#{X:0>2}{X:0>2}{X:0>2}", .{ color.r, color.g, color.b }) catch return;
@@ -838,4 +999,27 @@ fn refreshSelf() void {
     const ctrl = g_controls orelse return;
     const cs = g_canvas_state orelse return;
     refresh(ctrl, cs);
+}
+
+fn projectFontSettingsChanged() void {
+    if (g_on_project_font_settings_changed) |cb| cb();
+    refreshSelf();
+}
+
+fn fontFamilyIndex(family: FontFamily) usize {
+    return switch (family) {
+        .lato => 0,
+        .segoe_ui => 1,
+        .arial => 2,
+        .consolas => 3,
+    };
+}
+
+fn fontFamilyFromIndex(index: usize) FontFamily {
+    return switch (index) {
+        1 => .segoe_ui,
+        2 => .arial,
+        3 => .consolas,
+        else => .lato,
+    };
 }

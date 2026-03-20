@@ -38,6 +38,7 @@ pub const StudioEditableEdge = extern struct {
     source_id: [*c]const u8,
     target_id: [*c]const u8,
     label: [*c]const u8,
+    label_font_size: f32,
     color: StudioColor,
     thickness: f32,
     line_style: u32,
