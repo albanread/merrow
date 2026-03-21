@@ -148,6 +148,14 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
+        windows_app_exe.addIncludePath(b.path("deps"));
+        windows_app_exe.addCSourceFile(.{
+            .file = b.path("deps/sqlite3.c"),
+            .flags = &[_][]const u8{
+                "-DSQLITE_THREADSAFE=0",
+                "-DSQLITE_OMIT_LOAD_EXTENSION",
+            },
+        });
         windows_app_exe.linkLibC();
         windows_app_exe.linkSystemLibrary("kernel32");
         windows_app_exe.linkSystemLibrary("user32");
@@ -157,8 +165,12 @@ pub fn build(b: *std.Build) void {
         windows_app_exe.linkSystemLibrary("d2d1");
         windows_app_exe.linkSystemLibrary("dwrite");
         windows_app_exe.linkSystemLibrary("ole32");
+        windows_app_exe.linkSystemLibrary("oleaut32");
         windows_app_exe.linkSystemLibrary("windowscodecs");
         b.installArtifact(windows_app_exe);
+        _ = b.addInstallFile(b.path("wordcomglue/build/wordcomglue.dll"), "bin/wordcomglue.dll");
+        _ = b.addInstallFile(b.path("app/assets/diagrams_header.png"), "bin/assets/diagrams_header.png");
+        _ = b.addInstallFile(b.path("app/assets/diagrams_trailer.png"), "bin/assets/diagrams_trailer.png");
 
         const windows_app_step = b.step("studio", "Run the Windows Mermaid viewer/editor scaffold");
         const windows_app_cmd = b.addRunArtifact(windows_app_exe);
@@ -313,6 +325,18 @@ pub fn build(b: *std.Build) void {
     const preview_test_step = b.step("preview-test", "Run filtered preview freeform conversion tests");
     preview_test_step.dependOn(&run_preview_tests.step);
 
+    const markdown_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("app/markdown_parser.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_markdown_tests = b.addRunArtifact(markdown_tests);
+    const markdown_test_step = b.step("markdown-test", "Run markdown document parser tests");
+    markdown_test_step.dependOn(&run_markdown_tests.step);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
@@ -320,6 +344,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_preview_tests.step);
+    test_step.dependOn(&run_markdown_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

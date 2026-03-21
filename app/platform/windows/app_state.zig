@@ -16,8 +16,12 @@ pub const AppMode = enum {
 
 pub const ChildWindows = struct {
     preview: ?foundation.HWND = null,
+    diagram_label: ?foundation.HWND = null,
     editor: ?foundation.HWND = null,
     toolbar: ?foundation.HWND = null,
+    diagram_selector: ?foundation.HWND = null,
+    diagram_prev_button: ?foundation.HWND = null,
+    diagram_next_button: ?foundation.HWND = null,
     command: ?foundation.HWND = null,
     apply_button: ?foundation.HWND = null,
     status: ?foundation.HWND = null,

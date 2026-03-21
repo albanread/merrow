@@ -7,6 +7,21 @@ pub const FontFamily = enum {
     consolas,
 };
 
+pub const CanvasPreset = enum {
+    document,
+    narrow,
+    narrower,
+    slim,
+    banner_600,
+    banner_1000,
+    banner_1200,
+};
+
+pub const CanvasDimensions = struct {
+    width: u32,
+    height: u32,
+};
+
 pub fn fontFamilyDisplayName(family: FontFamily) []const u8 {
     return switch (family) {
         .lato => "Lato",
@@ -16,7 +31,32 @@ pub fn fontFamilyDisplayName(family: FontFamily) []const u8 {
     };
 }
 
+pub fn canvasPresetDisplayName(preset: CanvasPreset) []const u8 {
+    return switch (preset) {
+        .document => "Document (1800 x 3500)",
+        .narrow => "Narrow (1600 x 3500)",
+        .narrower => "Narrower (1400 x 3500)",
+        .slim => "Slim (1200 x 3500)",
+        .banner_600 => "Wide Short (1800 x 600)",
+        .banner_1000 => "Wide Short (1800 x 1000)",
+        .banner_1200 => "Wide Short (1800 x 1200)",
+    };
+}
+
+pub fn canvasPresetDimensions(preset: CanvasPreset) CanvasDimensions {
+    return switch (preset) {
+        .document => .{ .width = 1800, .height = 3500 },
+        .narrow => .{ .width = 1600, .height = 3500 },
+        .narrower => .{ .width = 1400, .height = 3500 },
+        .slim => .{ .width = 1200, .height = 3500 },
+        .banner_600 => .{ .width = 1800, .height = 600 },
+        .banner_1000 => .{ .width = 1800, .height = 1000 },
+        .banner_1200 => .{ .width = 1800, .height = 1200 },
+    };
+}
+
 pub const ProjectFontSettings = struct {
+    canvas_preset: CanvasPreset = .banner_1200,
     font_family: FontFamily = .lato,
     node_label_size: f32 = 14.0,
     group_title_size: f32 = 12.0,
@@ -24,6 +64,7 @@ pub const ProjectFontSettings = struct {
 
     pub fn sanitized(self: ProjectFontSettings) ProjectFontSettings {
         return .{
+            .canvas_preset = self.canvas_preset,
             .font_family = self.font_family,
             .node_label_size = clampFontSize(self.node_label_size),
             .group_title_size = clampFontSize(self.group_title_size),
@@ -60,8 +101,8 @@ pub fn saveProjectFontSettings(allocator: std.mem.Allocator, document_path: []co
     const value = settings.sanitized();
     const payload = try std.fmt.allocPrint(
         allocator,
-        "{{\n  \"font_family\": \"{s}\",\n  \"node_label_size\": {d:.1},\n  \"group_title_size\": {d:.1},\n  \"edge_label_size\": {d:.1}\n}}\n",
-        .{ @tagName(value.font_family), value.node_label_size, value.group_title_size, value.edge_label_size },
+        "{{\n  \"canvas_preset\": \"{s}\",\n  \"font_family\": \"{s}\",\n  \"node_label_size\": {d:.1},\n  \"group_title_size\": {d:.1},\n  \"edge_label_size\": {d:.1}\n}}\n",
+        .{ @tagName(value.canvas_preset), @tagName(value.font_family), value.node_label_size, value.group_title_size, value.edge_label_size },
     );
     defer allocator.free(payload);
 

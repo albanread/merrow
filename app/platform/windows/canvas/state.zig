@@ -204,6 +204,10 @@ pub fn graphBounds(graph: *const StudioEditableGraph) ?GraphBounds {
     }
 
     if (have_bounds) {
+        min_x = @min(min_x, 0.0);
+        min_y = @min(min_y, 0.0);
+        max_x = @max(max_x, graph.width);
+        max_y = @max(max_y, graph.height);
         return .{ .min_x = min_x, .min_y = min_y, .max_x = max_x, .max_y = max_y };
     }
 
@@ -212,6 +216,171 @@ pub fn graphBounds(graph: *const StudioEditableGraph) ?GraphBounds {
     }
 
     return null;
+}
+
+pub const ContentBounds = struct {
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+};
+
+pub fn subgraphIndexById(graph: *const StudioEditableGraph, id: [*c]const u8) ?usize {
+    if (id == null or graph.subgraphs == null) return null;
+    const needle = std.mem.span(id);
+    for (graph.subgraphs[0..graph.subgraph_count], 0..) |*sg, idx| {
+        if (sg.id == null) continue;
+        if (std.mem.eql(u8, std.mem.span(sg.id), needle)) return idx;
+    }
+    return null;
+}
+
+pub fn subgraphBelongsToSubgraph(graph: *const StudioEditableGraph, child_idx: usize, ancestor_idx: usize) bool {
+    if (child_idx >= graph.subgraph_count or ancestor_idx >= graph.subgraph_count or graph.subgraphs == null) return false;
+    return parentIdBelongsToSubgraph(graph, graph.subgraphs[child_idx].parent_subgraph_id, ancestor_idx);
+}
+
+pub fn nodeBelongsToSubgraph(graph: *const StudioEditableGraph, node_idx: usize, ancestor_idx: usize) bool {
+    if (node_idx >= graph.node_count or ancestor_idx >= graph.subgraph_count or graph.nodes == null) return false;
+    return parentIdBelongsToSubgraph(graph, graph.nodes[node_idx].parent_subgraph_id, ancestor_idx);
+}
+
+pub fn objectIdBelongsToSubgraph(graph: *const StudioEditableGraph, id: [*c]const u8, ancestor_idx: usize) bool {
+    if (id == null or ancestor_idx >= graph.subgraph_count or graph.subgraphs == null) return false;
+    const ancestor_id = std.mem.span(graph.subgraphs[ancestor_idx].id);
+    const object_id = std.mem.span(id);
+    if (std.mem.eql(u8, object_id, ancestor_id)) return true;
+
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count], 0..) |*node, idx| {
+            if (node.id == null) continue;
+            if (std.mem.eql(u8, std.mem.span(node.id), object_id)) {
+                return nodeBelongsToSubgraph(graph, idx, ancestor_idx);
+            }
+        }
+    }
+
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count], 0..) |*subgraph, idx| {
+            if (subgraph.id == null) continue;
+            if (std.mem.eql(u8, std.mem.span(subgraph.id), object_id)) {
+                return idx == ancestor_idx or subgraphBelongsToSubgraph(graph, idx, ancestor_idx);
+            }
+        }
+    }
+
+    return false;
+}
+
+pub fn edgeBelongsToSubgraph(graph: *const StudioEditableGraph, edge_idx: usize, ancestor_idx: usize) bool {
+    if (edge_idx >= graph.edge_count or graph.edges == null) return false;
+    const edge = &graph.edges[edge_idx];
+    return objectIdBelongsToSubgraph(graph, edge.source_id, ancestor_idx) and
+        objectIdBelongsToSubgraph(graph, edge.target_id, ancestor_idx);
+}
+
+pub fn moveSubgraphWithContents(graph: *StudioEditableGraph, subgraph_idx: usize, dx: f64, dy: f64) void {
+    if (subgraph_idx >= graph.subgraph_count or graph.subgraphs == null) return;
+
+    graph.subgraphs[subgraph_idx].x += dx;
+    graph.subgraphs[subgraph_idx].y += dy;
+    graph.subgraphs[subgraph_idx].title_x += dx;
+    graph.subgraphs[subgraph_idx].title_y += dy;
+
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count], 0..) |*node, idx| {
+            if (!nodeBelongsToSubgraph(graph, idx, subgraph_idx)) continue;
+            node.x += dx;
+            node.y += dy;
+        }
+    }
+
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count], 0..) |*subgraph, idx| {
+            if (!subgraphBelongsToSubgraph(graph, idx, subgraph_idx)) continue;
+            subgraph.x += dx;
+            subgraph.y += dy;
+            subgraph.title_x += dx;
+            subgraph.title_y += dy;
+        }
+    }
+}
+
+pub fn subgraphContentBounds(graph: *const StudioEditableGraph, subgraph_idx: usize) ?ContentBounds {
+    if (subgraph_idx >= graph.subgraph_count or graph.subgraphs == null) return null;
+
+    var have_bounds = false;
+    var min_x: f64 = 0;
+    var min_y: f64 = 0;
+    var max_x: f64 = 0;
+    var max_y: f64 = 0;
+
+    const selected = &graph.subgraphs[subgraph_idx];
+    const title_rect = estimatedSubgraphTitleBounds(@ptrCast(selected));
+    extendBounds(&have_bounds, &min_x, &min_y, &max_x, &max_y, title_rect.min_x, title_rect.min_y, title_rect.max_x, title_rect.max_y);
+
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count], 0..) |*node, idx| {
+            if (!nodeBelongsToSubgraph(graph, idx, subgraph_idx)) continue;
+            extendBounds(&have_bounds, &min_x, &min_y, &max_x, &max_y, node.x, node.y, node.x + node.width, node.y + node.height);
+        }
+    }
+
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count], 0..) |*subgraph, idx| {
+            if (!subgraphBelongsToSubgraph(graph, idx, subgraph_idx)) continue;
+            extendBounds(&have_bounds, &min_x, &min_y, &max_x, &max_y, subgraph.x, subgraph.y, subgraph.x + subgraph.width, subgraph.y + subgraph.height);
+
+            const child_title = estimatedSubgraphTitleBounds(@ptrCast(subgraph));
+            extendBounds(&have_bounds, &min_x, &min_y, &max_x, &max_y, child_title.min_x, child_title.min_y, child_title.max_x, child_title.max_y);
+        }
+    }
+
+    if (!have_bounds) return null;
+    return .{ .min_x = min_x, .min_y = min_y, .max_x = max_x, .max_y = max_y };
+}
+
+fn parentIdBelongsToSubgraph(graph: *const StudioEditableGraph, parent_id: [*c]const u8, ancestor_idx: usize) bool {
+    if (parent_id == null or ancestor_idx >= graph.subgraph_count or graph.subgraphs == null) return false;
+    const ancestor_id = std.mem.span(graph.subgraphs[ancestor_idx].id);
+
+    var current_parent = parent_id;
+    while (current_parent != null) {
+        const current_id = std.mem.span(current_parent);
+        if (std.mem.eql(u8, current_id, ancestor_id)) return true;
+        const parent_idx = subgraphIndexById(graph, current_parent) orelse return false;
+        current_parent = graph.subgraphs[parent_idx].parent_subgraph_id;
+    }
+    return false;
+}
+
+fn extendBounds(have_bounds: *bool, min_x: *f64, min_y: *f64, max_x: *f64, max_y: *f64, left: f64, top: f64, right: f64, bottom: f64) void {
+    if (!have_bounds.*) {
+        min_x.* = left;
+        min_y.* = top;
+        max_x.* = right;
+        max_y.* = bottom;
+        have_bounds.* = true;
+        return;
+    }
+
+    min_x.* = @min(min_x.*, left);
+    min_y.* = @min(min_y.*, top);
+    max_x.* = @max(max_x.*, right);
+    max_y.* = @max(max_y.*, bottom);
+}
+
+fn estimatedSubgraphTitleBounds(subgraph: *const StudioEditableSubgraph) ContentBounds {
+    const title_len: usize = if (subgraph.title != null) std.mem.span(subgraph.title).len else 0;
+    const font_size = @as(f64, @floatCast(std.math.clamp(subgraph.title_font_size, 6.0, 48.0)));
+    const half_w = @max(16.0, @as(f64, @floatFromInt(title_len)) * font_size * 0.30);
+    const half_h = font_size * 1.4;
+    return .{
+        .min_x = subgraph.title_x - half_w,
+        .min_y = subgraph.title_y - half_h,
+        .max_x = subgraph.title_x + half_w,
+        .max_y = subgraph.title_y + half_h,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -407,26 +576,35 @@ pub const CanvasState = struct {
     // Viewport helpers
     // -----------------------------------------------------------------------
 
-    /// Fit the full canvas into the given screen viewport, with 5 % padding.
+    /// Fit the configured page width into the given screen viewport.
+    ///
+    /// For document-sized canvases the page is intentionally allowed to be
+    /// taller than the viewport; the page top is aligned near the top edge
+    /// of the view instead of shrinking everything to fit the full height.
     pub fn fitToViewport(self: *CanvasState, screen_w: f64, screen_h: f64) void {
         const g = self.graph orelse return;
         if (screen_w <= 0 or screen_h <= 0) return;
 
         const bounds = graphBounds(g) orelse return;
-        const content_w = @max(bounds.width(), 1.0);
-        const content_h = @max(bounds.height(), 1.0);
+        const page_w = @max(if (g.width > 0) g.width else bounds.width(), 1.0);
+        const page_h = @max(if (g.height > 0) g.height else bounds.height(), 1.0);
 
         const padding_frac: f64 = 0.05;
         const available_w = screen_w * (1.0 - 2.0 * padding_frac);
         const available_h = screen_h * (1.0 - 2.0 * padding_frac);
-        const zoom_w = available_w / content_w;
-        const zoom_h = available_h / content_h;
-        self.viewport.zoom = @min(zoom_w, zoom_h);
+        self.viewport.zoom = available_w / page_w;
 
-        const margin_x = (screen_w - content_w * self.viewport.zoom) / 2.0;
-        const margin_y = (screen_h - content_h * self.viewport.zoom) / 2.0;
-        self.viewport.pan_x = bounds.min_x - margin_x / self.viewport.zoom;
-        self.viewport.pan_y = bounds.min_y - margin_y / self.viewport.zoom;
+        const page_screen_w = page_w * self.viewport.zoom;
+        const page_screen_h = page_h * self.viewport.zoom;
+
+        const margin_x = (screen_w - page_screen_w) / 2.0;
+        const margin_y = if (page_screen_h <= available_h)
+            (screen_h - page_screen_h) / 2.0
+        else
+            screen_h * padding_frac;
+
+        self.viewport.pan_x = -margin_x / self.viewport.zoom;
+        self.viewport.pan_y = -margin_y / self.viewport.zoom;
     }
 
     // -----------------------------------------------------------------------

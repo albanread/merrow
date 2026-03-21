@@ -575,6 +575,34 @@ fn drawSelectionPass(
             const sr = canvasRectToScreen(vp, sg.x, sg.y, sg.width, sg.height);
             sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 220));
             drawSelectionOutline(rt, sr.l, sr.t, sr.r, sr.b, sel_brush, vp.zoom);
+
+            if (graph.nodes != null) {
+                sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 150));
+                for (graph.nodes[0..graph.node_count], 0..) |*node, idx| {
+                    if (!state.nodeBelongsToSubgraph(graph, idx, selection.index)) continue;
+                    const node_sr = canvasRectToScreen(vp, node.x, node.y, node.width, node.height);
+                    drawSelectionOutline(rt, node_sr.l, node_sr.t, node_sr.r, node_sr.b, sel_brush, vp.zoom);
+                }
+            }
+
+            if (graph.subgraphs != null) {
+                sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 150));
+                for (graph.subgraphs[0..graph.subgraph_count], 0..) |*child, idx| {
+                    if (!state.subgraphBelongsToSubgraph(graph, idx, selection.index)) continue;
+                    const child_sr = canvasRectToScreen(vp, child.x, child.y, child.width, child.height);
+                    drawSelectionOutline(rt, child_sr.l, child_sr.t, child_sr.r, child_sr.b, sel_brush, vp.zoom);
+                }
+            }
+
+            if (graph.edges != null) {
+                sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 180));
+                for (graph.edges[0..graph.edge_count], 0..) |*edge, idx| {
+                    if (!state.edgeBelongsToSubgraph(graph, idx, selection.index)) continue;
+                    const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse continue;
+                    drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.35, vp.zoom);
+                }
+            }
+
             handle_fill_brush.SetColor(&d2dColorRgb(255, 255, 255));
             sel_brush.SetColor(&d2dColorRgb(0, 120, 215));
             drawResizeHandles(rt, hit_test.subgraphRect(@ptrCast(sg)), vp, handle_fill_brush, sel_brush);
@@ -735,6 +763,13 @@ pub fn drawCanvas(
     const selb = sel_brush orelse return;
     const hfb = handle_fill_brush orelse return;
     const hovb = hover_brush orelse return;
+
+    // Visible page boundary for the configured working canvas.
+    if (graph.width > 0 and graph.height > 0) {
+        sb.SetColor(&d2dColorRgb(206, 206, 206));
+        const page_rect = canvasRectToScreen(vp, 0.0, 0.0, graph.width, graph.height);
+        rt.DrawRectangle(&rectF(page_rect.l, page_rect.t, page_rect.r, page_rect.b), @ptrCast(sb), 1.0, null);
+    }
 
     // --- Subgraphs (drawn behind nodes) ---
     if (graph.subgraph_count > 0 and graph.subgraphs != null) {

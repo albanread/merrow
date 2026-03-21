@@ -314,20 +314,22 @@ pub fn onMouseMove(
         .move_object => {
             clearHover(canvas, &result);
             const g = canvas.graph orelse return result;
-            const dx: f64 = @as(f64, @floatFromInt(screen_x - canvas.drag.start_screen_x)) / canvas.viewport.zoom;
-            const dy: f64 = @as(f64, @floatFromInt(screen_y - canvas.drag.start_screen_y)) / canvas.viewport.zoom;
+            const dx: f64 = @as(f64, @floatFromInt(screen_x - canvas.drag.last_screen_x)) / canvas.viewport.zoom;
+            const dy: f64 = @as(f64, @floatFromInt(screen_y - canvas.drag.last_screen_y)) / canvas.viewport.zoom;
+
+            canvas.drag.last_screen_x = screen_x;
+            canvas.drag.last_screen_y = screen_y;
 
             switch (canvas.selection.kind) {
                 .node => {
                     if (canvas.selection.index < g.node_count) {
-                        g.nodes[canvas.selection.index].x = canvas.drag.object_origin_x + dx;
-                        g.nodes[canvas.selection.index].y = canvas.drag.object_origin_y + dy;
+                        g.nodes[canvas.selection.index].x += dx;
+                        g.nodes[canvas.selection.index].y += dy;
                     }
                 },
                 .subgraph => {
                     if (canvas.selection.index < g.subgraph_count) {
-                        g.subgraphs[canvas.selection.index].x = canvas.drag.object_origin_x + dx;
-                        g.subgraphs[canvas.selection.index].y = canvas.drag.object_origin_y + dy;
+                        state.moveSubgraphWithContents(g, canvas.selection.index, dx, dy);
                     }
                 },
                 else => {},
@@ -354,6 +356,7 @@ pub fn onMouseMove(
 
 fn applyResize(g: *state.StudioEditableGraph, canvas: *CanvasState, dx: f64, dy: f64) void {
     const min_size: f64 = 20;
+    const content_padding: f64 = 12;
     const ox = canvas.drag.object_origin_x;
     const oy = canvas.drag.object_origin_y;
     const ow = canvas.drag.object_origin_w;
@@ -380,6 +383,26 @@ fn applyResize(g: *state.StudioEditableGraph, canvas: *CanvasState, dx: f64, dy:
     if (drags_top) {
         new_h = @max(min_size, oh - dy);
         new_y = oy + oh - new_h;
+    }
+
+    if (canvas.selection.kind == .subgraph) {
+        if (state.subgraphContentBounds(g, canvas.selection.index)) |content| {
+            const min_left = content.min_x - content_padding;
+            const min_top = content.min_y - content_padding;
+            const min_right = content.max_x + content_padding;
+            const min_bottom = content.max_y + content_padding;
+
+            var right = new_x + new_w;
+            var bottom = new_y + new_h;
+
+            if (new_x > min_left) new_x = min_left;
+            if (new_y > min_top) new_y = min_top;
+            if (right < min_right) right = min_right;
+            if (bottom < min_bottom) bottom = min_bottom;
+
+            new_w = @max(min_size, right - new_x);
+            new_h = @max(min_size, bottom - new_y);
+        }
     }
 
     switch (canvas.selection.kind) {

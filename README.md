@@ -62,6 +62,8 @@ On Windows PowerShell, build and stage a ready-to-run CLI bundle with `merrow.ex
 .\scripts\build_windows_cli.ps1
 ```
 
+For Windows-native compiler setup and a recommendation for Zig plus Microsoft Word COM automation, see [windows-cpp-toolchains.md](c:/projects/zig/merrow/windows-cpp-toolchains.md).
+
 To cross-build a specific Windows target triple:
 
 ```powershell

@@ -46,6 +46,8 @@ const max_label_width: f32 = 220.0;
 const wrapped_text_safety_w: f64 = 12.0;
 const c_allocator = std.heap.c_allocator;
 const preview_raster_scale: f64 = 4.0;
+const preview_page_target_width: u32 = 1800;
+const preview_page_target_height: u32 = 1200;
 
 const NodeSize = struct { w: f64, h: f64 };
 
@@ -292,6 +294,15 @@ fn freeCString(allocator: std.mem.Allocator, text: [*c]const u8) void {
     if (text == null) return;
     const slice = std.mem.span(text);
     allocator.free(@constCast(text)[0 .. slice.len + 1]);
+}
+
+fn optionalCStringSlice(text: [*c]const u8) ?[]const u8 {
+    if (text == null) return null;
+    return std.mem.span(text);
+}
+
+fn studioColorRgba(color: StudioColor) [4]u8 {
+    return .{ color.r, color.g, color.b, color.a };
 }
 
 fn copyCString(dst: [*]u8, dst_len: usize, text: []const u8) void {
@@ -731,6 +742,83 @@ fn lineStyleTag(style: LineStyle) u32 {
 
 fn editableLineStyleTag(dashed: bool) u32 {
     return if (dashed) 1 else 0;
+}
+
+fn editableNodeShape(tag: u32) NodeShape {
+    return switch (tag) {
+        1 => .round,
+        2 => .diamond,
+        3 => .circle,
+        4 => .hexagon,
+        5 => .cylinder,
+        6 => .stadium,
+        7 => .trapezoid,
+        8 => .trapezoid_alt,
+        9 => .parallelogram,
+        10 => .parallelogram_alt,
+        11 => .subroutine,
+        else => .box,
+    };
+}
+
+fn editableLineStyle(tag: u32) LineStyle {
+    return switch (tag) {
+        1 => .dashed,
+        2 => .dotted,
+        3 => .thick,
+        else => .solid,
+    };
+}
+
+fn editableGraphEdgeHasTargetArrow(edge: StudioEditableEdge) bool {
+    return edge.has_arrow != 0 or edge.target_end_style != 0;
+}
+
+fn editableGraphEdgeHasSourceArrow(edge: StudioEditableEdge) bool {
+    return edge.has_source_arrow != 0 or edge.source_end_style != 0;
+}
+
+fn editableNodeText(allocator: std.mem.Allocator, node: StudioEditableNode) !struct {
+    text: []const u8,
+    owned: bool,
+} {
+    const base_text = blk: {
+        const label = std.mem.span(node.label);
+        if (label.len > 0) break :blk label;
+        break :blk std.mem.span(node.id);
+    };
+    const subtitle = optionalCStringSlice(node.subtitle);
+    const attributes = optionalCStringSlice(node.attributes_text);
+    const methods = optionalCStringSlice(node.methods_text);
+
+    if (subtitle == null and attributes == null and methods == null) {
+        return .{ .text = base_text, .owned = false };
+    }
+
+    var buffer = std.ArrayList(u8){};
+    errdefer buffer.deinit(allocator);
+
+    try buffer.appendSlice(allocator, base_text);
+    if (subtitle) |text| {
+        if (text.len > 0) {
+            try buffer.append(allocator, '\n');
+            try buffer.appendSlice(allocator, text);
+        }
+    }
+    if (attributes) |text| {
+        if (text.len > 0) {
+            try buffer.append(allocator, '\n');
+            try buffer.appendSlice(allocator, text);
+        }
+    }
+    if (methods) |text| {
+        if (text.len > 0) {
+            try buffer.append(allocator, '\n');
+            try buffer.appendSlice(allocator, text);
+        }
+    }
+
+    return .{ .text = try buffer.toOwnedSlice(allocator), .owned = true };
 }
 
 fn classRelationEndStyleTag(end_type: class_model.RelationEndType) u32 {
@@ -1793,6 +1881,26 @@ fn exportRenderConfig(layout_scale: f64, raster_scale: f64) RenderConfig {
     return config;
 }
 
+fn layoutScaleForTargetCanvas(base_pixel_width: f64, base_pixel_height: f64, target_width: u32, target_height: u32) f64 {
+    if (target_width == 0 or target_height == 0) return 1.0;
+    if (base_pixel_width <= 1.0 or base_pixel_height <= 1.0) return 1.0;
+
+    const target_w = @as(f64, @floatFromInt(target_width));
+    const target_h = @as(f64, @floatFromInt(target_height));
+    const fit = @min(target_w / base_pixel_width, target_h / base_pixel_height);
+    return std.math.clamp(fit, 0.25, 8.0);
+}
+
+fn downscaleForTargetCanvas(base_pixel_width: f64, base_pixel_height: f64, target_width: u32, target_height: u32) f64 {
+    if (target_width == 0 or target_height == 0) return 1.0;
+    if (base_pixel_width <= 1.0 or base_pixel_height <= 1.0) return 1.0;
+
+    const target_w = @as(f64, @floatFromInt(target_width));
+    const target_h = @as(f64, @floatFromInt(target_height));
+    const fit = @min(target_w / base_pixel_width, target_h / base_pixel_height);
+    return std.math.clamp(@min(fit, 1.0), 0.25, 1.0);
+}
+
 fn scaleGraphGeometry(temp_allocator: std.mem.Allocator, graph: *Graph, scale: f64) !void {
     if (@abs(scale - 1.0) < 0.001) return;
 
@@ -2569,6 +2677,8 @@ fn renderGenericGraphDiagramToFile(
     maybe_font: ?*LoadedFont,
     raster_scale: f64,
     layout_scale: f64,
+    target_width: u32,
+    target_height: u32,
 ) !void {
     var parser = Parser.init(allocator, source) catch |err| {
         return err;
@@ -2616,9 +2726,18 @@ fn renderGenericGraphDiagramToFile(
         .ranksep = 50,
     });
 
-    try scaleGraphGeometry(allocator, &graph, layout_scale);
+    const base_config = exportRenderConfig(1.0, raster_scale);
+    const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
+    const scaled_layout = layout_scale * downscaleForTargetCanvas(
+        (base_bounds.width + base_config.padding * 2.0) * raster_scale,
+        (base_bounds.height + base_config.padding * 2.0) * raster_scale,
+        target_width,
+        target_height,
+    );
 
-    const config = exportRenderConfig(layout_scale, raster_scale);
+    try scaleGraphGeometry(allocator, &graph, scaled_layout);
+
+    const config = exportRenderConfig(scaled_layout, raster_scale);
     const maybe_export_font = if (maybe_font) |loaded| &loaded.font else null;
 
     if (export_svg) {
@@ -2634,6 +2753,8 @@ fn renderGenericGraphDiagramToBytes(
     maybe_font: ?*LoadedFont,
     raster_scale: f64,
     layout_scale: f64,
+    target_width: u32,
+    target_height: u32,
 ) ![]u8 {
     var parser = Parser.init(allocator, source) catch |err| {
         return err;
@@ -2681,9 +2802,122 @@ fn renderGenericGraphDiagramToBytes(
         .ranksep = 50,
     });
 
-    try scaleGraphGeometry(allocator, &graph, layout_scale);
+    const base_config = exportRenderConfig(1.0, raster_scale);
+    const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
+    const scaled_layout = layout_scale * layoutScaleForTargetCanvas(
+        (base_bounds.width + base_config.padding * 2.0) * raster_scale,
+        (base_bounds.height + base_config.padding * 2.0) * raster_scale,
+        target_width,
+        target_height,
+    );
 
-    const config = exportRenderConfig(layout_scale, raster_scale);
+    try scaleGraphGeometry(allocator, &graph, scaled_layout);
+
+    const config = exportRenderConfig(scaled_layout, raster_scale);
+    const maybe_export_font = if (maybe_font) |loaded| &loaded.font else null;
+    return graph_render.renderGraphToPNGBytesWithFont(allocator, &graph, config, maybe_export_font);
+}
+
+fn renderEditableGraphToBytes(
+    allocator: std.mem.Allocator,
+    editable_graph: *const StudioEditableGraph,
+    maybe_font: ?*LoadedFont,
+    raster_scale: f64,
+    target_width: u32,
+    target_height: u32,
+) ![]u8 {
+    var graph = Graph.init(allocator);
+    defer graph.deinitDeep();
+
+    const graph_label = graph.getGraphLabel();
+    graph_label.width = editable_graph.width;
+    graph_label.height = editable_graph.height;
+
+    if (editable_graph.subgraphs) |subgraphs| {
+        for (subgraphs[0..editable_graph.subgraph_count]) |subgraph| {
+            const subgraph_id = std.mem.span(subgraph.id);
+            const title = optionalCStringSlice(subgraph.title);
+
+            try graph.setNode(subgraph_id, .{
+                .label = if (title) |text| text else subgraph_id,
+                .width = subgraph.width,
+                .height = subgraph.height,
+                .x = subgraph.x + subgraph.width / 2.0,
+                .y = subgraph.y + subgraph.height / 2.0,
+                .shape = .round,
+                .is_subgraph = true,
+                .subgraph_title = title,
+                .fill_color = studioColorRgba(subgraph.fill),
+                .stroke_color = studioColorRgba(subgraph.stroke),
+                .stroke_width = @intFromFloat(@round(subgraph.stroke_width)),
+                .text_color = studioColorRgba(subgraph.title_color),
+            });
+        }
+    }
+
+    if (editable_graph.nodes) |nodes| {
+        for (nodes[0..editable_graph.node_count]) |node| {
+            const node_id = std.mem.span(node.id);
+            const node_text = try editableNodeText(allocator, node);
+            errdefer if (node_text.owned) allocator.free(node_text.text);
+
+            try graph.setNode(node_id, .{
+                .label = node_text.text,
+                .label_owned = node_text.owned,
+                .width = node.width,
+                .height = node.height,
+                .shape = editableNodeShape(node.shape),
+                .fill_color = studioColorRgba(node.fill),
+                .stroke_color = studioColorRgba(node.stroke),
+                .stroke_width = @intFromFloat(@round(node.stroke_width)),
+                .text_color = studioColorRgba(node.label_color),
+                .x = node.x,
+                .y = node.y,
+            });
+        }
+    }
+
+    if (editable_graph.subgraphs) |subgraphs| {
+        for (subgraphs[0..editable_graph.subgraph_count]) |subgraph| {
+            if (optionalCStringSlice(subgraph.parent_subgraph_id)) |parent_id| {
+                try graph.setParent(std.mem.span(subgraph.id), parent_id);
+            }
+        }
+    }
+
+    if (editable_graph.nodes) |nodes| {
+        for (nodes[0..editable_graph.node_count]) |node| {
+            if (optionalCStringSlice(node.parent_subgraph_id)) |parent_id| {
+                try graph.setParent(std.mem.span(node.id), parent_id);
+            }
+        }
+    }
+
+    if (editable_graph.edges) |edges| {
+        for (edges[0..editable_graph.edge_count]) |edge| {
+            try graph.setEdge(std.mem.span(edge.source_id), std.mem.span(edge.target_id), .{
+                .label = optionalCStringSlice(edge.label),
+                .line_style = editableLineStyle(edge.line_style),
+                .color = studioColorRgba(edge.color),
+                .thickness = @intFromFloat(@round(edge.thickness)),
+                .arrowhead = if (editableGraphEdgeHasTargetArrow(edge)) "normal" else "none",
+                .arrowtail = if (editableGraphEdgeHasSourceArrow(edge)) "normal" else "none",
+            }, null);
+        }
+    }
+
+    const base_config = exportRenderConfig(1.0, raster_scale);
+    const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
+    const scaled_layout = layoutScaleForTargetCanvas(
+        (base_bounds.width + base_config.padding * 2.0) * raster_scale,
+        (base_bounds.height + base_config.padding * 2.0) * raster_scale,
+        target_width,
+        target_height,
+    );
+
+    try scaleGraphGeometry(allocator, &graph, scaled_layout);
+
+    const config = exportRenderConfig(scaled_layout, raster_scale);
     const maybe_export_font = if (maybe_font) |loaded| &loaded.font else null;
     return graph_render.renderGraphToPNGBytesWithFont(allocator, &graph, config, maybe_export_font);
 }
@@ -2691,6 +2925,8 @@ fn renderGenericGraphDiagramToBytes(
 pub export fn merrow_studio_render_preview_png_bytes(
     source_ptr: [*]const u8,
     source_len: u32,
+    target_width: u32,
+    target_height: u32,
     out_png_len: *u32,
     out_message: [*]u8,
     out_message_len: u32,
@@ -2772,12 +3008,61 @@ pub export fn merrow_studio_render_preview_png_bytes(
             if (maybe_font) |*loaded| loaded else null,
             preview_raster_scale,
             1.0,
+            target_width,
+            target_height,
         ) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
             return null;
         };
         preview_bytes = rendered;
     }
+    defer allocator.free(preview_bytes);
+
+    const owned = c_allocator.alloc(u8, preview_bytes.len) catch {
+        copyCString(out_message, out_message_len, "OutOfMemory");
+        return null;
+    };
+    @memcpy(owned, preview_bytes);
+    out_png_len.* = @intCast(preview_bytes.len);
+    copyCString(out_message, out_message_len, "Preview render complete");
+    return owned.ptr;
+}
+
+pub export fn merrow_studio_render_editable_graph_png_bytes(
+    graph: ?*const StudioEditableGraph,
+    target_width: u32,
+    target_height: u32,
+    out_png_len: *u32,
+    out_message: [*]u8,
+    out_message_len: u32,
+) callconv(.c) [*c]u8 {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    out_png_len.* = 0;
+    const editable_graph = graph orelse {
+        copyCString(out_message, out_message_len, "GraphUnavailable");
+        return null;
+    };
+
+    var maybe_font = loadFont(allocator) catch |err| {
+        copyCString(out_message, out_message_len, @errorName(err));
+        return null;
+    };
+    defer if (maybe_font) |*loaded| loaded.deinit(allocator);
+
+    const preview_bytes = renderEditableGraphToBytes(
+        allocator,
+        editable_graph,
+        if (maybe_font) |*loaded| loaded else null,
+        preview_raster_scale,
+        target_width,
+        target_height,
+    ) catch |err| {
+        copyCString(out_message, out_message_len, @errorName(err));
+        return null;
+    };
     defer allocator.free(preview_bytes);
 
     const owned = c_allocator.alloc(u8, preview_bytes.len) catch {
@@ -2927,6 +3212,8 @@ pub export fn merrow_studio_render_preview_png(
             if (maybe_font) |*loaded| loaded else null,
             1.0,
             1.0,
+            preview_page_target_width,
+            preview_page_target_height,
         ) catch |err| {
             copyCString(out_message, out_message_len, @errorName(err));
             return 4;
@@ -3104,6 +3391,8 @@ pub export fn merrow_studio_export_diagram(
         if (maybe_font) |*loaded| loaded else null,
         safe_raster_scale,
         safe_layout_scale,
+        preview_page_target_width,
+        preview_page_target_height,
     ) catch |err| {
         copyCString(out_message, out_message_len, @errorName(err));
         return 4;
@@ -3747,4 +4036,32 @@ test "editable graph conversion fixture er complex builds" {
 
 test "editable graph conversion fixture saas architecture" {
     try expectEditableGraphFixtureBuilds("test-diagrams/saas_architecture.mmd");
+}
+
+test "editable graph can render to png bytes" {
+    const source =
+        \\flowchart TB
+        \\    subgraph API["API"]
+        \\        gateway[Gateway]
+        \\    end
+        \\    user((User)) --> gateway
+    ;
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    var maybe_font = try loadFont(std.testing.allocator);
+    defer if (maybe_font) |*loaded| loaded.deinit(std.testing.allocator);
+
+    const png = try renderEditableGraphToBytes(
+        std.testing.allocator,
+        graph,
+        if (maybe_font) |*loaded| loaded else null,
+        2.0,
+        1200,
+        900,
+    );
+    defer std.testing.allocator.free(png);
+
+    try std.testing.expect(png.len > 0);
 }

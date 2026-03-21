@@ -1,11 +1,30 @@
 const std = @import("std");
 const win32 = @import("win32");
+const library_db = @import("../../library_db.zig");
 const common = @import("common.zig");
 const constants = @import("constants.zig");
 
 const dialogs = win32.ui.controls.dialogs;
 const foundation = win32.foundation;
+const shell = win32.ui.shell;
+const com = win32.system.com;
 const ui = win32.ui.windows_and_messaging;
+
+pub const MerrowUserFolders = struct {
+    root: []u8,
+    generated: []u8,
+    temp: []u8,
+    assets: []u8,
+    library: []u8,
+
+    pub fn deinit(self: MerrowUserFolders, allocator: std.mem.Allocator) void {
+        allocator.free(self.library);
+        allocator.free(self.assets);
+        allocator.free(self.temp);
+        allocator.free(self.generated);
+        allocator.free(self.root);
+    }
+};
 
 fn setWindowText(allocator: std.mem.Allocator, hwnd: ?foundation.HWND, text: []const u8) void {
     const z_text = allocator.allocSentinel(u8, text.len, 0) catch return;
@@ -68,8 +87,34 @@ pub fn chooseDocumentPath(
     current_document_path: ?[]u8,
     save: bool,
 ) ?[]u8 {
+    const initial_path = if (current_document_path) |path|
+        allocator.dupe(u8, path) catch null
+    else
+        defaultDocumentPath(allocator) catch null;
+    defer if (initial_path) |path| allocator.free(path);
+
+    return chooseCustomPath(
+        allocator,
+        owner_hwnd,
+        initial_path,
+        save,
+        constants.mermaid_dialog_filter,
+        if (save) constants.save_dialog_title else constants.open_dialog_title,
+        constants.default_extension,
+    );
+}
+
+pub fn chooseCustomPath(
+    allocator: std.mem.Allocator,
+    owner_hwnd: ?foundation.HWND,
+    initial_path: ?[]const u8,
+    save: bool,
+    filter: [*:0]const u8,
+    title: [*:0]const u8,
+    default_extension: [*:0]const u8,
+) ?[]u8 {
     var path_buffer = [_]u8{0} ** 1024;
-    if (current_document_path) |path| {
+    if (initial_path) |path| {
         const copy_len = @min(path.len, path_buffer.len - 1);
         @memcpy(path_buffer[0..copy_len], path[0..copy_len]);
         path_buffer[copy_len] = 0;
@@ -78,11 +123,11 @@ pub fn chooseDocumentPath(
     var dialog = std.mem.zeroes(dialogs.OPENFILENAMEA);
     dialog.lStructSize = @sizeOf(dialogs.OPENFILENAMEA);
     dialog.hwndOwner = owner_hwnd;
-    dialog.lpstrFilter = constants.mermaid_dialog_filter;
+    dialog.lpstrFilter = filter;
     dialog.lpstrFile = @ptrCast(path_buffer[0..].ptr);
     dialog.nMaxFile = path_buffer.len;
-    dialog.lpstrTitle = if (save) constants.save_dialog_title else constants.open_dialog_title;
-    dialog.lpstrDefExt = constants.default_extension;
+    dialog.lpstrTitle = title;
+    dialog.lpstrDefExt = default_extension;
     dialog.Flags = common.makeFileDialogFlags(
         common.fileDialogFlagBits(dialogs.OFN_PATHMUSTEXIST) |
             if (save) common.fileDialogFlagBits(dialogs.OFN_OVERWRITEPROMPT) else common.fileDialogFlagBits(dialogs.OFN_FILEMUSTEXIST),
@@ -101,7 +146,83 @@ pub fn loadSourceFromPath(allocator: std.mem.Allocator, path: []const u8) ![]u8 
 }
 
 pub fn saveSourceToPath(path: []const u8, source: []const u8) !void {
+    try ensureParentDirectoryExists(path);
     const file = try std.fs.createFileAbsolute(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(source);
+}
+
+pub fn getMerrowUserFolders(allocator: std.mem.Allocator) !MerrowUserFolders {
+    const documents_root = getDocumentsFolder(allocator) catch try getHomeDocumentsFallback(allocator);
+    defer allocator.free(documents_root);
+
+    const merrow_root = try std.fs.path.join(allocator, &.{ documents_root, "Merrow" });
+    errdefer allocator.free(merrow_root);
+    const merrow_generated = try std.fs.path.join(allocator, &.{ merrow_root, "generated" });
+    errdefer allocator.free(merrow_generated);
+    const merrow_temp = try std.fs.path.join(allocator, &.{ merrow_root, "temp" });
+    errdefer allocator.free(merrow_temp);
+    const merrow_assets = try std.fs.path.join(allocator, &.{ merrow_root, "assets" });
+    errdefer allocator.free(merrow_assets);
+    const merrow_library = try std.fs.path.join(allocator, &.{ merrow_root, "library" });
+    errdefer allocator.free(merrow_library);
+
+    try ensureDirectoryExists(merrow_root);
+    try ensureDirectoryExists(merrow_generated);
+    try ensureDirectoryExists(merrow_temp);
+    try ensureDirectoryExists(merrow_assets);
+    try ensureDirectoryExists(merrow_library);
+
+    return .{
+        .root = merrow_root,
+        .generated = merrow_generated,
+        .temp = merrow_temp,
+        .assets = merrow_assets,
+        .library = merrow_library,
+    };
+}
+
+pub fn defaultLibraryDbPath(allocator: std.mem.Allocator) ![]u8 {
+    const folders = try getMerrowUserFolders(allocator);
+    defer folders.deinit(allocator);
+    return library_db.defaultDatabasePath(allocator, folders.library);
+}
+
+pub fn defaultDocumentPath(allocator: std.mem.Allocator) ![]u8 {
+    const folders = try getMerrowUserFolders(allocator);
+    defer folders.deinit(allocator);
+    return std.fs.path.join(allocator, &.{ folders.generated, "untitled.mmd" });
+}
+
+fn ensureParentDirectoryExists(path: []const u8) !void {
+    const parent = std.fs.path.dirname(path) orelse return;
+    try ensureDirectoryExists(parent);
+}
+
+fn ensureDirectoryExists(path: []const u8) !void {
+    std.fs.makeDirAbsolute(path) catch |err| switch (err) {
+        error.PathAlreadyExists => return,
+        else => return err,
+    };
+}
+
+fn getDocumentsFolder(allocator: std.mem.Allocator) ![]u8 {
+    var wide_path: ?[*:0]u16 = null;
+    const hr = shell.SHGetKnownFolderPath(&shell.FOLDERID_Documents, 0, null, @ptrCast(&wide_path));
+    if (!common.hrFailed(hr) and wide_path != null) {
+        defer com.CoTaskMemFree(wide_path);
+        return std.unicode.utf16LeToUtf8Alloc(allocator, std.mem.span(wide_path.?));
+    }
+
+    const user_profile = try std.process.getEnvVarOwned(allocator, "USERPROFILE");
+    defer allocator.free(user_profile);
+    return std.fs.path.join(allocator, &.{ user_profile, "Documents" });
+}
+
+fn getHomeDocumentsFallback(allocator: std.mem.Allocator) ![]u8 {
+    const home_drive = try std.process.getEnvVarOwned(allocator, "HOMEDRIVE");
+    defer allocator.free(home_drive);
+    const home_path = try std.process.getEnvVarOwned(allocator, "HOMEPATH");
+    defer allocator.free(home_path);
+    return std.fs.path.join(allocator, &.{ home_drive, home_path, "Documents" });
 }

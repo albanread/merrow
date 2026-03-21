@@ -17,6 +17,8 @@ pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_open, constants.menu_open_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save, constants.menu_save_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save_as, constants.menu_save_as_label)) return false;
+    if (!appendMenuItem(file_menu, ui.MF_SEPARATOR, 0, null)) return false;
+    if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_export_word, constants.menu_export_word_label)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(file_menu), constants.file_menu_label)) return false;
 
     const settings_menu = ui.CreatePopupMenu() orelse return false;
@@ -26,6 +28,7 @@ pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
     const view_menu = ui.CreatePopupMenu() orelse return false;
     if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_mermaid, constants.menu_label_mode_mermaid)) return false;
     if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_freeform, constants.menu_label_mode_freeform)) return false;
+    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_toggle_source_panel, constants.menu_label_toggle_source_panel)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(view_menu), constants.view_menu_label)) return false;
 
     if (ui.SetMenu(hwnd, main_menu) == 0) return false;

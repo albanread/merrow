@@ -246,6 +246,30 @@ requires allocating a new C string and updating the `[*c]const u8` pointer.
 **Files:** `inspector.zig` — `mkEdit(..., true)` → `false`, add commit
 handler. `state.zig` — may need a label-update helper that allocates.
 
+### 4.6 Project canvas settings should live in the inspector
+**Current:** Project-level settings were introduced for fonts only. There is
+no corresponding canvas/page-size setting, so the editable graph width/height,
+the freeform working area, and the PNG preview/export target size can drift.
+
+**Expected:** The project inspector should include a `Canvas` section above the
+font controls. It should expose page-size presets with a default roughly equal
+to a Word document page at screen pixel scale: `1800 x 3500`. It should also
+offer narrower presets for tighter diagrams, for example `1600 x 3500`,
+`1400 x 3500`, and `1200 x 3500`.
+
+The selected canvas preset should be persisted in the project sidecar settings
+file alongside the font settings. It should apply to:
+- the freeform working canvas size (`StudioEditableGraph.width/height`)
+- fit-to-viewport behaviour in the editor
+- the target PNG output/preview size where the renderer supports it
+
+The setting is project-wide rather than object-specific, so it belongs in the
+same project/settings inspector family as font settings, not in the selected
+object inspector.
+
+**Files:** `project_settings.zig`, `windows_main.zig`, `inspector.zig`,
+`preview.zig`, `canvas/state.zig`.
+
 ---
 
 ## 5. Keyboard & Shortcuts
