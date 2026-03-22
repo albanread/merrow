@@ -507,9 +507,9 @@ fn drawEdge(
         const hook_h: f32 = 24.0 * zoom_scale;
         const tip_len: f32 = @max(8.0, stroke_w * 4.5);
 
-        // Build dashed style if needed.
+        // Build dashed style if needed (bit 0 of line_style = dashed).
         var dash_style: ?*d2d.ID2D1StrokeStyle = null;
-        if (edge.line_style != 0) {
+        if (edge.line_style & 1 != 0) {
             const props = d2d.D2D1_STROKE_STYLE_PROPERTIES{
                 .startCap = d2d.D2D1_CAP_STYLE_FLAT,
                 .endCap = d2d.D2D1_CAP_STYLE_FLAT,
@@ -522,7 +522,9 @@ fn drawEdge(
             var s: *d2d.ID2D1StrokeStyle = undefined;
             if (factory.CreateStrokeStyle(&props, null, 0, &s) >= 0) dash_style = s;
         }
-        defer if (dash_style) |s| { _ = s.IUnknown.Release(); };
+        defer if (dash_style) |s| {
+            _ = s.IUnknown.Release();
+        };
 
         // Three segments: right → down → left-to-return (with arrow at bottom).
         const p0 = point2F(cx, cy);
@@ -536,7 +538,14 @@ fn drawEdge(
         rt.DrawLine(p1, p2, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
         if (edge.has_arrow != 0) {
             rt.DrawLine(p2, p3_short, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
-            drawArrowTip(factory, rt, stroke_brush, p2.x, p2.y, p3_full.x, p3_full.y, stroke_w);
+            if (edge.line_style & 2 != 0) {
+                drawOpenArrowTip(factory, rt, stroke_brush, p2.x, p2.y, p3_full.x, p3_full.y, stroke_w);
+            } else {
+                drawArrowTip(factory, rt, stroke_brush, p2.x, p2.y, p3_full.x, p3_full.y, stroke_w);
+            }
+        } else if (edge.target_end_style == 10) {
+            rt.DrawLine(p2, p3_full, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
+            drawCrossMarker(rt, stroke_brush, p3_full.x, p3_full.y, stroke_w);
         } else {
             rt.DrawLine(p2, p3_full, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
         }
@@ -601,9 +610,9 @@ fn drawEdgeSegment(
     const stroke_w: f32 = @max(1.0, edge.thickness * zoom_scale * stroke_scale);
     const tip_len: f32 = @max(10.0, stroke_w * 5.0);
 
-    // Build a dashed stroke style when line_style != 0.
+    // Build a dashed stroke style when bit 0 of line_style is set.
     var dash_style: ?*d2d.ID2D1StrokeStyle = null;
-    if (edge.line_style != 0) {
+    if (edge.line_style & 1 != 0) {
         const props = d2d.D2D1_STROKE_STYLE_PROPERTIES{
             .startCap = d2d.D2D1_CAP_STYLE_FLAT,
             .endCap = d2d.D2D1_CAP_STYLE_FLAT,
@@ -618,7 +627,9 @@ fn drawEdgeSegment(
             dash_style = s;
         }
     }
-    defer if (dash_style) |s| { _ = s.IUnknown.Release(); };
+    defer if (dash_style) |s| {
+        _ = s.IUnknown.Release();
+    };
 
     // Shorten the line endpoints so it stops at each arrowhead base, not the tip.
     const seg_dx = dst_x - src_x;
@@ -650,29 +661,18 @@ fn drawEdgeSegment(
 
     // Arrow tip at target end.
     if (edge.has_arrow != 0) {
-        drawArrowTip(
-            factory,
-            rt,
-            stroke_brush,
-            src_x,
-            src_y,
-            dst_x,
-            dst_y,
-            stroke_w,
-        );
+        if (edge.line_style & 2 != 0) {
+            drawOpenArrowTip(factory, rt, stroke_brush, src_x, src_y, dst_x, dst_y, stroke_w);
+        } else {
+            drawArrowTip(factory, rt, stroke_brush, src_x, src_y, dst_x, dst_y, stroke_w);
+        }
+    } else if (edge.target_end_style == 10) {
+        // Cross marker (-x / --x style).
+        drawCrossMarker(rt, stroke_brush, dst_x, dst_y, stroke_w);
     }
     // Arrow tip at source end.
     if (edge.has_source_arrow != 0) {
-        drawArrowTip(
-            factory,
-            rt,
-            stroke_brush,
-            dst_x,
-            dst_y,
-            src_x,
-            src_y,
-            stroke_w,
-        );
+        drawArrowTip(factory, rt, stroke_brush, dst_x, dst_y, src_x, src_y, stroke_w);
     }
 }
 
@@ -828,6 +828,51 @@ fn drawHoverPass(
         },
         else => {},
     }
+}
+
+/// Draw an open chevron arrowhead (two lines forming a ">") at (dx, dy) pointing
+/// away from (sx, sy).  Used for sequence diagram "async" messages (-))).
+fn drawOpenArrowTip(
+    _: *d2d_factory_type,
+    rt: *d2d.ID2D1RenderTarget,
+    brush: *d2d.ID2D1SolidColorBrush,
+    sx: f32,
+    sy: f32,
+    dx: f32,
+    dy: f32,
+    stroke_w: f32,
+) void {
+    const len = @sqrt((dx - sx) * (dx - sx) + (dy - sy) * (dy - sy));
+    if (len < 1.0) return;
+    const ux = (dx - sx) / len;
+    const uy = (dy - sy) / len;
+    const tip_len: f32 = @max(10.0, stroke_w * 5.0);
+    const tip_w: f32 = tip_len * 0.5;
+    const base_x = dx - ux * tip_len;
+    const base_y = dy - uy * tip_len;
+    // Perpendicular unit vector.
+    const px = -uy;
+    const py = ux;
+    const left_x = base_x + px * tip_w;
+    const left_y = base_y + py * tip_w;
+    const right_x = base_x - px * tip_w;
+    const right_y = base_y - py * tip_w;
+    rt.DrawLine(point2F(left_x, left_y), point2F(dx, dy), @ptrCast(brush), stroke_w, null);
+    rt.DrawLine(point2F(right_x, right_y), point2F(dx, dy), @ptrCast(brush), stroke_w, null);
+}
+
+/// Draw a cross (×) marker at (px, py).  Used for sequence diagram "lost
+/// message" (-x / --x) arrows.
+fn drawCrossMarker(
+    rt: *d2d.ID2D1RenderTarget,
+    brush: *d2d.ID2D1SolidColorBrush,
+    px: f32,
+    py: f32,
+    stroke_w: f32,
+) void {
+    const r: f32 = @max(5.0, stroke_w * 3.5);
+    rt.DrawLine(point2F(px - r, py - r), point2F(px + r, py + r), @ptrCast(brush), stroke_w, null);
+    rt.DrawLine(point2F(px + r, py - r), point2F(px - r, py + r), @ptrCast(brush), stroke_w, null);
 }
 
 fn drawArrowTip(

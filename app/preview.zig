@@ -1841,11 +1841,17 @@ fn appendSequenceEditableGraph(
             .label_font_size = 11.0,
             .color = studioColor(.{ 60, 60, 60, 255 }),
             .thickness = 2.0,
-            .line_style = editableLineStyleTag(message.arrow_type.isDashed()),
+            // bit 0 = dashed, bit 1 = open/chevron arrowhead
+            .line_style = (if (message.arrow_type.isDashed()) @as(u32, 1) else 0) |
+                (if (message.arrow_type.isOpenArrow()) @as(u32, 2) else 0),
             .has_arrow = if (message.arrow_type.hasArrowhead() or message.arrow_type.isOpenArrow()) 1 else 0,
             .has_source_arrow = 0,
             .source_end_style = 0,
-            .target_end_style = if (message.arrow_type.hasArrowhead() or message.arrow_type.isOpenArrow()) classRelationEndStyleTag(.dependency) else 0,
+            // target_end_style 10 = cross marker (-x / --x)
+            .target_end_style = if (message.arrow_type.isCross()) 10 else if (message.arrow_type.hasArrowhead() or message.arrow_type.isOpenArrow())
+                classRelationEndStyleTag(.dependency)
+            else
+                0,
         });
     }
 }
