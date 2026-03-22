@@ -123,6 +123,8 @@ const Shape = enum(u32) {
     parallelogram_alt = 10,
     subroutine = 11,
     end_state = 12, // circle within a circle (mermaid state diagram end node)
+    note = 13,      // rectangle with folded top-right corner
+    actor = 14,     // stick figure (sequence diagram participant)
     other = 0xffff_ffff,
     _,
 };
@@ -287,6 +289,50 @@ fn drawNodeShape(
             rt.DrawRectangle(&rc, @ptrCast(stroke_brush), stroke_w, null);
             rt.DrawLine(point2F(sr.l + inset, sr.t), point2F(sr.l + inset, sr.b), @ptrCast(stroke_brush), stroke_w, null);
             rt.DrawLine(point2F(sr.r - inset, sr.t), point2F(sr.r - inset, sr.b), @ptrCast(stroke_brush), stroke_w, null);
+        },
+        .note => {
+            // Rectangle with folded top-right corner.
+            const h = sr.b - sr.t;
+            const max_fold: f32 = 14.0 * @as(f32, @floatCast(vp.zoom));
+            const fold = @min(max_fold, @min((sr.r - sr.l) * 0.20, h * 0.30));
+            const poly = [_]d2d_common.D2D_POINT_2F{
+                point2F(sr.l, sr.t),
+                point2F(sr.r - fold, sr.t),
+                point2F(sr.r, sr.t + fold),
+                point2F(sr.r, sr.b),
+                point2F(sr.l, sr.b),
+            };
+            drawClosedPolygon(factory, rt, &poly, fill_brush, stroke_brush, stroke_w);
+            // Fold crease lines (the triangular ear).
+            rt.DrawLine(point2F(sr.r - fold, sr.t), point2F(sr.r - fold, sr.t + fold), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(sr.r - fold, sr.t + fold), point2F(sr.r, sr.t + fold), @ptrCast(stroke_brush), stroke_w, null);
+        },
+        .actor => {
+            // Stick figure icon in the top 58% + filled name box in the bottom 42%.
+            const h = sr.b - sr.t;
+            const w = sr.r - sr.l;
+            const fig_frac: f32 = 0.58;
+            const fig_h = h * fig_frac;
+            const name_top = sr.t + fig_h;
+            const cx = (sr.l + sr.r) / 2.0;
+            // Name box (lower portion).
+            const name_rc = rectF(sr.l, name_top, sr.r, sr.b);
+            rt.FillRectangle(&name_rc, @ptrCast(fill_brush));
+            rt.DrawRectangle(&name_rc, @ptrCast(stroke_brush), stroke_w, null);
+            // Stick figure strokes.
+            const head_r = @min(w * 0.18, fig_h * 0.30);
+            const head_cy = sr.t + head_r + fig_h * 0.04;
+            const body_top = head_cy + head_r + 1.0;
+            const body_bottom = sr.t + fig_h * 0.72;
+            const arm_y = sr.t + fig_h * 0.52;
+            const arm_half = w * 0.36;
+            const leg_spread = w * 0.28;
+            const head_el = ellipseF(cx, head_cy, head_r, head_r);
+            rt.DrawEllipse(&head_el, @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(cx, body_top), point2F(cx, body_bottom), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(cx - arm_half, arm_y), point2F(cx + arm_half, arm_y), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(cx, body_bottom), point2F(cx - leg_spread, name_top - stroke_w), @ptrCast(stroke_brush), stroke_w, null);
+            rt.DrawLine(point2F(cx, body_bottom), point2F(cx + leg_spread, name_top - stroke_w), @ptrCast(stroke_brush), stroke_w, null);
         },
         else => {
             // Default: rectangle.
@@ -1118,10 +1164,15 @@ pub fn drawCanvas(
                     drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.attributes_text, font_size_n * 0.8, cx_n, attrs_cy, max_w_n - 8.0);
                 }
             } else {
-                // No body — label centered in the whole node.
+                // No body — label centered in the full node rect.
+                // For actor shape (14), place the label inside the lower name-box area.
                 if (node.label != null) {
                     tb.SetColor(&d2dColor(node.label_color));
-                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, (sr_n.t + sr_n.b) / 2.0, max_w_n);
+                    const label_cy = if (node.shape == 14)
+                        sr_n.t + (sr_n.b - sr_n.t) * 0.80 // 80% down = in the name-box
+                    else
+                        (sr_n.t + sr_n.b) / 2.0;
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, label_cy, max_w_n);
                 }
             }
             _ = idx;

@@ -1561,7 +1561,7 @@ fn nodeShapeTag(shape: NodeShape) u32 {
 fn sequenceParticipantShapeTag(kind: seq_model.ParticipantKind) u32 {
     return switch (kind) {
         .box => 1,
-        .actor => 3,
+        .actor => 14,
     };
 }
 
@@ -1658,7 +1658,16 @@ fn appendSequenceEditableGraph(
         });
     }
 
+    // Actor participants need a taller header so the stick figure floats above the name box.
+    const actor_fig_h: f64 = 55.0;
+
     for (diag.participants.items) |*participant| {
+        const is_actor = participant.kind == .actor;
+        // Header: actor extends upward so the figure clears the message area.
+        const hdr_y = if (is_actor) layout.header_y - actor_fig_h else layout.header_y;
+        const hdr_h = if (is_actor) participant.box_height + actor_fig_h else participant.box_height;
+        // shape 14 = stick figure (draws figure + name-box internally); shape 1 = rounded_rect
+        const hdr_shape: u32 = if (is_actor) 14 else 1;
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, participant.id),
             .label = try dupCString(c_allocator, participant.displayName()),
@@ -1666,11 +1675,11 @@ fn appendSequenceEditableGraph(
             .attributes_text = null,
             .methods_text = null,
             .parent_subgraph_id = null,
-            .shape = sequenceParticipantShapeTag(participant.kind),
+            .shape = hdr_shape,
             .x = participant.center_x - participant.box_width / 2.0,
-            .y = layout.header_y,
+            .y = hdr_y,
             .width = participant.box_width,
-            .height = participant.box_height,
+            .height = hdr_h,
             .fill = participant_fill,
             .body_fill = participant_fill,
             .stroke = participant_stroke,
@@ -1689,11 +1698,11 @@ fn appendSequenceEditableGraph(
             .attributes_text = null,
             .methods_text = null,
             .parent_subgraph_id = null,
-            .shape = sequenceParticipantShapeTag(participant.kind),
+            .shape = hdr_shape, // mirror same shape at bottom
             .x = participant.center_x - participant.box_width / 2.0,
             .y = layout.footer_y,
             .width = participant.box_width,
-            .height = participant.box_height,
+            .height = hdr_h,
             .fill = participant_fill,
             .body_fill = participant_fill,
             .stroke = participant_stroke,
@@ -1738,7 +1747,7 @@ fn appendSequenceEditableGraph(
             .attributes_text = null,
             .methods_text = null,
             .parent_subgraph_id = null,
-            .shape = 1,
+            .shape = 13, // note with folded corner
             .x = note_x,
             .y = note.y - note.height / 2.0,
             .width = note.width,
@@ -1799,10 +1808,10 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 0,
-            .x = source_participant.center_x - 4.0,
-            .y = message.y - 4.0,
-            .width = 8.0,
-            .height = 8.0,
+            .x = source_participant.center_x,
+            .y = message.y,
+            .width = 0.0,
+            .height = 0.0,
             .fill = anchor_clear,
             .body_fill = anchor_clear,
             .stroke = anchor_clear,
@@ -1824,10 +1833,10 @@ fn appendSequenceEditableGraph(
                 .methods_text = null,
                 .parent_subgraph_id = null,
                 .shape = 0,
-                .x = target_participant.center_x - 4.0,
-                .y = message.y - 4.0,
-                .width = 8.0,
-                .height = 8.0,
+                .x = target_participant.center_x,
+                .y = message.y,
+                .width = 0.0,
+                .height = 0.0,
                 .fill = anchor_clear,
                 .body_fill = anchor_clear,
                 .stroke = anchor_clear,
