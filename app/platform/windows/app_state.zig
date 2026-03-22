@@ -19,7 +19,6 @@ pub const ChildWindows = struct {
     diagram_label: ?foundation.HWND = null,
     editor: ?foundation.HWND = null,
     toolbar: ?foundation.HWND = null,
-    diagram_selector: ?foundation.HWND = null,
     diagram_prev_button: ?foundation.HWND = null,
     diagram_next_button: ?foundation.HWND = null,
     command: ?foundation.HWND = null,

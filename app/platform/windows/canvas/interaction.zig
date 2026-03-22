@@ -86,6 +86,14 @@ pub const InteractionResult = struct {
     node_inserted: bool = false,
     /// A new subgraph was inserted.
     subgraph_inserted: bool = false,
+    /// When node_inserted: the canvas-space position and shape code for the new node.
+    insert_x: f64 = 0,
+    insert_y: f64 = 0,
+    insert_shape: u32 = 0,
+    /// A link was completed between connector_source and the newly-selected node/subgraph.
+    link_completed: bool = false,
+    /// The source ID for a completed link (pointer into the graph; valid until graph mutation).
+    link_source_id: ?[*:0]const u8 = null,
 };
 
 fn clearHover(canvas: *CanvasState, result: *InteractionResult) void {
@@ -155,24 +163,50 @@ pub fn onLeftButtonDown(
 
     // --- Insertion mode ---
     if (canvas.insertion.kind == .node) {
-        // Placement at canvas_pt will be handled via FFI in a future step.
-        // For now, cancel so the caller can drive the mutation.
-        // We store the target position in the insertion state for the caller.
-        canvas.drag.object_origin_x = canvas_pt.x;
-        canvas.drag.object_origin_y = canvas_pt.y;
+        const shape = canvas.insertion.node_shape;
+        canvas.cancelInsertion();
         result.node_inserted = true;
+        result.insert_x = canvas_pt.x;
+        result.insert_y = canvas_pt.y;
+        result.insert_shape = shape;
         result.document_mutated = true;
         result.needs_redraw = true;
         result.selection_changed = true;
-        canvas.cancelInsertion();
         return result;
     }
     if (canvas.insertion.kind == .subgraph) {
+        canvas.cancelInsertion();
         result.subgraph_inserted = true;
+        result.insert_x = canvas_pt.x;
+        result.insert_y = canvas_pt.y;
         result.document_mutated = true;
         result.needs_redraw = true;
         result.selection_changed = true;
-        canvas.cancelInsertion();
+        return result;
+    }
+    if (canvas.insertion.kind == .connector_source) {
+        // Left-clicking a node or subgraph while in link mode completes the edge.
+        const hit = hit_test.hitTest(g, canvas.selection, canvas.viewport, cx, cy);
+        switch (hit.kind) {
+            .node, .subgraph => {
+                // Save source ID before cancelling insertion.
+                const src_id = canvas.insertion.connector_source_id;
+                canvas.cancelInsertion();
+                if (hit.kind == .node) canvas.selectNode(hit.index) else canvas.selectSubgraph(hit.index);
+                result.link_completed = true;
+                result.link_source_id = src_id;
+                result.document_mutated = true;
+                result.selection_changed = true;
+                result.needs_redraw = true;
+            },
+            else => {
+                // Clicked empty space — cancel linking.
+                canvas.cancelInsertion();
+                canvas.clearSelection();
+                result.selection_changed = true;
+                result.needs_redraw = true;
+            },
+        }
         return result;
     }
 

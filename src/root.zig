@@ -11,6 +11,7 @@ pub const GraphData = model.GraphData;
 // Parser modules
 pub const lexer = @import("parser/lexer.zig");
 pub const flowchart = @import("parser/flowchart.zig");
+pub const directives = @import("parser/directives.zig");
 
 // Pie chart modules
 pub const pie = struct {

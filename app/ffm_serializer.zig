@@ -8,7 +8,7 @@ pub const StudioEditableSubgraph = windows_canvas.StudioEditableSubgraph;
 pub const StudioEditableEdge = windows_canvas.StudioEditableEdge;
 
 pub const magic = "MROW-FFM";
-pub const version: u16 = 2;
+pub const version: u16 = 3;
 const null_string_len = std.math.maxInt(u32);
 
 pub const DeserializeError = error{
@@ -47,6 +47,7 @@ pub fn serializeGraph(allocator: std.mem.Allocator, graph: *const StudioEditable
             try appendF64(&buffer, allocator, item.title_y);
             try appendF32(&buffer, allocator, item.title_font_size);
             try appendColor(&buffer, allocator, item.title_color);
+            try appendU32(&buffer, allocator, item.title_position);
         }
     }
 
@@ -100,7 +101,7 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
     if (!std.mem.eql(u8, file_magic, magic)) return DeserializeError.InvalidMagic;
 
     const file_version = try reader.readU16();
-    if (file_version != version) return DeserializeError.UnsupportedVersion;
+    if (file_version < 2 or file_version > version) return DeserializeError.UnsupportedVersion;
 
     const graph = try std.heap.c_allocator.create(StudioEditableGraph);
     errdefer std.heap.c_allocator.destroy(graph);
@@ -140,6 +141,7 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
                 .title_y = 0,
                 .title_font_size = 0,
                 .title_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+                .title_position = 0,
             };
             errdefer freeSubgraphs(subgraphs[0 .. index + 1]);
 
@@ -158,6 +160,7 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
             item.title_y = try reader.readF64();
             item.title_font_size = try reader.readF32();
             item.title_color = try reader.readColor();
+            item.title_position = if (file_version >= 3) try reader.readU32() else 0;
         }
     }
 

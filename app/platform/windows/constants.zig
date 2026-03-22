@@ -61,9 +61,25 @@ pub const menu_label_mode_mermaid: [*:0]const u8 = "&Mermaid Source Mode";
 pub const menu_label_mode_freeform: [*:0]const u8 = "&Freeform Canvas Mode";
 pub const menu_label_toggle_source_panel: [*:0]const u8 = "Show &Source Panel";
 
-pub const toolbar_slot_1_label: [*:0]const u8 = "Fit Page";
-pub const toolbar_slot_2_label: [*:0]const u8 = "100%";
-pub const toolbar_slot_3_label: [*:0]const u8 = "Center";
+pub const toolbar_slot_1_label: [*:0]const u8 = "Fit";
+pub const toolbar_slot_2_label: [*:0]const u8 = "2x";
+pub const toolbar_slot_3_label: [*:0]const u8 = "4x";
+
+/// Canvas right-click context menu — flowchart "Add ..." items.
+/// IDs map 1:1 to NodeShape enum values (shape code in low 8 bits, 0x25xx prefix).
+pub const ctx_menu_add_box: usize = 2501; // NodeShape.box
+pub const ctx_menu_add_round: usize = 2502; // NodeShape.round
+pub const ctx_menu_add_diamond: usize = 2503; // NodeShape.diamond
+pub const ctx_menu_add_circle: usize = 2504; // NodeShape.circle
+pub const ctx_menu_add_hexagon: usize = 2505; // NodeShape.hexagon
+pub const ctx_menu_add_cylinder: usize = 2506; // NodeShape.cylinder
+pub const ctx_menu_add_stadium: usize = 2507; // NodeShape.stadium
+pub const ctx_menu_add_subgraph: usize = 2508; // inserts a subgraph group
+/// Context menu for selected objects.
+pub const ctx_menu_delete: usize = 2509;
+pub const ctx_menu_begin_link: usize = 2510;
+pub const ctx_menu_end_link: usize = 2511;
+pub const ctx_menu_cancel_link: usize = 2512;
 
 pub const Layout = struct {
     padding: i32 = 12,
@@ -71,12 +87,12 @@ pub const Layout = struct {
     status_height: i32 = 22,
     command_bar_height: i32 = 40,
     diagram_selector_height: i32 = 32,
-    diagram_label_width: i32 = 120,
+    diagram_label_width: i32 = 72,
     diagram_nav_button_width: i32 = 56,
     diagram_header_padding: i32 = 8,
     command_button_width: i32 = 88,
-    toolbar_button_width: i32 = 76,
-    diagram_selector_width: i32 = 180,
+    toolbar_button_width: i32 = 56,
+    diagram_selector_width: i32 = 120,
     toolbar_inner_padding: i32 = 6,
     min_preview_width: i32 = 420,
     min_editor_width: i32 = 780,

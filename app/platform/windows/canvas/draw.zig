@@ -340,6 +340,60 @@ fn drawLabel(
     );
 }
 
+fn drawLabelAligned(
+    rt: *d2d.ID2D1RenderTarget,
+    dwrite_factory: *dwrite.IDWriteFactory,
+    font_family: FontFamily,
+    text_brush: *d2d.ID2D1SolidColorBrush,
+    text: [*c]const u8,
+    font_size_pt: f32,
+    center_x: f32,
+    center_y: f32,
+    max_w: f32,
+    h_align: dwrite.DWRITE_TEXT_ALIGNMENT,
+) void {
+    if (text == null) return;
+    const text_slice = std.mem.span(text);
+    if (text_slice.len == 0) return;
+
+    var arena_buf: [1024]u8 = undefined;
+    var arena = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const alloc = arena.allocator();
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(alloc, text_slice) catch return;
+    defer alloc.free(wide);
+
+    var format: ?*dwrite.IDWriteTextFormat = null;
+    const hr = dwrite_factory.CreateTextFormat(
+        fontFamilyNameW(font_family),
+        null,
+        dwrite.DWRITE_FONT_WEIGHT_NORMAL,
+        dwrite.DWRITE_FONT_STYLE_NORMAL,
+        dwrite.DWRITE_FONT_STRETCH_NORMAL,
+        font_size_pt,
+        &locale_name_w,
+        @ptrCast(&format),
+    );
+    if (hr < 0 or format == null) return;
+    defer _ = format.?.IUnknown.Release();
+
+    _ = format.?.SetTextAlignment(h_align);
+    _ = format.?.SetParagraphAlignment(dwrite.DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    const half_w = max_w / 2.0;
+    const half_h: f32 = font_size_pt * 1.4;
+    const text_rect = rectF(center_x - half_w, center_y - half_h, center_x + half_w, center_y + half_h);
+
+    rt.DrawText(
+        wide.ptr,
+        @intCast(wide.len),
+        format.?,
+        &text_rect,
+        @ptrCast(text_brush),
+        d2d.D2D1_DRAW_TEXT_OPTIONS_NONE,
+        dwrite.DWRITE_MEASURING_MODE_NATURAL,
+    );
+}
+
 fn fontFamilyNameW(family: FontFamily) [*:0]const u16 {
     return switch (family) {
         .lato => &font_family_lato_w,
@@ -411,6 +465,7 @@ fn drawPointHandle(
 // ---------------------------------------------------------------------------
 
 fn drawEdge(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     dwrite_factory: *dwrite.IDWriteFactory,
     font_family: FontFamily,
@@ -422,7 +477,7 @@ fn drawEdge(
     text_brush: *d2d.ID2D1SolidColorBrush,
 ) void {
     const points = edgeScreenEndpoints(graph, edge, vp) orelse return;
-    drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0, vp.zoom);
+    drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0, vp.zoom);
     drawEdgeLabel(rt, dwrite_factory, font_family, edge, points, label_fill_brush, text_brush);
 }
 
@@ -461,6 +516,7 @@ fn edgeScreenEndpoints(
 }
 
 fn drawEdgeSegment(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     src_x: f32,
     src_y: f32,
@@ -473,9 +529,31 @@ fn drawEdgeSegment(
 ) void {
     const zoom_scale: f32 = @floatCast(@max(zoom, 0.25));
     const stroke_w: f32 = @max(1.0, edge.thickness * zoom_scale * stroke_scale);
+    const tip_len: f32 = @max(10.0, stroke_w * 5.0);
+
+    // Shorten the line endpoints so it stops at each arrowhead base, not the tip.
+    const seg_dx = dst_x - src_x;
+    const seg_dy = dst_y - src_y;
+    const seg_len = @sqrt(seg_dx * seg_dx + seg_dy * seg_dy);
+    var line_src_x = src_x;
+    var line_src_y = src_y;
+    var line_dst_x = dst_x;
+    var line_dst_y = dst_y;
+    if (seg_len > 1.0) {
+        const ux = seg_dx / seg_len;
+        const uy = seg_dy / seg_len;
+        if (edge.has_arrow != 0) {
+            line_dst_x = dst_x - ux * tip_len;
+            line_dst_y = dst_y - uy * tip_len;
+        }
+        if (edge.has_source_arrow != 0) {
+            line_src_x = src_x + ux * tip_len;
+            line_src_y = src_y + uy * tip_len;
+        }
+    }
     rt.DrawLine(
-        point2F(src_x, src_y),
-        point2F(dst_x, dst_y),
+        point2F(line_src_x, line_src_y),
+        point2F(line_dst_x, line_dst_y),
         @ptrCast(stroke_brush),
         stroke_w,
         null,
@@ -484,6 +562,7 @@ fn drawEdgeSegment(
     // Arrow tip at target end.
     if (edge.has_arrow != 0) {
         drawArrowTip(
+            factory,
             rt,
             stroke_brush,
             src_x,
@@ -496,6 +575,7 @@ fn drawEdgeSegment(
     // Arrow tip at source end.
     if (edge.has_source_arrow != 0) {
         drawArrowTip(
+            factory,
             rt,
             stroke_brush,
             dst_x,
@@ -551,6 +631,7 @@ fn drawEdgeLabel(
 }
 
 fn drawSelectionPass(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     graph: *const StudioEditableGraph,
     vp: Viewport,
@@ -599,7 +680,7 @@ fn drawSelectionPass(
                 for (graph.edges[0..graph.edge_count], 0..) |*edge, idx| {
                     if (!state.edgeBelongsToSubgraph(graph, idx, selection.index)) continue;
                     const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse continue;
-                    drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.35, vp.zoom);
+                    drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.35, vp.zoom);
                 }
             }
 
@@ -612,7 +693,7 @@ fn drawSelectionPass(
             const edge = &graph.edges[selection.index];
             const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse return;
             sel_brush.SetColor(&d2dColorRgba(0, 120, 215, 220));
-            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.8, vp.zoom);
+            drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), sel_brush, 1.8, vp.zoom);
             handle_fill_brush.SetColor(&d2dColorRgb(255, 255, 255));
             sel_brush.SetColor(&d2dColorRgb(0, 120, 215));
             drawPointHandle(rt, points.src_x, points.src_y, handle_fill_brush, sel_brush);
@@ -623,6 +704,7 @@ fn drawSelectionPass(
 }
 
 fn drawHoverPass(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     graph: *const StudioEditableGraph,
     vp: Viewport,
@@ -653,13 +735,14 @@ fn drawHoverPass(
             const edge = &graph.edges[hover.index];
             const points = edgeScreenEndpoints(graph, @ptrCast(edge), vp) orelse return;
             hover_brush.SetColor(&d2dColorRgba(0, 120, 215, 150));
-            drawEdgeSegment(rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), hover_brush, 1.35, vp.zoom);
+            drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, @ptrCast(edge), hover_brush, 1.35, vp.zoom);
         },
         else => {},
     }
 }
 
 fn drawArrowTip(
+    factory: *d2d_factory_type,
     rt: *d2d.ID2D1RenderTarget,
     brush: *d2d.ID2D1SolidColorBrush,
     sx: f32,
@@ -672,16 +755,31 @@ fn drawArrowTip(
     if (len < 1.0) return;
     const ux = (dx - sx) / len;
     const uy = (dy - sy) / len;
-    const tip_len: f32 = @max(8.0, stroke_w * 4.0);
-    const tip_w: f32 = tip_len * 0.45;
+    const tip_len: f32 = @max(10.0, stroke_w * 5.0);
+    const tip_w: f32 = tip_len * 0.5;
     const base_x = dx - ux * tip_len;
     const base_y = dy - uy * tip_len;
     const left_x = base_x - uy * tip_w;
     const left_y = base_y + ux * tip_w;
     const right_x = base_x + uy * tip_w;
     const right_y = base_y - ux * tip_w;
-    rt.DrawLine(point2F(dx, dy), point2F(left_x, left_y), @ptrCast(brush), stroke_w, null);
-    rt.DrawLine(point2F(dx, dy), point2F(right_x, right_y), @ptrCast(brush), stroke_w, null);
+
+    var path_raw: *d2d.ID2D1PathGeometry = undefined;
+    if (factory.CreatePathGeometry(&path_raw) < 0) return;
+    defer _ = path_raw.IUnknown.Release();
+
+    var sink_raw: *d2d.ID2D1GeometrySink = undefined;
+    if (path_raw.Open(&sink_raw) < 0) return;
+    sink_raw.ID2D1SimplifiedGeometrySink.BeginFigure(point2F(dx, dy), d2d_common.D2D1_FIGURE_BEGIN_FILLED);
+    sink_raw.AddLine(point2F(left_x, left_y));
+    sink_raw.AddLine(point2F(right_x, right_y));
+    sink_raw.ID2D1SimplifiedGeometrySink.EndFigure(d2d_common.D2D1_FIGURE_END_CLOSED);
+    if (sink_raw.ID2D1SimplifiedGeometrySink.Close() < 0) {
+        _ = sink_raw.IUnknown.Release();
+        return;
+    }
+    _ = sink_raw.IUnknown.Release();
+    rt.FillGeometry(@ptrCast(path_raw), @ptrCast(brush), null);
 }
 
 fn findNodeOrSubgraphCentre(graph: *const StudioEditableGraph, id: [*c]const u8) ?[2]f64 {
@@ -724,6 +822,9 @@ pub fn drawCanvas(
     vp: Viewport,
     selection: Selection,
     hover: Selection,
+    insertion: state.InsertionState,
+    link_mouse_x: f32,
+    link_mouse_y: f32,
 ) void {
     const rt = ctx.render_target;
 
@@ -788,8 +889,22 @@ pub fn drawCanvas(
             // Title.
             if (sg.title != null) {
                 tb.SetColor(&d2dColor(sg.title_color));
-                const title_s = vp.canvasToScreen(sg.title_x, sg.title_y);
-                drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, sg.title, std.math.clamp(sg.title_font_size, 6.0, 48.0), @floatCast(title_s.x), @floatCast(title_s.y), sr.r - sr.l);
+                const font_size = std.math.clamp(sg.title_font_size, 6.0, 48.0);
+                const v_pad: f32 = font_size * 0.85;
+                const h_inset: f32 = 8.0;
+                const sg_center_x = (sr.l + sr.r) / 2.0;
+                const sg_w = (sr.r - sr.l) - h_inset * 2.0;
+                const lp: state.SubgraphLabelPosition = @enumFromInt(sg.title_position);
+                const title_cy: f32 = switch (lp) {
+                    .bottom_left, .bottom_center, .bottom_right => sr.b - v_pad,
+                    else => sr.t + v_pad,
+                };
+                const h_align: dwrite.DWRITE_TEXT_ALIGNMENT = switch (lp) {
+                    .top_left, .bottom_left => dwrite.DWRITE_TEXT_ALIGNMENT_LEADING,
+                    .top_right, .bottom_right => dwrite.DWRITE_TEXT_ALIGNMENT_TRAILING,
+                    else => dwrite.DWRITE_TEXT_ALIGNMENT_CENTER,
+                };
+                drawLabelAligned(rt, ctx.dwrite_factory, ctx.font_family, tb, sg.title, font_size, sg_center_x, title_cy, sg_w, h_align);
             }
         }
     }
@@ -802,7 +917,7 @@ pub fn drawCanvas(
             color.a = 1.0;
             sb.SetColor(&color);
             _ = idx;
-            drawEdge(rt, ctx.dwrite_factory, ctx.font_family, graph, edge, vp, sb, fb, tb);
+            drawEdge(ctx.d2d_factory, rt, ctx.dwrite_factory, ctx.font_family, graph, edge, vp, sb, fb, tb);
         }
     }
 
@@ -825,6 +940,52 @@ pub fn drawCanvas(
         }
     }
 
-    drawHoverPass(rt, graph, vp, hover, selection, hovb);
-    drawSelectionPass(rt, graph, vp, selection, selb, hfb);
+    drawHoverPass(ctx.d2d_factory, rt, graph, vp, hover, selection, hovb);
+    drawSelectionPass(ctx.d2d_factory, rt, graph, vp, selection, selb, hfb);
+
+    // --- Link preview (connector_source mode) ---
+    if (insertion.kind == .connector_source) {
+        if (insertion.connector_source_id) |src_id| {
+            const id_slice = std.mem.span(src_id);
+            var src_sx: ?f32 = null;
+            var src_sy: ?f32 = null;
+
+            if (graph.node_count > 0 and graph.nodes != null) {
+                for (graph.nodes[0..graph.node_count]) |*n| {
+                    if (n.id == null) continue;
+                    if (std.mem.eql(u8, std.mem.span(n.id), id_slice)) {
+                        const s = vp.canvasToScreen(n.x + n.width / 2.0, n.y + n.height / 2.0);
+                        src_sx = @floatCast(s.x);
+                        src_sy = @floatCast(s.y);
+                        break;
+                    }
+                }
+            }
+            if (src_sx == null and graph.subgraph_count > 0 and graph.subgraphs != null) {
+                for (graph.subgraphs[0..graph.subgraph_count]) |*sg| {
+                    if (sg.id == null) continue;
+                    if (std.mem.eql(u8, std.mem.span(sg.id), id_slice)) {
+                        const s = vp.canvasToScreen(sg.x + sg.width / 2.0, sg.y + sg.height / 2.0);
+                        src_sx = @floatCast(s.x);
+                        src_sy = @floatCast(s.y);
+                        break;
+                    }
+                }
+            }
+
+            if (src_sx) |scx| {
+                const scy = src_sy.?;
+                var link_brush: ?*d2d.ID2D1SolidColorBrush = null;
+                makeBrush(rt, d2dColorRgba(30, 100, 220, 200), &link_brush);
+                defer {
+                    if (link_brush) |b| _ = b.IUnknown.Release();
+                }
+                if (link_brush) |lb| {
+                    rt.DrawLine(point2F(scx, scy), point2F(link_mouse_x, link_mouse_y), @ptrCast(lb), 2.0, null);
+                    const end_ell = ellipseF(link_mouse_x, link_mouse_y, 5.0, 5.0);
+                    rt.FillEllipse(&end_ell, @ptrCast(lb));
+                }
+            }
+        }
+    }
 }

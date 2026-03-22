@@ -13,6 +13,8 @@ pub const schema_sql =
     \\    source_file     TEXT,
     \\    mermaid_source  TEXT NOT NULL,
     \\    graph_blob      BLOB NOT NULL,
+    \\    canvas_width_cm REAL,
+    \\    canvas_height_cm REAL,
     \\    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     \\    modified_at     TEXT NOT NULL DEFAULT (datetime('now'))
     \\);
@@ -46,6 +48,8 @@ pub const FfmSaveRecord = struct {
     source_file: ?[]const u8 = null,
     mermaid_source: []const u8,
     graph_blob: []const u8,
+    canvas_width_cm: ?f64 = null,
+    canvas_height_cm: ?f64 = null,
 };
 
 pub const FfmRecord = struct {
@@ -54,6 +58,8 @@ pub const FfmRecord = struct {
     source_file: ?[]u8,
     mermaid_source: []u8,
     graph_blob: []u8,
+    canvas_width_cm: ?f64,
+    canvas_height_cm: ?f64,
 
     pub fn deinit(self: *FfmRecord, allocator: std.mem.Allocator) void {
         if (self.diagram_name) |value| allocator.free(value);
@@ -95,24 +101,23 @@ pub const LibraryDb = struct {
     }
 
     pub fn ensureSchema(self: *LibraryDb) !void {
-        var error_message: [*c]u8 = null;
-        defer if (error_message != null) sqlite.sqlite3_free(error_message);
-
-        if (sqlite.sqlite3_exec(self.handle, schema_sql.ptr, null, null, @ptrCast(&error_message)) != sqlite.SQLITE_OK) {
+        if (sqlite.sqlite3_exec(self.handle, schema_sql.ptr, null, null, null) != sqlite.SQLITE_OK) {
             return DbError.SchemaFailed;
         }
     }
 
     pub fn saveFfm(self: *LibraryDb, content_hash: []const u8, record: FfmSaveRecord) !void {
         const sql =
-            "INSERT INTO ffm (content_hash, graph_type, diagram_name, source_file, mermaid_source, graph_blob, created_at, modified_at) " ++
-            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), datetime('now')) " ++
+            "INSERT INTO ffm (content_hash, graph_type, diagram_name, source_file, mermaid_source, graph_blob, canvas_width_cm, canvas_height_cm, created_at, modified_at) " ++
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now')) " ++
             "ON CONFLICT(content_hash) DO UPDATE SET " ++
             "graph_type = excluded.graph_type, " ++
             "diagram_name = excluded.diagram_name, " ++
             "source_file = excluded.source_file, " ++
             "mermaid_source = excluded.mermaid_source, " ++
             "graph_blob = excluded.graph_blob, " ++
+            "canvas_width_cm = excluded.canvas_width_cm, " ++
+            "canvas_height_cm = excluded.canvas_height_cm, " ++
             "modified_at = datetime('now');";
 
         const statement = try prepare(self.handle, sql);
@@ -124,12 +129,14 @@ pub const LibraryDb = struct {
         try bindOptionalText(statement, 4, record.source_file);
         try bindText(statement, 5, record.mermaid_source);
         try bindBlob(statement, 6, record.graph_blob);
+        try bindOptionalDouble(statement, 7, record.canvas_width_cm);
+        try bindOptionalDouble(statement, 8, record.canvas_height_cm);
         try stepDone(statement);
     }
 
     pub fn loadFfm(self: *LibraryDb, allocator: std.mem.Allocator, content_hash: []const u8) !?FfmRecord {
         const sql =
-            "SELECT graph_blob, graph_type, diagram_name, source_file, mermaid_source " ++
+            "SELECT graph_blob, graph_type, diagram_name, source_file, mermaid_source, canvas_width_cm, canvas_height_cm " ++
             "FROM ffm WHERE content_hash = ?1 LIMIT 1;";
 
         const statement = try prepare(self.handle, sql);
@@ -147,6 +154,8 @@ pub const LibraryDb = struct {
             .diagram_name = try dupeOptionalColumnText(allocator, statement, 2),
             .source_file = try dupeOptionalColumnText(allocator, statement, 3),
             .mermaid_source = try dupeColumnText(allocator, statement, 4),
+            .canvas_width_cm = optionalColumnDouble(statement, 5),
+            .canvas_height_cm = optionalColumnDouble(statement, 6),
         };
     }
 
@@ -191,6 +200,16 @@ fn bindOptionalText(statement: *sqlite.sqlite3_stmt, index: c_int, value: ?[]con
     }
 }
 
+fn bindOptionalDouble(statement: *sqlite.sqlite3_stmt, index: c_int, value: ?f64) !void {
+    if (value) |number| {
+        if (sqlite.sqlite3_bind_double(statement, index, number) != sqlite.SQLITE_OK) {
+            return DbError.BindFailed;
+        }
+    } else if (sqlite.sqlite3_bind_null(statement, index) != sqlite.SQLITE_OK) {
+        return DbError.BindFailed;
+    }
+}
+
 fn bindBlob(statement: *sqlite.sqlite3_stmt, index: c_int, value: []const u8) !void {
     if (sqlite.sqlite3_bind_blob(statement, index, value.ptr, @intCast(value.len), null) != sqlite.SQLITE_OK) {
         return DbError.BindFailed;
@@ -213,6 +232,11 @@ fn dupeOptionalColumnText(allocator: std.mem.Allocator, statement: *sqlite.sqlit
     const raw = sqlite.sqlite3_column_text(statement, column) orelse return null;
     const len: usize = @intCast(sqlite.sqlite3_column_bytes(statement, column));
     return try allocator.dupe(u8, @as([*]const u8, @ptrCast(raw))[0..len]);
+}
+
+fn optionalColumnDouble(statement: *sqlite.sqlite3_stmt, column: c_int) ?f64 {
+    if (sqlite.sqlite3_column_type(statement, column) == sqlite.SQLITE_NULL) return null;
+    return sqlite.sqlite3_column_double(statement, column);
 }
 
 fn dupeColumnBlob(allocator: std.mem.Allocator, statement: *sqlite.sqlite3_stmt, column: c_int) ![]u8 {

@@ -6,6 +6,7 @@ const library_db = @import("../library_db.zig");
 const markdown_parser = @import("../markdown_parser.zig");
 const document_model = @import("../document_model.zig");
 const merrow_lexer = merrow.lexer;
+const merrow_directives = merrow.directives;
 const windows_app_state = @import("windows/app_state.zig");
 const windows_canvas = @import("windows/canvas.zig");
 const windows_common = @import("windows/common.zig");
@@ -111,6 +112,7 @@ const wcg_document = ?*anyopaque;
 const WCG_ABI_VERSION: u32 = 1;
 const WCG_OK: wcg_status = 0;
 const WCG_HIDDEN: u32 = 1;
+const WCG_UNIT_MM: u32 = 2;
 const WCG_UNIT_PCT_CONTENT: u32 = 4;
 const WCG_BANNER_ALL_PAGES: u32 = 0;
 const WCG_TRAILER_FOOTER: u32 = 0;
@@ -278,6 +280,10 @@ var current_status_message: ?[]u8 = null;
 var is_document_dirty = false;
 var suppress_editor_change = false;
 var last_editor_text_hash: u64 = 0;
+var startup_layout_done = false;
+/// Last known mouse position within the canvas window (screen coords), for link preview.
+var canvas_mouse_screen_x: i32 = 0;
+var canvas_mouse_screen_y: i32 = 0;
 
 const empty_c_string = windows_constants.empty_c_string;
 const setPosFlagsBits = windows_common.setPosFlagsBits;
@@ -297,6 +303,8 @@ const releaseUnknown = windows_common.releaseUnknown;
 const fileDialogFlagBits = windows_common.fileDialogFlagBits;
 const makeFileDialogFlags = windows_common.makeFileDialogFlags;
 const preview_bitmap_scale: f64 = 4.0;
+const preview_min_zoom: f64 = 0.25;
+const preview_max_zoom: f64 = 32.0;
 const ffm_persist_debounce_ms: u32 = 450;
 // Minimum virtual border around the image in display pixels; actual margin is
 // max(preview_pan_margin, viewport/4) so it grows with window size.
@@ -675,8 +683,565 @@ fn saveSourceToPath(path: []const u8, source: []const u8) !void {
     return windows_document.saveSourceToPath(path, source);
 }
 
+const CanvasSizeCm = struct {
+    width_cm: f64,
+    height_cm: f64,
+};
+
+fn currentProjectCanvasSizeCm() CanvasSizeCm {
+    return .{
+        .width_cm = project_font_settings.canvas_width_cm,
+        .height_cm = project_font_settings.canvas_height_cm,
+    };
+}
+
+fn canvasDimensionsForSizeCm(size_cm: CanvasSizeCm) CanvasDimensions {
+    return windows_project_settings.canvasDimensionsFromCentimeters(size_cm.width_cm, size_cm.height_cm);
+}
+
 fn currentProjectCanvasDimensions() CanvasDimensions {
-    return windows_project_settings.canvasPresetDimensions(project_font_settings.canvas_preset);
+    return canvasDimensionsForSizeCm(currentProjectCanvasSizeCm());
+}
+
+fn exportDimensionsForSizeCm(size_cm: CanvasSizeCm) CanvasDimensions {
+    return windows_project_settings.exportDimensionsFromCentimeters(size_cm.width_cm, size_cm.height_cm);
+}
+
+// ---------------------------------------------------------------------------
+// Freeform canvas context menu
+// ---------------------------------------------------------------------------
+
+/// Node shape u32 constants (must stay in sync with src/model.zig NodeShape enum order).
+const node_shape_box: u32 = 0;
+const node_shape_round: u32 = 1;
+const node_shape_diamond: u32 = 2;
+const node_shape_circle: u32 = 3;
+const node_shape_hexagon: u32 = 4;
+const node_shape_cylinder: u32 = 5;
+const node_shape_stadium: u32 = 6;
+
+/// Graph type constants (must stay in sync with StudioGraphType enum in preview.zig).
+const graph_type_flowchart: u32 = 0;
+
+/// Show the canvas right-click context menu when nothing is selected (no-selection state).
+/// Returns immediately via TPM_RETURNCMD and dispatches the result.
+fn showCanvasContextMenuEmpty(hwnd: foundation.HWND, client_x: i32, client_y: i32) void {
+    const g = canvas_renderer.canvas_state.graph orelse return;
+    if (g.graph_type != graph_type_flowchart) return;
+
+    const menu = ui.CreatePopupMenu() orelse return;
+    defer _ = ui.DestroyMenu(menu);
+
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_box, "Add Box");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_round, "Add Rounded Box");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_diamond, "Add Diamond (Decision)");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_circle, "Add Circle");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_stadium, "Add Stadium (Pill)");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_hexagon, "Add Hexagon");
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_cylinder, "Add Cylinder (Database)");
+    _ = ui.AppendMenuA(menu, ui.MF_SEPARATOR, 0, null);
+    _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_subgraph, "Add Group");
+
+    // Convert client coords to screen coords for popup placement.
+    var pt = foundation.POINT{ .x = client_x, .y = client_y };
+    _ = gdi.ClientToScreen(hwnd, &pt);
+
+    // TPM_LEFTALIGN=0x0000 | TPM_TOPALIGN=0x0000 | TPM_RETURNCMD=0x0100
+    const tpm_flags: ui.TRACK_POPUP_MENU_FLAGS = @bitCast(@as(u32, 0x0100));
+    const cmd_raw = ui.TrackPopupMenu(
+        menu,
+        tpm_flags,
+        pt.x,
+        pt.y,
+        0,
+        hwnd,
+        null,
+    );
+
+    const cmd: usize = @intCast(cmd_raw);
+    if (cmd == 0) return; // user dismissed
+
+    const shape: ?u32 = switch (cmd) {
+        windows_constants.ctx_menu_add_box => node_shape_box,
+        windows_constants.ctx_menu_add_round => node_shape_round,
+        windows_constants.ctx_menu_add_diamond => node_shape_diamond,
+        windows_constants.ctx_menu_add_circle => node_shape_circle,
+        windows_constants.ctx_menu_add_stadium => node_shape_stadium,
+        windows_constants.ctx_menu_add_hexagon => node_shape_hexagon,
+        windows_constants.ctx_menu_add_cylinder => node_shape_cylinder,
+        else => null,
+    };
+
+    if (cmd == windows_constants.ctx_menu_add_subgraph) {
+        // Activate subgraph insertion mode.
+        canvas_renderer.canvas_state.insertion = .{ .kind = .subgraph };
+        windows_canvas.interaction.setCursor(ui.IDC_CROSS);
+        _ = gdi.InvalidateRect(hwnd, null, 0);
+        setStatusMessage("Click on the canvas to place a group");
+        return;
+    }
+
+    if (shape) |s| {
+        canvas_renderer.canvas_state.insertion = .{ .kind = .node, .node_shape = s };
+        windows_canvas.interaction.setCursor(ui.IDC_CROSS);
+        _ = gdi.InvalidateRect(hwnd, null, 0);
+        setStatusMessage("Click on the canvas to place the shape");
+    }
+}
+
+/// Right-click context menu shown when an object is selected.
+fn showCanvasContextMenuSelected(hwnd: foundation.HWND, client_x: i32, client_y: i32) void {
+    const canvas = &canvas_renderer.canvas_state;
+    const in_link_mode = canvas.insertion.kind == .connector_source;
+
+    const menu = ui.CreatePopupMenu() orelse return;
+    defer _ = ui.DestroyMenu(menu);
+
+    if (in_link_mode) {
+        // If something is selected we can complete the link here.
+        if (canvas.hasSelection()) {
+            _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_end_link, "End Link Here");
+            _ = ui.AppendMenuA(menu, ui.MF_SEPARATOR, 0, null);
+        }
+        _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_cancel_link, "Cancel Link");
+    } else {
+        _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_delete, "Delete");
+        if (canvas.selection.kind != .edge) {
+            _ = ui.AppendMenuA(menu, ui.MF_SEPARATOR, 0, null);
+            _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_begin_link, "Begin Link");
+        }
+        // Allow adding a group even when something is already selected.
+        if (canvas.graph) |g| {
+            if (g.graph_type == graph_type_flowchart) {
+                _ = ui.AppendMenuA(menu, ui.MF_SEPARATOR, 0, null);
+                _ = ui.AppendMenuA(menu, ui.MF_STRING, windows_constants.ctx_menu_add_subgraph, "Add Group");
+            }
+        }
+    }
+
+    var pt = foundation.POINT{ .x = client_x, .y = client_y };
+    _ = gdi.ClientToScreen(hwnd, &pt);
+
+    const tpm_flags: ui.TRACK_POPUP_MENU_FLAGS = @bitCast(@as(u32, 0x0100));
+    const cmd_raw = ui.TrackPopupMenu(menu, tpm_flags, pt.x, pt.y, 0, hwnd, null);
+    const cmd: usize = @intCast(cmd_raw);
+    if (cmd == 0) return;
+
+    switch (cmd) {
+        windows_constants.ctx_menu_delete => {
+            deleteSelectedObject();
+            windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            scheduleFreeformPersist();
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+        },
+        windows_constants.ctx_menu_begin_link => {
+            beginLinkFromSelection();
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+        },
+        windows_constants.ctx_menu_end_link => {
+            const src = canvas.insertion.connector_source_id orelse return;
+            canvas.cancelInsertion();
+            completeCanvasLink(src);
+            windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+            scheduleFreeformPersist();
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+        },
+        windows_constants.ctx_menu_cancel_link => {
+            canvas.cancelInsertion();
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+            setStatusMessage("Link cancelled");
+        },
+        windows_constants.ctx_menu_add_subgraph => {
+            canvas_renderer.canvas_state.insertion = .{ .kind = .subgraph };
+            windows_canvas.interaction.setCursor(ui.IDC_CROSS);
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+            setStatusMessage("Click on the canvas to place a group");
+        },
+        else => {},
+    }
+}
+
+/// Enter link-source mode for the currently selected node or subgraph.
+fn beginLinkFromSelection() void {
+    const canvas = &canvas_renderer.canvas_state;
+    const g = canvas.graph orelse return;
+    const src_id: ?[*:0]const u8 = switch (canvas.selection.kind) {
+        .node => blk: {
+            if (canvas.selection.index >= g.node_count or g.nodes == null) break :blk null;
+            const raw: [*c]const u8 = g.nodes[canvas.selection.index].id;
+            if (raw == null) break :blk null;
+            break :blk @ptrCast(raw);
+        },
+        .subgraph => blk: {
+            if (canvas.selection.index >= g.subgraph_count or g.subgraphs == null) break :blk null;
+            const raw: [*c]const u8 = g.subgraphs[canvas.selection.index].id;
+            if (raw == null) break :blk null;
+            break :blk @ptrCast(raw);
+        },
+        else => null,
+    };
+    if (src_id == null) return;
+    canvas.insertion = .{ .kind = .connector_source, .connector_source_id = src_id };
+    windows_canvas.interaction.setCursor(ui.IDC_CROSS);
+    setStatusMessage("Click a target node to complete the link, or right-click to cancel");
+}
+
+/// Complete a link from `source_id` to the currently selected object.
+fn completeCanvasLink(source_id: [*:0]const u8) void {
+    const canvas = &canvas_renderer.canvas_state;
+    const g = canvas.graph orelse return;
+
+    const target_id: [*c]const u8 = switch (canvas.selection.kind) {
+        .node => blk: {
+            if (canvas.selection.index >= g.node_count or g.nodes == null) break :blk null;
+            break :blk g.nodes[canvas.selection.index].id;
+        },
+        .subgraph => blk: {
+            if (canvas.selection.index >= g.subgraph_count or g.subgraphs == null) break :blk null;
+            break :blk g.subgraphs[canvas.selection.index].id;
+        },
+        else => null,
+    } orelse return;
+
+    // Avoid self-loops.
+    if (std.mem.eql(u8, std.mem.span(source_id), std.mem.span(target_id))) return;
+
+    addCanvasEdge(source_id, target_id);
+    setStatusMessage("Link created");
+}
+
+/// Add a directed edge to the live graph.
+fn addCanvasEdge(source_id: [*:0]const u8, target_id: [*c]const u8) void {
+    const g = canvas_renderer.canvas_state.graph orelse return;
+
+    const src_copy = std.fmt.allocPrint(c_allocator, "{s}\x00", .{std.mem.span(source_id)}) catch return;
+    const dst_copy = std.fmt.allocPrint(c_allocator, "{s}\x00", .{std.mem.span(target_id)}) catch {
+        c_allocator.free(src_copy);
+        return;
+    };
+
+    const new_edge = windows_canvas.StudioEditableEdge{
+        .source_id = src_copy.ptr,
+        .target_id = dst_copy.ptr,
+        .label = null,
+        .label_font_size = project_font_settings.edge_label_size,
+        .color = .{ .r = 80, .g = 80, .b = 80, .a = 255 },
+        .thickness = 2.0,
+        .line_style = 0, // solid
+        .has_arrow = 1,
+        .has_source_arrow = 0,
+        .source_end_style = 0,
+        .target_end_style = 0,
+    };
+
+    const old_count = g.edge_count;
+    const new_count = old_count + 1;
+
+    const new_edges = c_allocator.alloc(windows_canvas.StudioEditableEdge, new_count) catch {
+        c_allocator.free(src_copy);
+        c_allocator.free(dst_copy);
+        return;
+    };
+    if (old_count > 0 and g.edges != null) {
+        @memcpy(new_edges[0..old_count], g.edges[0..old_count]);
+        c_allocator.free(g.edges[0..old_count]);
+    }
+    new_edges[old_count] = new_edge;
+    g.edges = new_edges.ptr;
+    g.edge_count = new_count;
+
+    canvas_renderer.canvas_state.selection = .{ .kind = .edge, .index = old_count };
+}
+
+/// Remove the currently selected object (node, subgraph, or edge) from the graph.
+fn deleteSelectedObject() void {
+    const canvas = &canvas_renderer.canvas_state;
+    const g = canvas.graph orelse return;
+
+    switch (canvas.selection.kind) {
+        .node => deleteNodeAtIndex(g, canvas.selection.index),
+        .subgraph => deleteSubgraphAtIndex(g, canvas.selection.index),
+        .edge => deleteEdgeAtIndex(g, canvas.selection.index),
+        .none => return,
+    }
+    canvas.clearSelection();
+    canvas.drag = .{};
+}
+
+fn deleteNodeAtIndex(g: *windows_canvas.StudioEditableGraph, idx: usize) void {
+    if (idx >= g.node_count or g.nodes == null) return;
+    const node = g.nodes[idx];
+    // Free node strings.
+    freeCStringPtr(node.id);
+    freeCStringPtr(node.label);
+    freeCStringPtr(node.subtitle);
+    freeCStringPtr(node.attributes_text);
+    freeCStringPtr(node.methods_text);
+    freeCStringPtr(node.parent_subgraph_id);
+
+    // Remove edges that reference this node.
+    if (node.id != null) {
+        const id_s = std.mem.span(node.id);
+        deleteEdgesReferencingId(g, id_s);
+    }
+
+    // Compact the node array.
+    const old_count = g.node_count;
+    const new_count = old_count - 1;
+    if (new_count == 0) {
+        c_allocator.free(g.nodes[0..old_count]);
+        g.nodes = null;
+        g.node_count = 0;
+        return;
+    }
+    const new_nodes = c_allocator.alloc(windows_canvas.StudioEditableNode, new_count) catch {
+        // Can't resize; just zero out the entry and leave a gap.
+        g.nodes[idx] = std.mem.zeroes(windows_canvas.StudioEditableNode);
+        return;
+    };
+    if (idx > 0) @memcpy(new_nodes[0..idx], g.nodes[0..idx]);
+    if (idx < new_count) @memcpy(new_nodes[idx..new_count], g.nodes[idx + 1 .. old_count]);
+    c_allocator.free(g.nodes[0..old_count]);
+    g.nodes = new_nodes.ptr;
+    g.node_count = new_count;
+}
+
+fn deleteSubgraphAtIndex(g: *windows_canvas.StudioEditableGraph, idx: usize) void {
+    if (idx >= g.subgraph_count or g.subgraphs == null) return;
+    const sg = g.subgraphs[idx];
+    if (sg.id != null) {
+        const id_s = std.mem.span(sg.id);
+        deleteEdgesReferencingId(g, id_s);
+    }
+    freeCStringPtr(sg.id);
+    freeCStringPtr(sg.title);
+    freeCStringPtr(sg.parent_subgraph_id);
+
+    const old_count = g.subgraph_count;
+    const new_count = old_count - 1;
+    if (new_count == 0) {
+        c_allocator.free(g.subgraphs[0..old_count]);
+        g.subgraphs = null;
+        g.subgraph_count = 0;
+        return;
+    }
+    const new_sgs = c_allocator.alloc(windows_canvas.StudioEditableSubgraph, new_count) catch {
+        g.subgraphs[idx] = std.mem.zeroes(windows_canvas.StudioEditableSubgraph);
+        return;
+    };
+    if (idx > 0) @memcpy(new_sgs[0..idx], g.subgraphs[0..idx]);
+    if (idx < new_count) @memcpy(new_sgs[idx..new_count], g.subgraphs[idx + 1 .. old_count]);
+    c_allocator.free(g.subgraphs[0..old_count]);
+    g.subgraphs = new_sgs.ptr;
+    g.subgraph_count = new_count;
+}
+
+fn deleteEdgeAtIndex(g: *windows_canvas.StudioEditableGraph, idx: usize) void {
+    if (idx >= g.edge_count or g.edges == null) return;
+    const edge = g.edges[idx];
+    freeCStringPtr(edge.source_id);
+    freeCStringPtr(edge.target_id);
+    freeCStringPtr(edge.label);
+
+    const old_count = g.edge_count;
+    const new_count = old_count - 1;
+    if (new_count == 0) {
+        c_allocator.free(g.edges[0..old_count]);
+        g.edges = null;
+        g.edge_count = 0;
+        return;
+    }
+    const new_edges = c_allocator.alloc(windows_canvas.StudioEditableEdge, new_count) catch {
+        g.edges[idx] = std.mem.zeroes(windows_canvas.StudioEditableEdge);
+        return;
+    };
+    if (idx > 0) @memcpy(new_edges[0..idx], g.edges[0..idx]);
+    if (idx < new_count) @memcpy(new_edges[idx..new_count], g.edges[idx + 1 .. old_count]);
+    c_allocator.free(g.edges[0..old_count]);
+    g.edges = new_edges.ptr;
+    g.edge_count = new_count;
+}
+
+/// Delete all edges whose source_id or target_id matches `id`.
+fn deleteEdgesReferencingId(g: *windows_canvas.StudioEditableGraph, id: []const u8) void {
+    if (g.edge_count == 0 or g.edges == null) return;
+
+    // Collect surviving edges using a fixed stack buffer.
+    var keep_buf: [4096]windows_canvas.StudioEditableEdge = undefined;
+    var keep_len: usize = 0;
+    for (g.edges[0..g.edge_count]) |edge| {
+        const matches_src = edge.source_id != null and std.mem.eql(u8, std.mem.span(edge.source_id), id);
+        const matches_dst = edge.target_id != null and std.mem.eql(u8, std.mem.span(edge.target_id), id);
+        if (matches_src or matches_dst) {
+            freeCStringPtr(edge.source_id);
+            freeCStringPtr(edge.target_id);
+            freeCStringPtr(edge.label);
+        } else {
+            if (keep_len < keep_buf.len) {
+                keep_buf[keep_len] = edge;
+                keep_len += 1;
+            }
+        }
+    }
+
+    c_allocator.free(g.edges[0..g.edge_count]);
+    if (keep_len == 0) {
+        g.edges = null;
+        g.edge_count = 0;
+        return;
+    }
+    const new_edges = c_allocator.alloc(windows_canvas.StudioEditableEdge, keep_len) catch {
+        g.edges = null;
+        g.edge_count = 0;
+        return;
+    };
+    @memcpy(new_edges, keep_buf[0..keep_len]);
+    g.edges = new_edges.ptr;
+    g.edge_count = keep_len;
+}
+
+fn freeCStringPtr(ptr: [*c]const u8) void {
+    if (ptr == null) return;
+    const s = std.mem.span(ptr);
+    // Free the slice including the null terminator.
+    c_allocator.free(ptr[0 .. s.len + 1]);
+}
+
+/// Label strings for each node shape (used when generating default node labels).
+fn defaultLabelForShape(shape: u32) []const u8 {
+    return switch (shape) {
+        node_shape_box => "Box",
+        node_shape_round => "Step",
+        node_shape_diamond => "Decision",
+        node_shape_circle => "Circle",
+        node_shape_stadium => "Start",
+        node_shape_hexagon => "Prepare",
+        node_shape_cylinder => "Database",
+        else => "Node",
+    };
+}
+
+/// Node dimensions for each shape.
+fn defaultSizeForShape(shape: u32) struct { w: f64, h: f64 } {
+    return switch (shape) {
+        node_shape_diamond => .{ .w = 100, .h = 80 },
+        node_shape_circle => .{ .w = 72, .h = 72 },
+        node_shape_cylinder => .{ .w = 100, .h = 80 },
+        else => .{ .w = 120, .h = 56 },
+    };
+}
+
+/// Default fill/stroke colors matching the flowchart default render config.
+const default_node_fill = windows_canvas.StudioColor{ .r = 240, .g = 240, .b = 250, .a = 255 };
+const default_node_stroke = windows_canvas.StudioColor{ .r = 100, .g = 100, .b = 150, .a = 255 };
+const default_node_text = windows_canvas.StudioColor{ .r = 40, .g = 40, .b = 40, .a = 255 };
+
+/// Insert a new node into the live graph in memory at the given canvas position.
+/// The node ID is generated automatically and the node is selected after insertion.
+fn addCanvasNodeAtPosition(shape: u32, canvas_x: f64, canvas_y: f64) void {
+    const g = canvas_renderer.canvas_state.graph orelse return;
+
+    // Generate a unique ID: count existing nodes + subgraphs to avoid collisions.
+    const next_num = g.node_count + g.subgraph_count + 1;
+    const id_str = std.fmt.allocPrint(c_allocator, "n{d}\x00", .{next_num}) catch return;
+    const label_str = std.fmt.allocPrint(c_allocator, "{s}\x00", .{defaultLabelForShape(shape)}) catch {
+        c_allocator.free(id_str);
+        return;
+    };
+
+    const size = defaultSizeForShape(shape);
+
+    const new_node = windows_canvas.StudioEditableNode{
+        .id = id_str.ptr,
+        .label = label_str.ptr,
+        .subtitle = null,
+        .attributes_text = null,
+        .methods_text = null,
+        .parent_subgraph_id = null,
+        .shape = shape,
+        .x = canvas_x - size.w * 0.5,
+        .y = canvas_y - size.h * 0.5,
+        .width = size.w,
+        .height = size.h,
+        .fill = default_node_fill,
+        .body_fill = default_node_fill,
+        .stroke = default_node_stroke,
+        .stroke_width = 2.0,
+        .label_color = default_node_text,
+        .label_font_size = project_font_settings.node_label_size,
+    };
+
+    // Extend the nodes array with a c_allocator realloc-equivalent.
+    const old_count = g.node_count;
+    const new_count = old_count + 1;
+
+    const new_nodes = c_allocator.alloc(windows_canvas.StudioEditableNode, new_count) catch {
+        c_allocator.free(id_str);
+        c_allocator.free(label_str);
+        return;
+    };
+    if (old_count > 0 and g.nodes != null) {
+        @memcpy(new_nodes[0..old_count], g.nodes[0..old_count]);
+        c_allocator.free(g.nodes[0..old_count]);
+    }
+    new_nodes[old_count] = new_node;
+    g.nodes = new_nodes.ptr;
+    g.node_count = new_count;
+
+    // Select the new node.
+    canvas_renderer.canvas_state.selection = .{ .kind = .node, .index = old_count };
+}
+
+/// Insert a new subgraph group into the live graph at the given canvas position.
+fn addCanvasSubgraphAtPosition(canvas_x: f64, canvas_y: f64) void {
+    const g = canvas_renderer.canvas_state.graph orelse return;
+
+    const next_num = g.node_count + g.subgraph_count + 1;
+    const id_str = std.fmt.allocPrint(c_allocator, "sg{d}\x00", .{next_num}) catch return;
+    const title_str = std.fmt.allocPrint(c_allocator, "Group\x00", .{}) catch {
+        c_allocator.free(id_str);
+        return;
+    };
+
+    const sg_w: f64 = 200;
+    const sg_h: f64 = 160;
+
+    const new_sg = windows_canvas.StudioEditableSubgraph{
+        .id = id_str.ptr,
+        .title = title_str.ptr,
+        .parent_subgraph_id = null,
+        .x = canvas_x - sg_w * 0.5,
+        .y = canvas_y - sg_h * 0.5,
+        .width = sg_w,
+        .height = sg_h,
+        .corner_radius = 8.0,
+        .fill = .{ .r = 230, .g = 240, .b = 255, .a = 160 },
+        .stroke = .{ .r = 80, .g = 120, .b = 200, .a = 255 },
+        .stroke_width = 1.5,
+        .title_x = canvas_x,
+        .title_y = canvas_y - sg_h * 0.5 + 16.0,
+        .title_font_size = project_font_settings.group_title_size,
+        .title_color = .{ .r = 40, .g = 40, .b = 40, .a = 255 },
+        .title_position = 0, // top_left
+    };
+
+    const old_count = g.subgraph_count;
+    const new_count = old_count + 1;
+
+    const new_subgraphs = c_allocator.alloc(windows_canvas.StudioEditableSubgraph, new_count) catch {
+        c_allocator.free(id_str);
+        c_allocator.free(title_str);
+        return;
+    };
+    if (old_count > 0 and g.subgraphs != null) {
+        @memcpy(new_subgraphs[0..old_count], g.subgraphs[0..old_count]);
+        c_allocator.free(g.subgraphs[0..old_count]);
+    }
+    new_subgraphs[old_count] = new_sg;
+    g.subgraphs = new_subgraphs.ptr;
+    g.subgraph_count = new_count;
+
+    canvas_renderer.canvas_state.selection = .{ .kind = .subgraph, .index = old_count };
 }
 
 fn applyProjectSettingsToGraph(graph: *windows_canvas.StudioEditableGraph) void {
@@ -711,6 +1276,31 @@ fn applyProjectSettingsToCanvas(refresh_inspector: bool) void {
     if (refresh_inspector and app_mode == .freeform) {
         windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
     }
+}
+
+/// Apply `%% @canvas` and `%% @font` directives from mermaid source to project settings.
+/// Directive values override the current settings; fields not present in the source are left unchanged.
+fn applyDirectivesFromSource(source: []const u8) void {
+    const d = merrow_directives.parse(source);
+    if (!d.hasAny()) return;
+
+    if (d.canvas_width_cm) |w| project_font_settings.canvas_width_cm = w;
+    if (d.canvas_height_cm) |h| project_font_settings.canvas_height_cm = h;
+    if (d.font_family) |f| project_font_settings.font_family = directiveFontToProjectFont(f);
+    if (d.node_font_size) |s| project_font_settings.node_label_size = s;
+    if (d.group_font_size) |s| project_font_settings.group_title_size = s;
+    if (d.edge_font_size) |s| project_font_settings.edge_label_size = s;
+
+    project_font_settings = project_font_settings.sanitized();
+}
+
+fn directiveFontToProjectFont(f: merrow_directives.FontFamily) windows_project_settings.FontFamily {
+    return switch (f) {
+        .lato => .lato,
+        .segoe_ui => .segoe_ui,
+        .arial => .arial,
+        .consolas => .consolas,
+    };
 }
 
 fn refreshCurrentMarkdownDocument(source: []const u8) bool {
@@ -839,9 +1429,8 @@ fn applyModeVisibility() void {
     if (child_windows.command) |w| _ = ui.ShowWindow(w, if (show_source_panel) ui.SW_SHOWNA else ui.SW_HIDE);
     if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, if (show_source_panel) ui.SW_SHOWNA else ui.SW_HIDE);
 
-    if (child_windows.toolbar) |w| _ = ui.ShowWindow(w, if (app_mode == .mermaid) ui.SW_SHOWNA else ui.SW_HIDE);
+    if (child_windows.toolbar) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_label) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
-    if (child_windows.diagram_selector) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_prev_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_next_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
 
@@ -877,46 +1466,6 @@ fn toggleSourcePanelVisibility() void {
 }
 
 fn updateDiagramSelectorControl() void {
-    const selector = child_windows.diagram_selector orelse return;
-    _ = ui.SendMessageA(selector, ui.CB_RESETCONTENT, 0, 0);
-
-    const document = current_markdown_document orelse {
-        const text = "No diagrams";
-        _ = ui.SendMessageA(selector, ui.CB_ADDSTRING, 0, @bitCast(@intFromPtr(text)));
-        _ = ui.SendMessageA(selector, ui.CB_SETCURSEL, 0, 0);
-        updateDiagramHeaderControls();
-        return;
-    };
-
-    if (document.diagram_count == 0) {
-        const text = "No diagrams";
-        _ = ui.SendMessageA(selector, ui.CB_ADDSTRING, 0, @bitCast(@intFromPtr(text)));
-        _ = ui.SendMessageA(selector, ui.CB_SETCURSEL, 0, 0);
-        updateDiagramHeaderControls();
-        return;
-    }
-
-    var diagram_index: usize = 0;
-    for (document.blocks) |block| {
-        switch (block) {
-            .diagram => |diagram| {
-                const label = if (diagram.name) |name|
-                    c_allocator.dupe(u8, name) catch null
-                else
-                    std.fmt.allocPrint(c_allocator, "Diagram {d}", .{diagram_index + 1}) catch null;
-                defer if (label) |owned| c_allocator.free(owned);
-
-                const text = label orelse "Diagram";
-                const text_z = dupeSentinel(c_allocator, text) catch continue;
-                defer c_allocator.free(text_z);
-                _ = ui.SendMessageA(selector, ui.CB_ADDSTRING, 0, @bitCast(@intFromPtr(text_z.ptr)));
-                diagram_index += 1;
-            },
-            else => {},
-        }
-    }
-
-    _ = ui.SendMessageA(selector, ui.CB_SETCURSEL, @min(selected_diagram_index, document.diagram_count - 1), 0);
     updateDiagramHeaderControls();
 }
 
@@ -931,10 +1480,11 @@ fn selectDiagramIndex(index: usize, refresh_view: bool) void {
         return;
     }
 
-    selected_diagram_index = @min(index, document.diagram_count - 1);
-    if (child_windows.diagram_selector) |selector| {
-        _ = ui.SendMessageA(selector, ui.CB_SETCURSEL, selected_diagram_index, 0);
+    if (refresh_view and app_mode == .freeform and index != selected_diagram_index) {
+        flushPendingFreeformPersist();
     }
+
+    selected_diagram_index = @min(index, document.diagram_count - 1);
     updateDiagramHeaderControls();
 
     if (!refresh_view) return;
@@ -972,12 +1522,7 @@ fn handleDiagramNavigationShortcut(vkey: u16, ctrl_down: bool) bool {
     }
 }
 
-fn onDiagramSelectionChanged() void {
-    const selector = child_windows.diagram_selector orelse return;
-    const selection = ui.SendMessageA(selector, ui.CB_GETCURSEL, 0, 0);
-    if (selection < 0) return;
-    selectDiagramIndex(@intCast(selection), true);
-}
+fn onDiagramSelectionChanged() void {}
 
 fn syncDiagramSelectionToSourceOffset(offset: usize, refresh_view: bool) void {
     const document = current_markdown_document orelse return;
@@ -1005,7 +1550,9 @@ fn onEditorSelectionChanged() void {
 
 fn onProjectFontSettingsChanged() void {
     applyProjectSettingsToCanvas(true);
-    updateEditorDerivedState(false);
+    if (app_mode == .mermaid) {
+        updateEditorDerivedState(false);
+    }
     setDocumentDirty(true);
     setStatusMessage("Updated project settings");
 }
@@ -1056,7 +1603,18 @@ fn updateCanvasPresentation(fit_view: bool) void {
     if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
 }
 
-fn loadPersistedFreeformGraph() ?*windows_canvas.StudioEditableGraph {
+const PersistedDiagramGraph = struct {
+    graph: *windows_canvas.StudioEditableGraph,
+    canvas_width_cm: ?f64,
+    canvas_height_cm: ?f64,
+};
+
+fn applyPersistedCanvasSize(width_cm: ?f64, height_cm: ?f64) void {
+    project_font_settings.canvas_width_cm = width_cm orelse windows_project_settings.default_canvas_width_cm;
+    project_font_settings.canvas_height_cm = height_cm orelse windows_project_settings.default_canvas_height_cm;
+}
+
+fn loadPersistedFreeformGraph() ?PersistedDiagramGraph {
     const diagram = selectedDiagramBlock() orelse return null;
     return loadPersistedGraphForDiagram(diagram);
 }
@@ -1075,6 +1633,11 @@ fn scheduleFreeformPersist() void {
 fn cancelScheduledFreeformPersist() void {
     const hwnd = main_window orelse return;
     _ = ui.KillTimer(hwnd, main_timer_id_ffm_persist);
+}
+
+fn flushPendingFreeformPersist() void {
+    cancelScheduledFreeformPersist();
+    persistCurrentFreeformGraph();
 }
 
 fn persistCurrentFreeformGraph() void {
@@ -1099,6 +1662,8 @@ fn persistCurrentFreeformGraph() void {
         .source_file = current_document_path,
         .mermaid_source = diagram.mermaid_source,
         .graph_blob = graph_blob,
+        .canvas_width_cm = project_font_settings.canvas_width_cm,
+        .canvas_height_cm = project_font_settings.canvas_height_cm,
     }) catch {
         setStatusMessage("Failed to save freeform diagram");
         return;
@@ -1130,8 +1695,9 @@ fn rebuildFreeformCanvas(fit_view: bool) void {
     };
     defer c_allocator.free(source);
 
-    if (loadPersistedFreeformGraph()) |saved_graph| {
-        canvas_renderer.canvas_state.setGraph(saved_graph);
+    if (loadPersistedFreeformGraph()) |saved| {
+        applyPersistedCanvasSize(saved.canvas_width_cm, saved.canvas_height_cm);
+        canvas_renderer.canvas_state.setGraph(saved.graph);
         updateCanvasPresentation(fit_view);
         setStatusMessage("Freeform canvas mode (saved layout)");
         rememberCurrentRecentFile();
@@ -1145,6 +1711,7 @@ fn rebuildFreeformCanvas(fit_view: bool) void {
         &eg_message,
         eg_message.len,
     );
+    applyDirectivesFromSource(source);
     canvas_renderer.canvas_state.setGraph(eg);
     updateCanvasPresentation(fit_view);
 
@@ -1202,7 +1769,16 @@ fn saveDocumentToPath(path: []const u8) bool {
     _ = refreshCurrentMarkdownDocument(source);
     setDocumentDirty(false);
     rememberCurrentRecentFile();
-    setStatusMessage("Saved source document");
+
+    if (app_mode == .freeform) {
+        if (saveFfmSidecar(path)) {
+            setStatusMessage("Saved source and freeform layout");
+        } else {
+            setStatusMessage("Saved source document (freeform layout not saved)");
+        }
+    } else {
+        setStatusMessage("Saved source document");
+    }
     return true;
 }
 
@@ -1287,6 +1863,10 @@ fn loadWordComGlueProc(comptime Proc: type, module: ModuleHandle, name: [*:0]con
 fn exportDiagramToWord() void {
     const api = ensureWordComGlueLoaded() orelse return;
 
+    if (app_mode == .freeform) {
+        flushPendingFreeformPersist();
+    }
+
     seedDefaultWordAssets() catch {};
 
     const export_docx_path = chooseExportWordPath() orelse return;
@@ -1357,6 +1937,24 @@ fn exportDiagramToWord() void {
     defer {
         const close_options = wcg_close_options{ .save_before_close = 0 };
         _ = api.close_document(document, &close_options);
+    }
+
+    if (header_path) |path| {
+        const path_z = dupeSentinel(c_allocator, path) catch {
+            setStatusMessage("Failed to prepare header asset path");
+            return;
+        };
+        defer c_allocator.free(path_z);
+
+        const banner = wcg_banner_options{
+            .scope = WCG_BANNER_ALL_PAGES,
+            .preserve_aspect_ratio = 1,
+            .spacing_after = .{ .unit = 0, .value = 0.0 },
+        };
+        if (api.insert_header_banner(document, path_z.ptr, &banner) != WCG_OK) {
+            setWordComStatusMessage(api, library, "Failed to insert header banner");
+            return;
+        }
     }
 
     if (!markdownDocumentHasTextContent(&markdown_document)) {
@@ -1454,7 +2052,15 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
                 }
             },
             .diagram => |diagram_block| {
-                const diagram_png_path = renderDiagramToTempPng(diagram_block.mermaid_source) catch |err| {
+                const canvas_size_cm = if (loadPersistedGraphForDiagram(&diagram_block)) |saved| blk: {
+                    defer ffm_serializer.freeGraph(saved.graph);
+                    break :blk CanvasSizeCm{
+                        .width_cm = saved.canvas_width_cm orelse project_font_settings.canvas_width_cm,
+                        .height_cm = saved.canvas_height_cm orelse project_font_settings.canvas_height_cm,
+                    };
+                } else currentProjectCanvasSizeCm();
+
+                const diagram_png_path = renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
                     setStatusMessage(@errorName(err));
                     return false;
                 };
@@ -1475,13 +2081,13 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
                     .placement = 0,
                     .alignment = 1,
                     .wrap = 0,
-                    .width = .{ .unit = WCG_UNIT_PCT_CONTENT, .value = 100.0 },
-                    .height = .{ .unit = 0, .value = 0.0 },
+                    .width = .{ .unit = WCG_UNIT_MM, .value = canvas_size_cm.width_cm * 10.0 },
+                    .height = .{ .unit = WCG_UNIT_MM, .value = canvas_size_cm.height_cm * 10.0 },
                     .max_width = .{ .unit = 0, .value = 0.0 },
                     .max_height = .{ .unit = 0, .value = 0.0 },
                     .spacing_before = .{ .unit = 0, .value = 0.0 },
                     .spacing_after = .{ .unit = 0, .value = 12.0 },
-                    .preserve_aspect_ratio = 1,
+                    .preserve_aspect_ratio = 0,
                     .utf8_caption = null,
                     .utf8_alt_text = null,
                 };
@@ -1651,6 +2257,30 @@ fn replaceFileExtension(path: []const u8, new_extension: []const u8) ![]u8 {
     return std.fmt.allocPrint(c_allocator, "{s}{s}", .{ base, new_extension });
 }
 
+/// Save the current freeform canvas graph as a sidecar .ffm file next to `doc_path`.
+/// The file is named `<stem>_<diagram_index>.ffm`.
+/// Returns true on success.
+fn saveFfmSidecar(doc_path: []const u8) bool {
+    const graph = canvas_renderer.canvas_state.graph orelse return false;
+
+    const graph_blob = ffm_serializer.serializeGraph(c_allocator, graph) catch return false;
+    defer c_allocator.free(graph_blob);
+
+    const ext = std.fs.path.extension(doc_path);
+    const stem = doc_path[0 .. doc_path.len - ext.len];
+    const ffm_path = std.fmt.allocPrint(
+        c_allocator,
+        "{s}_{d}.ffm",
+        .{ stem, selected_diagram_index },
+    ) catch return false;
+    defer c_allocator.free(ffm_path);
+
+    const file = std.fs.createFileAbsolute(ffm_path, .{ .truncate = true }) catch return false;
+    defer file.close();
+    file.writeAll(graph_blob) catch return false;
+    return true;
+}
+
 fn renderDiagramToTempPng(source: []const u8) ![]u8 {
     var preview_message: [256]u8 = std.mem.zeroes([256]u8);
     var preview_png_len: u32 = 0;
@@ -1678,14 +2308,149 @@ fn renderDiagramToTempPng(source: []const u8) ![]u8 {
     return temp_path;
 }
 
+/// Render an editable graph to a PNG file using Direct2D + WIC (high quality).
+fn renderGraphToD2DPng(
+    graph: *const windows_canvas.StudioEditableGraph,
+    out_w: u32,
+    out_h: u32,
+    out_dpi: f64,
+    out_path: []const u8,
+) !void {
+    if (!ensureCanvasD2DFactory()) return error.RenderPreviewFailed;
+    if (!ensureCanvasDWriteFactory()) return error.RenderPreviewFailed;
+    if (!ensurePreviewImagingFactory()) return error.RenderPreviewFailed;
+    const d2d_factory = canvas_renderer.factory orelse return error.RenderPreviewFailed;
+    const dw_factory = canvas_dwrite_factory orelse return error.RenderPreviewFailed;
+    const wic_factory = preview_renderer.wic_factory orelse return error.RenderPreviewFailed;
+
+    // 1. Create off-screen WIC bitmap in D2D's native premultiplied BGRA format.
+    var wic_bitmap: ?*imaging.IWICBitmap = null;
+    var pf_guid = imaging.GUID_WICPixelFormat32bppPBGRA;
+    if (hrFailed(wic_factory.CreateBitmap(out_w, out_h, &pf_guid, imaging.WICBitmapCacheOnLoad, &wic_bitmap)) or wic_bitmap == null)
+        return error.RenderPreviewFailed;
+    defer _ = wic_bitmap.?.IUnknown.Release();
+
+    // 2. Create a D2D render target backed by the WIC bitmap.
+    var render_target: *d2d.ID2D1RenderTarget = undefined;
+    const rt_props = d2d.D2D1_RENDER_TARGET_PROPERTIES{
+        .type = d2d.D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        .pixelFormat = .{
+            .format = dxgi_common.DXGI_FORMAT_UNKNOWN,
+            .alphaMode = d2d_common.D2D1_ALPHA_MODE_PREMULTIPLIED,
+        },
+        .dpiX = 96.0,
+        .dpiY = 96.0,
+        .usage = d2d.D2D1_RENDER_TARGET_USAGE_NONE,
+        .minLevel = d2d.D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    if (hrFailed(d2d_factory.CreateWicBitmapRenderTarget(wic_bitmap, &rt_props, &render_target)))
+        return error.RenderPreviewFailed;
+    defer _ = render_target.IUnknown.Release();
+    const rt = render_target;
+
+    // 3. Compute a viewport that maps the full graph canvas into the output bitmap.
+    const zoom: f64 = if (graph.width > 0) @as(f64, @floatFromInt(out_w)) / graph.width else 1.0;
+    const vp = windows_canvas.state.Viewport{ .zoom = zoom };
+    const ctx = windows_canvas.draw.DrawContext{
+        .d2d_factory = d2d_factory,
+        .render_target = rt,
+        .dwrite_factory = dw_factory,
+        .font_family = project_font_settings.font_family,
+        .viewport_width = @floatFromInt(out_w),
+        .viewport_height = @floatFromInt(out_h),
+    };
+
+    // 4. Draw the graph into the off-screen bitmap.
+    rt.BeginDraw();
+    windows_canvas.draw.drawCanvas(&ctx, graph, vp, .{}, .{}, .{}, 0.0, 0.0);
+    if (hrFailed(rt.EndDraw(null, null))) return error.RenderPreviewFailed;
+
+    // 5. Encode the WIC bitmap to a PNG file via WIC.
+    const path_w = try std.unicode.utf8ToUtf16LeAllocZ(c_allocator, out_path);
+    defer c_allocator.free(path_w);
+
+    var wic_stream: ?*imaging.IWICStream = null;
+    if (hrFailed(wic_factory.CreateStream(&wic_stream)) or wic_stream == null)
+        return error.RenderPreviewFailed;
+    defer _ = wic_stream.?.IUnknown.Release();
+    const GENERIC_WRITE: u32 = 0x40000000;
+    if (hrFailed(wic_stream.?.InitializeFromFilename(path_w.ptr, GENERIC_WRITE)))
+        return error.RenderPreviewFailed;
+
+    var encoder: ?*imaging.IWICBitmapEncoder = null;
+    if (hrFailed(wic_factory.CreateEncoder(&imaging.GUID_ContainerFormatPng, null, &encoder)) or encoder == null)
+        return error.RenderPreviewFailed;
+    defer _ = encoder.?.IUnknown.Release();
+    if (hrFailed(encoder.?.Initialize(&wic_stream.?.IStream, imaging.WICBitmapEncoderNoCache)))
+        return error.RenderPreviewFailed;
+
+    var frame: ?*imaging.IWICBitmapFrameEncode = null;
+    if (hrFailed(encoder.?.CreateNewFrame(&frame, null)) or frame == null)
+        return error.RenderPreviewFailed;
+    defer _ = frame.?.IUnknown.Release();
+
+    if (hrFailed(frame.?.Initialize(null))) return error.RenderPreviewFailed;
+    if (hrFailed(frame.?.SetSize(out_w, out_h))) return error.RenderPreviewFailed;
+    if (hrFailed(frame.?.SetResolution(out_dpi, out_dpi))) return error.RenderPreviewFailed;
+    var frame_pf = pf_guid;
+    if (hrFailed(frame.?.SetPixelFormat(&frame_pf))) return error.RenderPreviewFailed;
+    if (hrFailed(frame.?.WriteSource(&wic_bitmap.?.IWICBitmapSource, null))) return error.RenderPreviewFailed;
+    if (hrFailed(frame.?.Commit())) return error.RenderPreviewFailed;
+    if (hrFailed(encoder.?.Commit())) return error.RenderPreviewFailed;
+}
+
 fn renderEditableGraphToTempPng(graph: *const windows_canvas.StudioEditableGraph) ![]u8 {
+    const w: u32 = @max(1, @as(u32, @intFromFloat(graph.width)));
+    const h: u32 = @max(1, @as(u32, @intFromFloat(graph.height)));
+    const temp_path = try createTempExportPath(".png");
+    errdefer c_allocator.free(temp_path);
+    try renderGraphToD2DPng(graph, w, h, 96.0, temp_path);
+    return temp_path;
+}
+
+fn loadPersistedGraphForDiagram(diagram: *const document_model.DiagramBlock) ?PersistedDiagramGraph {
+    var db = &(library_database orelse return null);
+    var hash_buffer: [16]u8 = undefined;
+    const content_hash = diagramHashText(diagram, &hash_buffer) orelse return null;
+    var record = db.loadFfm(c_allocator, content_hash) catch return null;
+    if (record) |*saved| {
+        defer saved.deinit(c_allocator);
+        const graph = ffm_serializer.deserializeGraph(saved.graph_blob) catch return null;
+        if (saved.canvas_width_cm != null and saved.canvas_height_cm != null) {
+            const canvas_dims = windows_project_settings.canvasDimensionsFromCentimeters(saved.canvas_width_cm.?, saved.canvas_height_cm.?);
+            graph.width = @floatFromInt(canvas_dims.width);
+            graph.height = @floatFromInt(canvas_dims.height);
+        }
+        return .{
+            .graph = graph,
+            .canvas_width_cm = saved.canvas_width_cm,
+            .canvas_height_cm = saved.canvas_height_cm,
+        };
+    }
+    return null;
+}
+
+fn renderDiagramBlockToTempPng(diagram: *const document_model.DiagramBlock) ![]u8 {
+    if (loadPersistedGraphForDiagram(diagram)) |saved| {
+        defer ffm_serializer.freeGraph(saved.graph);
+        if (saved.graph.graph_type == export_editable_graph_type_flowchart or
+            saved.graph.graph_type == export_editable_graph_type_sequence)
+        {
+            return renderEditableGraphToTempPng(saved.graph) catch renderDiagramToTempPng(diagram.mermaid_source);
+        }
+    }
+    return renderDiagramToTempPng(diagram.mermaid_source);
+}
+
+fn renderDiagramToExportPng(source: []const u8, size_cm: CanvasSizeCm) ![]u8 {
     var preview_message: [256]u8 = std.mem.zeroes([256]u8);
     var preview_png_len: u32 = 0;
-    const canvas_dims = currentProjectCanvasDimensions();
-    const preview_png_ptr = merrow_studio_render_editable_graph_png_bytes(
-        graph,
-        canvas_dims.width,
-        canvas_dims.height,
+    const export_dims = exportDimensionsForSizeCm(size_cm);
+    const preview_png_ptr = merrow_studio_render_preview_png_bytes(
+        source.ptr,
+        @intCast(source.len),
+        export_dims.width,
+        export_dims.height,
         &preview_png_len,
         &preview_message,
         preview_message.len,
@@ -1704,28 +2469,24 @@ fn renderEditableGraphToTempPng(graph: *const windows_canvas.StudioEditableGraph
     return temp_path;
 }
 
-fn loadPersistedGraphForDiagram(diagram: *const document_model.DiagramBlock) ?*windows_canvas.StudioEditableGraph {
-    var db = &(library_database orelse return null);
-    var hash_buffer: [16]u8 = undefined;
-    const content_hash = diagramHashText(diagram, &hash_buffer) orelse return null;
-    var record = db.loadFfm(c_allocator, content_hash) catch return null;
-    if (record) |*saved| {
-        defer saved.deinit(c_allocator);
-        return ffm_serializer.deserializeGraph(saved.graph_blob) catch null;
-    }
-    return null;
+fn renderEditableGraphToExportPng(graph: *const windows_canvas.StudioEditableGraph, size_cm: CanvasSizeCm) ![]u8 {
+    const export_dims = exportDimensionsForSizeCm(size_cm);
+    const temp_path = try createTempExportPath(".png");
+    errdefer c_allocator.free(temp_path);
+    try renderGraphToD2DPng(graph, export_dims.width, export_dims.height, 300.0, temp_path);
+    return temp_path;
 }
 
-fn renderDiagramBlockToTempPng(diagram: *const document_model.DiagramBlock) ![]u8 {
-    if (loadPersistedGraphForDiagram(diagram)) |saved_graph| {
-        defer ffm_serializer.freeGraph(saved_graph);
-        if (saved_graph.graph_type == export_editable_graph_type_flowchart or
-            saved_graph.graph_type == export_editable_graph_type_sequence)
+fn renderDiagramBlockToExportPng(diagram: *const document_model.DiagramBlock, size_cm: CanvasSizeCm) ![]u8 {
+    if (loadPersistedGraphForDiagram(diagram)) |saved| {
+        defer ffm_serializer.freeGraph(saved.graph);
+        if (saved.graph.graph_type == export_editable_graph_type_flowchart or
+            saved.graph.graph_type == export_editable_graph_type_sequence)
         {
-            return renderEditableGraphToTempPng(saved_graph) catch renderDiagramToTempPng(diagram.mermaid_source);
+            return renderEditableGraphToExportPng(saved.graph, size_cm) catch renderDiagramToExportPng(diagram.mermaid_source, size_cm);
         }
     }
-    return renderDiagramToTempPng(diagram.mermaid_source);
+    return renderDiagramToExportPng(diagram.mermaid_source, size_cm);
 }
 
 fn createTempExportPath(suffix: []const u8) ![]u8 {
@@ -2082,14 +2843,7 @@ fn centerPreviewPage(hwnd: ?foundation.HWND) void {
 }
 
 fn fitPreviewPageInView(hwnd: ?foundation.HWND) void {
-    const viewport = currentPreviewPixelSize(hwnd) orelse return;
-    const page_width = previewPageWidth();
-    const page_height = previewPageHeight();
-    if (page_width <= 0 or page_height <= 0) return;
-
-    const zoom_x = @as(f64, @floatFromInt(viewport.width)) / @as(f64, @floatFromInt(page_width));
-    const zoom_y = @as(f64, @floatFromInt(viewport.height)) / @as(f64, @floatFromInt(page_height));
-    preview_renderer.zoom = std.math.clamp(@min(zoom_x, zoom_y), 0.25, 4.0);
+    preview_renderer.zoom = previewFitZoom(hwnd) orelse return;
 
     if (previewBounds(hwnd)) |bounds| {
         preview_renderer.scroll_x = bounds.x.default_pos;
@@ -2102,8 +2856,19 @@ fn fitPreviewPageInView(hwnd: ?foundation.HWND) void {
     requestPreviewRefresh();
 }
 
+fn previewFitZoom(hwnd: ?foundation.HWND) ?f64 {
+    const viewport = currentPreviewPixelSize(hwnd) orelse return null;
+    const page_width = previewPageWidth();
+    const page_height = previewPageHeight();
+    if (page_width <= 0 or page_height <= 0) return null;
+
+    const zoom_x = @as(f64, @floatFromInt(viewport.width)) / @as(f64, @floatFromInt(page_width));
+    const zoom_y = @as(f64, @floatFromInt(viewport.height)) / @as(f64, @floatFromInt(page_height));
+    return std.math.clamp(@min(zoom_x, zoom_y), preview_min_zoom, preview_max_zoom);
+}
+
 fn setPreviewZoom(new_zoom: f64, anchor_x: i32, anchor_y: i32) void {
-    const clamped_zoom = std.math.clamp(new_zoom, 0.25, 4.0);
+    const clamped_zoom = std.math.clamp(new_zoom, preview_min_zoom, preview_max_zoom);
     if (@abs(clamped_zoom - preview_renderer.zoom) < 0.001) return;
 
     const old_zoom = preview_renderer.zoom;
@@ -2113,6 +2878,16 @@ fn setPreviewZoom(new_zoom: f64, anchor_x: i32, anchor_y: i32) void {
     preview_renderer.zoom = clamped_zoom;
     preview_renderer.scroll_x = @intFromFloat(@round(world_x * clamped_zoom - @as(f64, @floatFromInt(anchor_x))));
     preview_renderer.scroll_y = @intFromFloat(@round(world_y * clamped_zoom - @as(f64, @floatFromInt(anchor_y))));
+    refreshStatusDisplay();
+    requestPreviewRefresh();
+}
+
+fn setPreviewZoomAbsolute(hwnd: ?foundation.HWND, level: f64) void {
+    const fit_zoom = previewFitZoom(hwnd) orelse 1.0;
+    preview_renderer.zoom = std.math.clamp(fit_zoom * level, preview_min_zoom, preview_max_zoom);
+    // Align content top-left.
+    preview_renderer.scroll_x = 0;
+    preview_renderer.scroll_y = 0;
     refreshStatusDisplay();
     requestPreviewRefresh();
 }
@@ -2232,7 +3007,7 @@ fn drawPreviewBitmap(hwnd: ?foundation.HWND) void {
             .bottom = @floatFromInt(preview_renderer.bitmap_height),
         };
         // Prefer ID2D1DeviceContext.DrawBitmap which supports
-        // HIGH_QUALITY_CUBIC — a proper downsampling filter that avoids
+        // HIGH_QUALITY_CUBIC ��� a proper downsampling filter that avoids
         // the bilinear jaggies produced by ID2D1RenderTarget.DrawBitmap.
         var device_ctx: ?*d2d.ID2D1DeviceContext = null;
         const qi_hr = render_target.IUnknown.QueryInterface(d2d.IID_ID2D1DeviceContext, @ptrCast(&device_ctx));
@@ -2287,39 +3062,40 @@ fn previewWindowProc(
             return 0;
         },
         ui.WM_MOUSEWHEEL => {
+            // Scroll pans the view vertically; zoom is toolbar-only.
             const delta = wheelDeltaFromWParam(w_param);
-            const anchor = viewportAnchorFromWheel(hwnd, l_param);
-            if (delta > 0) {
-                stepPreviewZoomAtAnchor(anchor.x, anchor.y, true);
-            } else if (delta < 0) {
-                stepPreviewZoomAtAnchor(anchor.x, anchor.y, false);
-            }
+            const scroll_amount: i32 = @divTrunc(@as(i32, delta) * 40, 120);
+            panPreviewBy(hwnd, 0, -scroll_amount);
             return 0;
         },
         ui.WM_KEYDOWN, ui.WM_SYSKEYDOWN => {
             const ctrl_down = mouse.GetKeyState(@intFromEnum(mouse.VK_CONTROL)) < 0;
             if (handleDiagramNavigationShortcut(@truncate(w_param), ctrl_down)) return 0;
-            if (ctrl_down) {
-                switch (@as(u16, @truncate(w_param))) {
-                    @intFromEnum(mouse.VK_ADD), @intFromEnum(mouse.VK_OEM_PLUS) => {
-                        stepPreviewZoom(hwnd, true);
-                        return 0;
-                    },
-                    @intFromEnum(mouse.VK_SUBTRACT), @intFromEnum(mouse.VK_OEM_MINUS) => {
-                        stepPreviewZoom(hwnd, false);
-                        return 0;
-                    },
-                    @intFromEnum(mouse.VK_0), @intFromEnum(mouse.VK_NUMPAD0) => {
-                        const anchor = viewportAnchor(hwnd);
-                        setPreviewZoom(1.0, anchor.x, anchor.y);
-                        return 0;
-                    },
-                    else => {},
-                }
+            const vkey: u16 = @truncate(w_param);
+            const pan_step: i32 = 40;
+            switch (vkey) {
+                @intFromEnum(mouse.VK_LEFT) => {
+                    panPreviewBy(hwnd, -pan_step, 0);
+                    return 0;
+                },
+                @intFromEnum(mouse.VK_RIGHT) => {
+                    panPreviewBy(hwnd, pan_step, 0);
+                    return 0;
+                },
+                @intFromEnum(mouse.VK_UP) => {
+                    panPreviewBy(hwnd, 0, -pan_step);
+                    return 0;
+                },
+                @intFromEnum(mouse.VK_DOWN) => {
+                    panPreviewBy(hwnd, 0, pan_step);
+                    return 0;
+                },
+                else => {},
             }
             return ui.DefWindowProcA(hwnd, message, w_param, l_param);
         },
         ui.WM_MOUSEMOVE => {
+            if (mouse.GetFocus() != hwnd) _ = mouse.SetFocus(hwnd);
             if (preview_renderer.is_dragging) {
                 const mouse_pos = mouseCoordFromLParam(l_param);
                 const dx = mouse_pos.x - preview_renderer.drag_last_x;
@@ -2466,7 +3242,7 @@ fn drawCanvasFrame(hwnd: ?foundation.HWND) void {
 
     rt.ID2D1RenderTarget.BeginDraw();
     if (canvas_renderer.canvas_state.graph) |graph| {
-        windows_canvas.draw.drawCanvas(&ctx, graph, canvas_renderer.canvas_state.viewport, canvas_renderer.canvas_state.selection, canvas_renderer.canvas_state.hover);
+        windows_canvas.draw.drawCanvas(&ctx, graph, canvas_renderer.canvas_state.viewport, canvas_renderer.canvas_state.selection, canvas_renderer.canvas_state.hover, canvas_renderer.canvas_state.insertion, @floatFromInt(canvas_mouse_screen_x), @floatFromInt(canvas_mouse_screen_y));
     } else {
         var bg = rgba8Color(245, 245, 245, 255);
         rt.ID2D1RenderTarget.Clear(&bg);
@@ -2514,8 +3290,19 @@ fn canvasWindowProc(
                 pos.x,
                 pos.y,
             );
+            if (result.node_inserted) {
+                addCanvasNodeAtPosition(result.insert_shape, result.insert_x, result.insert_y);
+            }
+            if (result.subgraph_inserted) {
+                addCanvasSubgraphAtPosition(result.insert_x, result.insert_y);
+            }
+            if (result.link_completed) {
+                if (result.link_source_id) |src| {
+                    completeCanvasLink(src);
+                }
+            }
             if (result.document_mutated) scheduleFreeformPersist();
-            if (result.selection_changed) {
+            if (result.selection_changed or result.node_inserted or result.subgraph_inserted or result.link_completed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
             }
             if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
@@ -2529,6 +3316,8 @@ fn canvasWindowProc(
             _ = TrackMouseEvent(&track);
 
             const pos = mouseCoordFromLParam(l_param);
+            canvas_mouse_screen_x = pos.x;
+            canvas_mouse_screen_y = pos.y;
             const result = windows_canvas.interaction.onMouseMove(
                 &canvas_renderer.canvas_state,
                 pos.x,
@@ -2556,19 +3345,11 @@ fn canvasWindowProc(
             return 0;
         },
         ui.WM_MOUSEWHEEL => {
+            // Scroll pans the canvas vertically; zoom is toolbar-only.
             const delta = wheelDeltaFromWParam(w_param);
-            var pt = foundation.POINT{
-                .x = mouseCoordFromLParam(l_param).x,
-                .y = mouseCoordFromLParam(l_param).y,
-            };
-            _ = gdi.ScreenToClient(hwnd, &pt);
-            const result = windows_canvas.interaction.onMouseWheel(
-                &canvas_renderer.canvas_state,
-                pt.x,
-                pt.y,
-                delta,
-            );
-            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            const scroll_amount: f64 = @as(f64, @floatFromInt(delta)) * 40.0 / 120.0;
+            canvas_renderer.canvas_state.viewport.pan_y += scroll_amount / canvas_renderer.canvas_state.viewport.zoom;
+            _ = gdi.InvalidateRect(hwnd, null, 0);
             return 0;
         },
         ui.WM_RBUTTONDOWN => {
@@ -2581,8 +3362,15 @@ fn canvasWindowProc(
             if (result.document_mutated) scheduleFreeformPersist();
             if (result.selection_changed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+                _ = gdi.InvalidateRect(hwnd, null, 0);
             }
-            if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+            // Show the appropriate context menu based on selection state.
+            if (canvas_renderer.canvas_state.hasSelection()) {
+                showCanvasContextMenuSelected(hwnd.?, pos.x, pos.y);
+            } else {
+                showCanvasContextMenuEmpty(hwnd.?, pos.x, pos.y);
+            }
+            _ = gdi.InvalidateRect(hwnd, null, 0);
             return 0;
         },
         ui.WM_MBUTTONDOWN => {
@@ -2604,7 +3392,7 @@ fn canvasWindowProc(
         },
         ui.WM_LBUTTONDBLCLK => {
             // Double-click selects the object (same as single click for now).
-            // This ensures clicking text feels responsive — the first click
+            // This ensures clicking text feels responsive ��� the first click
             // selects, the double-click confirms the selection.
             _ = mouse.SetFocus(hwnd);
             const pos = mouseCoordFromLParam(l_param);
@@ -2624,6 +3412,33 @@ fn canvasWindowProc(
             const vkey: u16 = @truncate(w_param);
             const ctrl_down = mouse.GetKeyState(@intFromEnum(mouse.VK_CONTROL)) < 0;
             if (handleDiagramNavigationShortcut(vkey, ctrl_down)) return 0;
+            // Arrow keys pan when nothing is selected.
+            if (!canvas_renderer.canvas_state.hasSelection()) {
+                const pan_step: f64 = 40.0 / canvas_renderer.canvas_state.viewport.zoom;
+                switch (vkey) {
+                    @intFromEnum(mouse.VK_LEFT) => {
+                        canvas_renderer.canvas_state.viewport.pan_x += pan_step;
+                        _ = gdi.InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    @intFromEnum(mouse.VK_RIGHT) => {
+                        canvas_renderer.canvas_state.viewport.pan_x -= pan_step;
+                        _ = gdi.InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    @intFromEnum(mouse.VK_UP) => {
+                        canvas_renderer.canvas_state.viewport.pan_y += pan_step;
+                        _ = gdi.InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    @intFromEnum(mouse.VK_DOWN) => {
+                        canvas_renderer.canvas_state.viewport.pan_y -= pan_step;
+                        _ = gdi.InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    else => {},
+                }
+            }
             switch (vkey) {
                 @as(u16, @intCast(@intFromEnum(mouse.VK_PRIOR))) => {
                     if (scrollCanvasByPage(hwnd, -1)) _ = gdi.InvalidateRect(hwnd, null, 0);
@@ -2707,25 +3522,6 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
         32,
         hwnd,
         null,
-        h_instance,
-        null,
-    ) orelse return false;
-
-    const diagram_selector_style_bits = child_visible_bits |
-        styleBits(ui.WS_TABSTOP) |
-        styleBits(ui.WS_VSCROLL) |
-        @as(u32, @intCast(ui.CBS_DROPDOWNLIST));
-    const diagram_selector = ui.CreateWindowExA(
-        .{},
-        combo_box_class,
-        null,
-        makeStyle(diagram_selector_style_bits),
-        0,
-        0,
-        180,
-        240,
-        hwnd,
-        @ptrFromInt(control_id_diagram_selector),
         h_instance,
         null,
     ) orelse return false;
@@ -2824,14 +3620,13 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
     child_windows.diagram_label = diagram_label;
     child_windows.editor = editor;
     child_windows.toolbar = toolbar;
-    child_windows.diagram_selector = diagram_selector;
     child_windows.diagram_prev_button = diagram_prev_button;
     child_windows.diagram_next_button = diagram_next_button;
     child_windows.command = command;
     child_windows.apply_button = apply_button;
     child_windows.status = status;
 
-    // Canvas child window — hidden at startup (app starts in mermaid mode).
+    // Canvas child window ��� hidden at startup (app starts in mermaid mode).
     const canvas = ui.CreateWindowExA(
         .{},
         canvas_class_name,
@@ -3025,6 +3820,8 @@ fn updateEditorDerivedState(reset_view: bool) void {
         return;
     }
 
+    applyDirectivesFromSource(diagram.mermaid_source);
+
     var preview_message: [256]u8 = std.mem.zeroes([256]u8);
     var preview_png_len: u32 = 0;
     const canvas_dims = currentProjectCanvasDimensions();
@@ -3057,7 +3854,7 @@ fn updateEditorDerivedState(reset_view: bool) void {
     }
 
     if (reset_view) {
-        resetPreviewView(child_windows.preview);
+        fitPreviewPageInView(child_windows.preview);
     }
 
     const status_text = std.fmt.allocPrint(
@@ -3081,29 +3878,47 @@ fn runReservedToolbarAction(slot: u8) void {
     if (app_mode == .mermaid) {
         switch (slot) {
             1 => {
-                fitPreviewPageInView(child_windows.preview);
-                setStatusMessage("Preview fit to page");
+                setPreviewZoomAbsolute(child_windows.preview, 1.0);
+                setStatusMessage("Preview zoom: fit to page");
                 return;
             },
             2 => {
-                resetPreviewView(child_windows.preview);
-                setStatusMessage("Preview at 100%");
-                requestPreviewRefresh();
+                setPreviewZoomAbsolute(child_windows.preview, 2.0);
+                setStatusMessage("Preview zoom: 2x");
                 return;
             },
             3 => {
-                centerPreviewPage(child_windows.preview);
-                setStatusMessage("Preview page centered");
+                setPreviewZoomAbsolute(child_windows.preview, 4.0);
+                setStatusMessage("Preview zoom: 4x");
                 return;
             },
             else => {},
         }
+    } else if (app_mode == .freeform) {
+        const level: f64 = switch (slot) {
+            1 => 1.0,
+            2 => 2.0,
+            3 => 4.0,
+            else => return,
+        };
+        canvas_renderer.canvas_state.viewport.zoom = std.math.clamp(level, 0.1, 8.0);
+        canvas_renderer.canvas_state.viewport.pan_x = 0;
+        canvas_renderer.canvas_state.viewport.pan_y = 0;
+        if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
+        const label = switch (slot) {
+            1 => "Canvas zoom: fit",
+            2 => "Canvas zoom: 2x",
+            3 => "Canvas zoom: 4x",
+            else => "Canvas zoom",
+        };
+        setStatusMessage(label);
+        return;
     }
 
     const text = switch (slot) {
-        1 => "Fit Page unavailable",
-        2 => "100% unavailable",
-        3 => "Center unavailable",
+        1 => "Fit unavailable",
+        2 => "2x unavailable",
+        3 => "4x unavailable",
         else => "Reserved toolbar slot",
     };
     setStatusMessage(text);
@@ -3113,6 +3928,9 @@ fn runReservedToolbarAction(slot: u8) void {
 /// Shows / hides the appropriate child windows and triggers a layout pass.
 fn switchToMode(new_mode: AppMode) void {
     if (app_mode == new_mode) return;
+    if (app_mode == .freeform) {
+        flushPendingFreeformPersist();
+    }
     app_mode = new_mode;
 
     switch (new_mode) {
@@ -3256,12 +4074,32 @@ fn windowProc(
                 setStatusMessage(message_text);
             }
             openLibraryDatabase();
+            startup_layout_done = true;
             return 0;
         },
         ui.WM_COMMAND => {
             const command_id: u16 = @truncate(w_param & 0xffff);
             const notification_code: u16 = @truncate((w_param >> 16) & 0xffff);
             const source_hwnd: ?foundation.HWND = if (l_param == 0) null else @ptrFromInt(@as(usize, @bitCast(l_param)));
+            // Handle toolbar button commands (source_hwnd is the toolbar control).
+            if (notification_code == 0) {
+                switch (command_id) {
+                    toolbar_id_reserved_1 => {
+                        runReservedToolbarAction(1);
+                        return 0;
+                    },
+                    toolbar_id_reserved_2 => {
+                        runReservedToolbarAction(2);
+                        return 0;
+                    },
+                    toolbar_id_reserved_3 => {
+                        runReservedToolbarAction(3);
+                        return 0;
+                    },
+                    else => {},
+                }
+            }
+            // Handle menu commands (source_hwnd is null for menus).
             if (notification_code == 0 and source_hwnd == null) {
                 switch (command_id) {
                     menu_id_open => {
@@ -3296,18 +4134,6 @@ fn windowProc(
                         toggleSourcePanelVisibility();
                         return 0;
                     },
-                    toolbar_id_reserved_1 => {
-                        runReservedToolbarAction(1);
-                        return 0;
-                    },
-                    toolbar_id_reserved_2 => {
-                        runReservedToolbarAction(2);
-                        return 0;
-                    },
-                    toolbar_id_reserved_3 => {
-                        runReservedToolbarAction(3);
-                        return 0;
-                    },
                     else => {},
                 }
             }
@@ -3321,10 +4147,6 @@ fn windowProc(
             }
             if (notification_code == ui.BN_CLICKED and (command_id == control_id_diagram_next or source_hwnd == child_windows.diagram_next_button)) {
                 selectAdjacentDiagram(1);
-                return 0;
-            }
-            if (notification_code == ui.CBN_SELCHANGE and (command_id == control_id_diagram_selector or source_hwnd == child_windows.diagram_selector)) {
-                onDiagramSelectionChanged();
                 return 0;
             }
             if (notification_code == ui.EN_CHANGE and (command_id == control_id_editor or source_hwnd == child_windows.editor)) {
@@ -3363,6 +4185,7 @@ fn windowProc(
             return 0;
         },
         ui.WM_SIZE => {
+            if (!startup_layout_done) return 0;
             layoutChildWindows(hwnd);
             _ = gdi.RedrawWindow(
                 hwnd,
@@ -3370,9 +4193,7 @@ fn windowProc(
                 null,
                 makeRedrawFlags(
                     redrawFlagsBits(gdi.RDW_INVALIDATE) |
-                        redrawFlagsBits(gdi.RDW_ERASE) |
-                        redrawFlagsBits(gdi.RDW_ALLCHILDREN) |
-                        redrawFlagsBits(gdi.RDW_ERASENOW),
+                        redrawFlagsBits(gdi.RDW_ALLCHILDREN),
                 ),
             );
             requestPreviewRefresh();

@@ -17,7 +17,6 @@ const dialogs = win32.ui.controls.dialogs;
 const CanvasState = state.CanvasState;
 const SelectionKind = state.SelectionKind;
 const StudioColor = state.StudioColor;
-const CanvasPreset = project_settings.CanvasPreset;
 const ProjectFontSettings = project_settings.ProjectFontSettings;
 const FontFamily = project_settings.FontFamily;
 
@@ -39,7 +38,8 @@ const inspector_label_color = StudioColor{ .r = 74, .g = 65, .b = 44, .a = 255 }
 const ID = struct {
     const btn_fit: u16 = 4001;
     // Project settings inspector
-    const cmb_canvas_preset: u16 = 4006;
+    const edt_canvas_width_cm: u16 = 4006;
+    const edt_canvas_height_cm: u16 = 4007;
     const cmb_font_family: u16 = 4002;
     const edt_font_node: u16 = 4003;
     const edt_font_group: u16 = 4004;
@@ -54,12 +54,17 @@ const ID = struct {
     const btn_ns_fill: u16 = 4016;
     const btn_ns_stroke: u16 = 4017;
     const edt_ns_border: u16 = 4018;
+    const cmb_sg_lbl_pos: u16 = 4019;
+    const btn_sg_attach: u16 = 4020;
+    const btn_sg_detach: u16 = 4021;
     // Edge
     const edt_e_label: u16 = 4030;
     const btn_e_color: u16 = 4031;
     const edt_e_thick: u16 = 4032;
     const cmb_e_line: u16 = 4033;
     const cmb_e_arrows: u16 = 4034;
+    const cmb_e_from: u16 = 4035;
+    const cmb_e_to: u16 = 4036;
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +81,11 @@ var g_font_inspector_active: bool = false;
 var g_suppress: bool = false;
 var g_custom_colors: [16]u32 = [_]u32{0x00FFFFFF} ** 16;
 var g_panel_brush: ?gdi.HBRUSH = null;
+
+// Picker item ID storage — populated when an edge is selected.
+const max_picker_items = 256;
+var g_picker_ids: [max_picker_items][128]u8 = std.mem.zeroes([max_picker_items][128]u8);
+var g_picker_count: usize = 0;
 var g_ns_fill_brush: ?gdi.HBRUSH = null;
 var g_ns_stroke_brush: ?gdi.HBRUSH = null;
 var g_e_color_brush: ?gdi.HBRUSH = null;
@@ -95,8 +105,11 @@ pub const InspectorControls = struct {
     // -- Project canvas section --
     lbl_canvas_section: ?foundation.HWND = null,
     div_canvas_section: ?foundation.HWND = null,
-    lbl_canvas_preset: ?foundation.HWND = null,
-    cmb_canvas_preset: ?foundation.HWND = null,
+    lbl_canvas_size: ?foundation.HWND = null,
+    lbl_canvas_width_cm: ?foundation.HWND = null,
+    edt_canvas_width_cm: ?foundation.HWND = null,
+    lbl_canvas_height_cm: ?foundation.HWND = null,
+    edt_canvas_height_cm: ?foundation.HWND = null,
     // -- Project font section --
     lbl_font_section: ?foundation.HWND = null,
     div_font_section: ?foundation.HWND = null,
@@ -135,7 +148,17 @@ pub const InspectorControls = struct {
     lbl_ns_border: ?foundation.HWND = null,
     div_ns_appear: ?foundation.HWND = null,
     edt_ns_border: ?foundation.HWND = null,
+    // Subgraph-only label position
+    lbl_sg_lbl_pos: ?foundation.HWND = null,
+    cmb_sg_lbl_pos: ?foundation.HWND = null,
+    // Subgraph-only attach/detach children
+    btn_sg_attach: ?foundation.HWND = null,
+    btn_sg_detach: ?foundation.HWND = null,
     // -- Edge section --
+    lbl_e_from: ?foundation.HWND = null,
+    cmb_e_from: ?foundation.HWND = null,
+    lbl_e_to: ?foundation.HWND = null,
+    cmb_e_to: ?foundation.HWND = null,
     lbl_e_label: ?foundation.HWND = null,
     edt_e_label: ?foundation.HWND = null,
     lbl_e_style: ?foundation.HWND = null,
@@ -451,9 +474,13 @@ pub fn createInspector(
     y += sect_h;
     c.div_canvas_section = mkDivider(pnl, hi, pad, y, full_w, divider_h);
     y += divider_h + section_gap;
-    c.lbl_canvas_preset = mkLabel(pnl, hi, "Page Size", pad, y, full_w, lbl_h);
+    c.lbl_canvas_size = mkLabel(pnl, hi, "Word Image Size", pad, y, full_w, lbl_h);
     y += lbl_h + label_gap;
-    c.cmb_canvas_preset = mkCombo(pnl, hi, pad, y, full_w, 140, ID.cmb_canvas_preset);
+    c.lbl_canvas_width_cm = mkLabel(pnl, hi, "Width (cm)", pad, y, half_w, lbl_h);
+    c.lbl_canvas_height_cm = mkLabel(pnl, hi, "Height (cm)", right_x, y, half_w, lbl_h);
+    y += lbl_h + label_gap;
+    c.edt_canvas_width_cm = mkEdit(pnl, hi, pad, y, half_w, row_h, ID.edt_canvas_width_cm, false);
+    c.edt_canvas_height_cm = mkEdit(pnl, hi, right_x, y, half_w, row_h, ID.edt_canvas_height_cm, false);
     y += row_h + 10;
 
     // ===== PROJECT FONT SECTION =====
@@ -490,6 +517,12 @@ pub fn createInspector(
     c.lbl_ns_shape = mkLabel(pnl, hi, "Shape", pad, y, full_w, lbl_h);
     y += lbl_h + label_gap;
     c.cmb_ns_shape = mkCombo(pnl, hi, pad, y, full_w, 200, ID.cmb_ns_shape);
+    y += row_h + 8;
+
+    // Label Position combo (subgraph only)
+    c.lbl_sg_lbl_pos = mkLabel(pnl, hi, "Label Position", pad, y, full_w, lbl_h);
+    y += lbl_h + label_gap;
+    c.cmb_sg_lbl_pos = mkCombo(pnl, hi, pad, y, full_w, 180, ID.cmb_sg_lbl_pos);
     y += row_h + 8;
 
     // POSITION header
@@ -537,9 +570,26 @@ pub fn createInspector(
     c.lbl_ns_border = mkLabel(pnl, hi, "Border Width", pad, y, full_w, lbl_h);
     y += lbl_h + label_gap;
     c.edt_ns_border = mkEdit(pnl, hi, pad, y, 80, row_h, ID.edt_ns_border, false);
+    y += row_h + 8;
+
+    // Attach / Detach children buttons (subgraph only)
+    c.btn_sg_attach = mkButton(pnl, hi, "Attach Children", pad, y, half_w, btn_h, ID.btn_sg_attach);
+    c.btn_sg_detach = mkButton(pnl, hi, "Detach Children", right_x, y, half_w, btn_h, ID.btn_sg_detach);
 
     // ===== EDGE SECTION (same vertical origin as node section) =====
     y = section_start;
+
+    // From endpoint picker
+    c.lbl_e_from = mkLabel(pnl, hi, "From", pad, y, full_w, lbl_h);
+    y += lbl_h + label_gap;
+    c.cmb_e_from = mkCombo(pnl, hi, pad, y, full_w, 200, ID.cmb_e_from);
+    y += row_h + 8;
+
+    // To endpoint picker
+    c.lbl_e_to = mkLabel(pnl, hi, "To", pad, y, full_w, lbl_h);
+    y += lbl_h + label_gap;
+    c.cmb_e_to = mkCombo(pnl, hi, pad, y, full_w, 200, ID.cmb_e_to);
+    y += row_h + 8;
 
     c.lbl_e_label = mkLabel(pnl, hi, "Label", pad, y, 50, lbl_h);
     y += lbl_h + label_gap;
@@ -577,14 +627,6 @@ pub fn createInspector(
 }
 
 fn populateCombos(c: *InspectorControls) void {
-    addComboItem(c.cmb_canvas_preset, "Document (1800 x 3500)");
-    addComboItem(c.cmb_canvas_preset, "Narrow (1600 x 3500)");
-    addComboItem(c.cmb_canvas_preset, "Narrower (1400 x 3500)");
-    addComboItem(c.cmb_canvas_preset, "Slim (1200 x 3500)");
-    addComboItem(c.cmb_canvas_preset, "Wide Short (1800 x 600)");
-    addComboItem(c.cmb_canvas_preset, "Wide Short (1800 x 1000)");
-    addComboItem(c.cmb_canvas_preset, "Wide Short (1800 x 1200)");
-
     const shapes = [_][*:0]const u8{
         "Rectangle",     "Rounded Rect",  "Diamond",           "Circle",
         "Hexagon",       "Cylinder",      "Stadium",           "Trapezoid",
@@ -605,6 +647,13 @@ fn populateCombos(c: *InspectorControls) void {
     addComboItem(c.cmb_font_family, "Segoe UI");
     addComboItem(c.cmb_font_family, "Arial");
     addComboItem(c.cmb_font_family, "Consolas");
+
+    addComboItem(c.cmb_sg_lbl_pos, "Top Left");
+    addComboItem(c.cmb_sg_lbl_pos, "Top Center");
+    addComboItem(c.cmb_sg_lbl_pos, "Top Right");
+    addComboItem(c.cmb_sg_lbl_pos, "Bottom Left");
+    addComboItem(c.cmb_sg_lbl_pos, "Bottom Center");
+    addComboItem(c.cmb_sg_lbl_pos, "Bottom Right");
 }
 
 // ---------------------------------------------------------------------------
@@ -679,10 +728,13 @@ fn swShow(hwnd: ?foundation.HWND, cmd: ui.SHOW_WINDOW_CMD) void {
 fn showNodeSection(c: *const InspectorControls, vis: bool, is_node: bool) void {
     const cmd = if (vis) ui.SW_SHOWNA else ui.SW_HIDE;
     const shape_cmd = if (vis and is_node) ui.SW_SHOWNA else ui.SW_HIDE;
+    const sg_cmd = if (vis and !is_node) ui.SW_SHOWNA else ui.SW_HIDE;
     swShow(c.lbl_ns_label, cmd);
     swShow(c.edt_ns_label, cmd);
     swShow(c.lbl_ns_shape, shape_cmd);
     swShow(c.cmb_ns_shape, shape_cmd);
+    swShow(c.lbl_sg_lbl_pos, sg_cmd);
+    swShow(c.cmb_sg_lbl_pos, sg_cmd);
     swShow(c.lbl_ns_pos, cmd);
     swShow(c.div_ns_pos, cmd);
     swShow(c.lbl_ns_x, cmd);
@@ -705,14 +757,19 @@ fn showNodeSection(c: *const InspectorControls, vis: bool, is_node: bool) void {
     swShow(c.btn_ns_stroke, cmd);
     swShow(c.lbl_ns_border, cmd);
     swShow(c.edt_ns_border, cmd);
+    swShow(c.btn_sg_attach, sg_cmd);
+    swShow(c.btn_sg_detach, sg_cmd);
 }
 
 fn showProjectSection(c: *const InspectorControls, vis: bool) void {
     const cmd = if (vis) ui.SW_SHOWNA else ui.SW_HIDE;
     swShow(c.lbl_canvas_section, cmd);
     swShow(c.div_canvas_section, cmd);
-    swShow(c.lbl_canvas_preset, cmd);
-    swShow(c.cmb_canvas_preset, cmd);
+    swShow(c.lbl_canvas_size, cmd);
+    swShow(c.lbl_canvas_width_cm, cmd);
+    swShow(c.edt_canvas_width_cm, cmd);
+    swShow(c.lbl_canvas_height_cm, cmd);
+    swShow(c.edt_canvas_height_cm, cmd);
     swShow(c.lbl_font_section, cmd);
     swShow(c.div_font_section, cmd);
     swShow(c.lbl_font_family, cmd);
@@ -727,6 +784,10 @@ fn showProjectSection(c: *const InspectorControls, vis: bool) void {
 
 fn showEdgeSection(c: *const InspectorControls, vis: bool) void {
     const cmd = if (vis) ui.SW_SHOWNA else ui.SW_HIDE;
+    swShow(c.lbl_e_from, cmd);
+    swShow(c.cmb_e_from, cmd);
+    swShow(c.lbl_e_to, cmd);
+    swShow(c.cmb_e_to, cmd);
     swShow(c.lbl_e_label, cmd);
     swShow(c.edt_e_label, cmd);
     swShow(c.lbl_e_style, cmd);
@@ -758,7 +819,8 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
         showProjectSection(controls_ref, true);
         showNodeSection(controls_ref, false, false);
         showEdgeSection(controls_ref, false);
-        setComboSel(controls_ref.cmb_canvas_preset, canvasPresetIndex(settings.canvas_preset));
+        setEditF64(controls_ref.edt_canvas_width_cm, settings.canvas_width_cm);
+        setEditF64(controls_ref.edt_canvas_height_cm, settings.canvas_height_cm);
         setComboSel(controls_ref.cmb_font_family, fontFamilyIndex(settings.font_family));
         setEditF32(controls_ref.edt_font_node, settings.node_label_size);
         setEditF32(controls_ref.edt_font_group, settings.group_title_size);
@@ -770,9 +832,23 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
 
     switch (canvas.selection.kind) {
         .none => {
-            setLabelText(controls_ref.lbl_header, "No selection");
+            // No selection — show project settings automatically.
+            const settings = g_project_font_settings orelse {
+                setLabelText(controls_ref.lbl_header, "No selection");
+                showNodeSection(controls_ref, false, false);
+                showEdgeSection(controls_ref, false);
+                return;
+            };
+            setLabelText(controls_ref.lbl_header, "Project Settings");
+            showProjectSection(controls_ref, true);
             showNodeSection(controls_ref, false, false);
             showEdgeSection(controls_ref, false);
+            setEditF64(controls_ref.edt_canvas_width_cm, settings.canvas_width_cm);
+            setEditF64(controls_ref.edt_canvas_height_cm, settings.canvas_height_cm);
+            setComboSel(controls_ref.cmb_font_family, fontFamilyIndex(settings.font_family));
+            setEditF32(controls_ref.edt_font_node, settings.node_label_size);
+            setEditF32(controls_ref.edt_font_group, settings.group_title_size);
+            setEditF32(controls_ref.edt_font_edge, settings.edge_label_size);
         },
         .node => {
             const n = canvas.selectedNode() orelse return;
@@ -795,6 +871,7 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
             showNodeSection(controls_ref, true, false);
             showEdgeSection(controls_ref, false);
             setEditSlice(controls_ref.edt_ns_label, cstrToSlice(sg.title));
+            setComboSel(controls_ref.cmb_sg_lbl_pos, @intCast(sg.title_position));
             setEditF64(controls_ref.edt_ns_x, sg.x);
             setEditF64(controls_ref.edt_ns_y, sg.y);
             setEditF64(controls_ref.edt_ns_w, sg.width);
@@ -808,6 +885,7 @@ pub fn refresh(controls_ref: *const InspectorControls, canvas: *const CanvasStat
             setHeaderWithSlice(controls_ref.lbl_header, "Edge", cstrToSlice(e.label));
             showNodeSection(controls_ref, false, false);
             showEdgeSection(controls_ref, true);
+            if (canvas.graph) |g| populateEdgePickers(controls_ref, g, e);
             setEditSlice(controls_ref.edt_e_label, cstrToSlice(e.label));
             setColorSelector(controls_ref.btn_e_color, controls_ref.swatch_e_color, .edge_color, e.color);
             setEditF32(controls_ref.edt_e_thick, e.thickness);
@@ -829,6 +907,8 @@ fn handleCommand(id: u16, code: u32, owner: ?foundation.HWND) void {
             ID.btn_ns_fill => pickColor(.node_fill, owner),
             ID.btn_ns_stroke => pickColor(.node_stroke, owner),
             ID.btn_e_color => pickColor(.edge_color, owner),
+            ID.btn_sg_attach => applyAttachChildren(),
+            ID.btn_sg_detach => applyDetachChildren(),
             else => {},
         }
         return;
@@ -836,11 +916,13 @@ fn handleCommand(id: u16, code: u32, owner: ?foundation.HWND) void {
     // Combo box selection change
     if (code == ui.CBN_SELCHANGE) {
         switch (id) {
-            ID.cmb_canvas_preset => applyProjectCanvasPreset(),
             ID.cmb_font_family => applyProjectFontFamily(),
             ID.cmb_ns_shape => applyShape(),
+            ID.cmb_sg_lbl_pos => applySubgraphLabelPos(),
             ID.cmb_e_line => applyLineStyle(),
             ID.cmb_e_arrows => applyArrowMode(),
+            ID.cmb_e_from => applyEdgeEndpoint(true),
+            ID.cmb_e_to => applyEdgeEndpoint(false),
             else => {},
         }
         return;
@@ -848,6 +930,7 @@ fn handleCommand(id: u16, code: u32, owner: ?foundation.HWND) void {
     // Edit control lost focus — commit numeric values
     if (code == ui.EN_KILLFOCUS) {
         switch (id) {
+            ID.edt_canvas_width_cm, ID.edt_canvas_height_cm => applyProjectCanvasSize(),
             ID.edt_font_node, ID.edt_font_group, ID.edt_font_edge => applyProjectFontNumeric(id),
             ID.edt_ns_label, ID.edt_e_label => applySelectedLabel(id),
             ID.edt_ns_x, ID.edt_ns_y, ID.edt_ns_w, ID.edt_ns_h, ID.edt_ns_border => applyNodeNumeric(id),
@@ -922,6 +1005,34 @@ fn applyShape() void {
     graphDocumentChanged();
 }
 
+fn applySubgraphLabelPos() void {
+    const cs = g_canvas_state orelse return;
+    const ctrl = g_controls orelse return;
+    const sg = cs.selectedSubgraph() orelse return;
+    const sel = getComboSel(ctrl.cmb_sg_lbl_pos) orelse return;
+    sg.title_position = @intCast(sel);
+    invalidateCanvas();
+    graphDocumentChanged();
+}
+
+fn applyAttachChildren() void {
+    const cs = g_canvas_state orelse return;
+    const g = cs.graph orelse return;
+    if (cs.selection.kind != .subgraph) return;
+    state.attachChildrenToSubgraph(g, cs.selection.index);
+    invalidateCanvas();
+    graphDocumentChanged();
+}
+
+fn applyDetachChildren() void {
+    const cs = g_canvas_state orelse return;
+    const g = cs.graph orelse return;
+    if (cs.selection.kind != .subgraph) return;
+    state.detachChildrenFromSubgraph(g, cs.selection.index);
+    invalidateCanvas();
+    graphDocumentChanged();
+}
+
 fn applyProjectFontFamily() void {
     const settings = g_project_font_settings orelse return;
     const ctrl = g_controls orelse return;
@@ -930,11 +1041,11 @@ fn applyProjectFontFamily() void {
     projectFontSettingsChanged();
 }
 
-fn applyProjectCanvasPreset() void {
+fn applyProjectCanvasSize() void {
     const settings = g_project_font_settings orelse return;
     const ctrl = g_controls orelse return;
-    const sel = getComboSel(ctrl.cmb_canvas_preset) orelse return;
-    settings.canvas_preset = canvasPresetFromIndex(sel);
+    settings.canvas_width_cm = readEditF64(ctrl.edt_canvas_width_cm) orelse settings.canvas_width_cm;
+    settings.canvas_height_cm = readEditF64(ctrl.edt_canvas_height_cm) orelse settings.canvas_height_cm;
     projectFontSettingsChanged();
 }
 
@@ -1029,6 +1140,124 @@ fn applyEdgeThickness() void {
     e.thickness = @floatCast(readEditF64(ctrl.edt_e_thick) orelse return);
     invalidateCanvas();
     graphDocumentChanged();
+}
+
+/// Populate the from/to endpoint pickers with all nodes and subgraphs in the graph,
+/// then select the items matching the current edge endpoints.
+fn populateEdgePickers(
+    c: *const InspectorControls,
+    graph: *const state.StudioEditableGraph,
+    edge: *const state.StudioEditableEdge,
+) void {
+    // Reset combos and parallel ID buffer.
+    _ = ui.SendMessageA(c.cmb_e_from, ui.CB_RESETCONTENT, 0, 0);
+    _ = ui.SendMessageA(c.cmb_e_to, ui.CB_RESETCONTENT, 0, 0);
+    g_picker_count = 0;
+
+    var label_buf: [256]u8 = undefined;
+
+    // Add all nodes.
+    if (graph.node_count > 0 and graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count]) |*n| {
+            if (n.id == null) continue;
+            const id_slice = std.mem.span(n.id);
+            if (id_slice.len == 0) continue;
+            const display = pickerDisplayLabel(cstrToSlice(n.label), id_slice);
+            addPickerEntry(c, &label_buf, id_slice, display);
+        }
+    }
+
+    // Add all subgraphs.
+    if (graph.subgraph_count > 0 and graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count]) |*sg| {
+            if (sg.id == null) continue;
+            const id_slice = std.mem.span(sg.id);
+            if (id_slice.len == 0) continue;
+            const display = pickerDisplayLabel(cstrToSlice(sg.title), id_slice);
+            addPickerEntry(c, &label_buf, id_slice, display);
+        }
+    }
+
+    // Set selections.
+    if (edge.source_id != null) {
+        if (pickerIndexForId(std.mem.span(edge.source_id))) |idx|
+            setComboSel(c.cmb_e_from, idx);
+    }
+    if (edge.target_id != null) {
+        if (pickerIndexForId(std.mem.span(edge.target_id))) |idx|
+            setComboSel(c.cmb_e_to, idx);
+    }
+}
+
+fn addPickerEntry(
+    c: *const InspectorControls,
+    buf: *[256]u8,
+    id_slice: []const u8,
+    display: []const u8,
+) void {
+    if (g_picker_count >= max_picker_items) return;
+    // Store ID (null-terminated, capped at 127 chars).
+    const id_len = @min(id_slice.len, 127);
+    @memcpy(g_picker_ids[g_picker_count][0..id_len], id_slice[0..id_len]);
+    g_picker_ids[g_picker_count][id_len] = 0;
+    g_picker_count += 1;
+    // Build null-terminated display string and add to both combos.
+    const lbl_len = @min(display.len, 254);
+    @memcpy(buf[0..lbl_len], display[0..lbl_len]);
+    buf[lbl_len] = 0;
+    const lbl_ptr: [*:0]const u8 = @ptrCast(buf);
+    addComboItem(c.cmb_e_from, lbl_ptr);
+    addComboItem(c.cmb_e_to, lbl_ptr);
+}
+
+fn pickerDisplayLabel(label: []const u8, id: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, label, " \t\r\n");
+    return if (trimmed.len > 0) trimmed else id;
+}
+
+fn pickerIndexForId(id: []const u8) ?usize {
+    for (g_picker_ids[0..g_picker_count], 0..) |*stored, i| {
+        const stored_len = std.mem.indexOfScalar(u8, stored, 0) orelse 127;
+        if (std.mem.eql(u8, stored[0..stored_len], id)) return i;
+    }
+    return null;
+}
+
+/// Apply a changed from or to endpoint selection to the selected edge.
+fn applyEdgeEndpoint(is_from: bool) void {
+    const cs = g_canvas_state orelse return;
+    const ctrl = g_controls orelse return;
+    const e = cs.selectedEdge() orelse return;
+
+    const cmb = if (is_from) ctrl.cmb_e_from else ctrl.cmb_e_to;
+    const sel = getComboSel(cmb) orelse return;
+    if (sel >= g_picker_count) return;
+
+    // Build null-terminated copy of the new ID.
+    const raw = &g_picker_ids[sel];
+    const id_len = std.mem.indexOfScalar(u8, raw, 0) orelse 127;
+    const new_cstr = std.fmt.allocPrint(
+        std.heap.c_allocator,
+        "{s}\x00",
+        .{raw[0..id_len]},
+    ) catch return;
+
+    if (is_from) {
+        replaceEdgeCStringId(&e.source_id, new_cstr.ptr);
+    } else {
+        replaceEdgeCStringId(&e.target_id, new_cstr.ptr);
+    }
+
+    invalidateCanvas();
+    graphDocumentChanged();
+}
+
+fn replaceEdgeCStringId(field: *[*c]const u8, new_ptr: [*]const u8) void {
+    if (field.* != null) {
+        const old = std.mem.span(field.*);
+        std.heap.c_allocator.free(field.*[0 .. old.len + 1]);
+    }
+    field.* = new_ptr;
 }
 
 fn graphDocumentChanged() void {
@@ -1252,30 +1481,6 @@ fn fontFamilyIndex(family: FontFamily) usize {
         .segoe_ui => 1,
         .arial => 2,
         .consolas => 3,
-    };
-}
-
-fn canvasPresetIndex(preset: CanvasPreset) usize {
-    return switch (preset) {
-        .document => 0,
-        .narrow => 1,
-        .narrower => 2,
-        .slim => 3,
-        .banner_600 => 4,
-        .banner_1000 => 5,
-        .banner_1200 => 6,
-    };
-}
-
-fn canvasPresetFromIndex(index: usize) CanvasPreset {
-    return switch (index) {
-        1 => .narrow,
-        2 => .narrower,
-        3 => .slim,
-        4 => .banner_600,
-        5 => .banner_1000,
-        6 => .banner_1200,
-        else => .document,
     };
 }
 

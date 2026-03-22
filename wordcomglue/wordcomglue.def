@@ -1,0 +1,25 @@
+LIBRARY wordcomglue
+EXPORTS
+    wcg_get_abi_version
+    wcg_create_library
+    wcg_destroy_library
+    wcg_start_word
+    wcg_shutdown_word
+    wcg_create_document
+    wcg_open_document
+    wcg_save_document
+    wcg_save_document_as
+    wcg_export_pdf
+    wcg_close_document
+    wcg_set_document_font
+    wcg_insert_heading
+    wcg_insert_paragraph
+    wcg_insert_text_run
+    wcg_insert_header_banner
+    wcg_insert_footer_trailer
+    wcg_insert_image
+    wcg_insert_caption
+    wcg_insert_page_break
+    wcg_insert_section_break
+    wcg_get_last_error
+    wcg_clear_last_error

@@ -34,6 +34,7 @@ const Vec2 = graph_render.Vec2;
 const seq_model = merrow.sequence.model;
 const class_model = merrow.class.model;
 const er_model = merrow.er.model;
+const state_model = merrow.state.model;
 
 const Graph = Digraph(NodeData, EdgeData, GraphData);
 
@@ -73,6 +74,7 @@ pub const StudioGraphType = enum(u32) {
     sequence = 1,
     class = 2,
     er = 3,
+    state = 4,
 };
 
 pub const StudioPoint = extern struct {
@@ -204,6 +206,7 @@ pub const StudioEditableSubgraph = extern struct {
     title_y: f64,
     title_font_size: f32,
     title_color: StudioColor,
+    title_position: u32,
 };
 
 pub const StudioEditableGraph = extern struct {
@@ -1651,6 +1654,7 @@ fn appendSequenceEditableGraph(
             .title_y = frag.y + 16.0,
             .title_font_size = 12.0,
             .title_color = title_color,
+            .title_position = 0,
         });
     }
 
@@ -2402,6 +2406,7 @@ fn appendEditableSubgraphs(temp_allocator: std.mem.Allocator, scene_allocator: s
             .title_y = node.y + offset_y - node.height / 2.0 + 16.0,
             .title_font_size = config.text_size * 0.9,
             .title_color = studioColor(config.subgraph_title_color),
+            .title_position = 0,
         });
     }
 }
@@ -2491,6 +2496,305 @@ fn appendEditableEdges(scene_allocator: std.mem.Allocator, graph: *Graph, buffer
     }
 }
 
+// ---------------------------------------------------------------------------
+// State diagram editable graph
+// ---------------------------------------------------------------------------
+
+const state_editable_margin: f64 = 50.0;
+const state_editable_nodesep: f64 = 50.0;
+const state_editable_ranksep: f64 = 60.0;
+const state_editable_fixed_width: f64 = 180.0;
+const state_editable_min_width: f64 = 80.0;
+const state_editable_min_height: f64 = 40.0;
+const state_editable_padding_v: f64 = 12.0;
+const state_editable_char_width: f64 = 8.0;
+const state_editable_line_height: f64 = 20.0;
+const state_editable_start_size: f64 = 20.0;
+const state_editable_end_size: f64 = 24.0;
+const state_editable_fork_w: f64 = 70.0;
+const state_editable_fork_h: f64 = 12.0;
+const state_editable_choice_size: f64 = 36.0;
+const state_editable_composite_padding: f64 = 16.0;
+
+fn stateNodeSizeForEditable(s: *const state_model.State) NodeSize {
+    return switch (s.state_type) {
+        .start => .{ .w = state_editable_start_size, .h = state_editable_start_size },
+        .end => .{ .w = state_editable_end_size, .h = state_editable_end_size },
+        .fork, .join => .{ .w = state_editable_fork_w, .h = state_editable_fork_h },
+        .choice => .{ .w = state_editable_choice_size, .h = state_editable_choice_size },
+        .divider => .{ .w = 60.0, .h = 8.0 },
+        .default => {
+            const label = s.displayLabel();
+            const iw: f64 = @floatFromInt(label.len);
+            const w = @max(state_editable_fixed_width, @max(state_editable_min_width, iw * state_editable_char_width + 40.0));
+            var desc_lines: usize = 0;
+            if (s.description != null) desc_lines += 1;
+            desc_lines += s.descriptions.items.len;
+            const h_base = state_editable_padding_v * 2.0 + state_editable_line_height;
+            const h_desc: f64 = if (desc_lines > 0) @as(f64, @floatFromInt(desc_lines)) * state_editable_line_height + 8.0 else 0.0;
+            return .{ .w = w, .h = @max(state_editable_min_height, h_base + h_desc) };
+        },
+    };
+}
+
+fn stateShapeTagForEditable(state_type: state_model.StateType) u32 {
+    return switch (state_type) {
+        .start, .end => 3, // circle
+        .fork, .join => 0, // rectangle
+        .choice => 2, // diamond
+        .divider => 0, // rectangle
+        .default => 1, // rounded_rectangle
+    };
+}
+
+fn stateFillColorForEditable(state_type: state_model.StateType) StudioColor {
+    return switch (state_type) {
+        .start, .end, .fork, .join => studioColor(.{ 30, 30, 30, 255 }),
+        .choice => studioColor(.{ 255, 255, 255, 255 }),
+        .divider => studioColor(.{ 80, 80, 80, 255 }),
+        .default => studioColor(.{ 254, 254, 254, 255 }),
+    };
+}
+
+fn stateStrokeColorForEditable(state_type: state_model.StateType) StudioColor {
+    return switch (state_type) {
+        .start, .end, .fork, .join => studioColor(.{ 20, 20, 20, 255 }),
+        .choice => studioColor(.{ 40, 40, 40, 255 }),
+        .divider => studioColor(.{ 60, 60, 60, 255 }),
+        .default => studioColor(.{ 102, 102, 102, 255 }),
+    };
+}
+
+fn stateLabelColorForEditable(state_type: state_model.StateType) StudioColor {
+    return switch (state_type) {
+        .start, .end, .fork, .join, .divider => studioColor(.{ 255, 255, 255, 255 }),
+        .default, .choice => studioColor(.{ 40, 40, 40, 255 }),
+    };
+}
+
+fn appendStateEditableGraph(
+    allocator: std.mem.Allocator,
+    diagram: *state_model.StateDiagram,
+    buffers: *EditableGraphBuffers,
+) !struct { width: f64, height: f64 } {
+    // Identify composite states (any state that is a parent of another state).
+    var composite_set = std.StringHashMap(void).init(allocator);
+    defer composite_set.deinit();
+
+    {
+        var iter = diagram.states.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.parent) |p| try composite_set.put(p, {});
+        }
+    }
+
+    // Build a Dagre graph with composite states as subgraph containers.
+    var graph = Graph.init(allocator);
+    defer {
+        normalize.freeDummyIds(allocator, &graph);
+        graph.deinitDeep();
+    }
+
+    var node_ids = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (node_ids.items) |id| allocator.free(id);
+        node_ids.deinit(allocator);
+    }
+
+    {
+        var iter = diagram.states.iterator();
+        while (iter.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const state = entry.value_ptr;
+            try node_ids.append(allocator, try allocator.dupe(u8, id));
+
+            if (composite_set.contains(id)) {
+                try graph.setNode(id, .{
+                    .label = state.displayLabel(),
+                    .width = 0,
+                    .height = 0,
+                    .is_subgraph = true,
+                    .subgraph_title = state.displayLabel(),
+                    .subgraph_padding = state_editable_composite_padding,
+                });
+            } else {
+                const size = stateNodeSizeForEditable(state);
+                try graph.setNode(id, .{
+                    .label = state.displayLabel(),
+                    .width = size.w,
+                    .height = size.h,
+                });
+            }
+        }
+    }
+
+    // Set parent relationships.
+    {
+        var iter = diagram.states.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.parent) |p| {
+                if (graph.getNode(p) != null) {
+                    try graph.setParent(entry.key_ptr.*, p);
+                }
+            }
+        }
+    }
+
+    // Deterministic ordering.
+    std.mem.sort([]const u8, node_ids.items, {}, struct {
+        fn cmp(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.cmp);
+
+    // Direction and edges.
+    var graph_label = graph.getGraphLabel();
+    graph_label.rankdir = switch (diagram.direction) {
+        .LR => "LR",
+        .RL => "RL",
+        .BT => "BT",
+        .TB => "TB",
+    };
+
+    for (diagram.relations.items) |rel| {
+        if (graph.getNode(rel.from) != null and graph.getNode(rel.to) != null) {
+            try graph.setEdge(rel.from, rel.to, .{
+                .label = rel.label,
+                .minlen = 1,
+            }, null);
+        }
+    }
+
+    try dagre.layout(allocator, &graph, .{
+        .rankdir = rankDirFromText(graph_label.rankdir),
+        .ranker = .network_simplex,
+        .nodesep = state_editable_nodesep,
+        .ranksep = state_editable_ranksep,
+    });
+
+    // Compute canvas bounds.
+    var min_x: f64 = std.math.inf(f64);
+    var min_y: f64 = std.math.inf(f64);
+    var max_x: f64 = -std.math.inf(f64);
+    var max_y: f64 = -std.math.inf(f64);
+
+    for (node_ids.items) |id| {
+        const node = graph.getNode(id) orelse continue;
+        if (node.width < 0.1 or node.height < 0.1) continue;
+        const left = node.x - node.width / 2.0;
+        const right = node.x + node.width / 2.0;
+        const top = node.y - node.height / 2.0;
+        const bottom = node.y + node.height / 2.0;
+        if (left < min_x) min_x = left;
+        if (right > max_x) max_x = right;
+        if (top < min_y) min_y = top;
+        if (bottom > max_y) max_y = bottom;
+    }
+
+    if (min_x == std.math.inf(f64)) {
+        min_x = 0.0;
+        min_y = 0.0;
+        max_x = 200.0;
+        max_y = 100.0;
+    }
+
+    const offset_x = state_editable_margin - min_x;
+    const offset_y = state_editable_margin - min_y;
+
+    // Emit composite states as subgraphs.
+    for (node_ids.items) |id| {
+        const node = graph.getNode(id) orelse continue;
+        if (!node.is_subgraph or node.width < 0.1 or node.height < 0.1) continue;
+
+        const state = diagram.states.getPtr(id) orelse continue;
+        const parent_id = graph.getParent(id);
+
+        try buffers.subgraphs.append(c_allocator, .{
+            .id = try dupCString(c_allocator, id),
+            .title = try dupCString(c_allocator, state.displayLabel()),
+            .parent_subgraph_id = if (parent_id) |pid| try dupCString(c_allocator, pid) else null,
+            .x = node.x + offset_x - node.width / 2.0,
+            .y = node.y + offset_y - node.height / 2.0,
+            .width = node.width,
+            .height = node.height,
+            .corner_radius = 8.0,
+            .fill = studioColor(.{ 242, 247, 255, 255 }),
+            .stroke = studioColor(.{ 102, 140, 200, 255 }),
+            .stroke_width = 1.5,
+            .title_x = node.x + offset_x - node.width / 2.0 + 10.0,
+            .title_y = node.y + offset_y - node.height / 2.0 + 16.0,
+            .title_font_size = 13.0,
+            .title_color = studioColor(.{ 60, 80, 120, 255 }),
+            .title_position = 0,
+        });
+    }
+
+    // Emit regular states as nodes.
+    for (node_ids.items) |id| {
+        const node = graph.getNode(id) orelse continue;
+        if (node.is_subgraph) continue;
+
+        const state = diagram.states.getPtr(id) orelse continue;
+        const parent_id = graph.getParent(id);
+
+        const subtitle: ?[*c]const u8 = if (state.description) |desc|
+            try dupCString(c_allocator, desc)
+        else
+            null;
+
+        const stroke_w: f32 = switch (state.state_type) {
+            .default => 1.5,
+            else => 2.0,
+        };
+        const label_font_size: f32 = switch (state.state_type) {
+            .default => 13.0,
+            else => 0.0, // special shapes: no text label drawn
+        };
+
+        try buffers.nodes.append(c_allocator, .{
+            .id = try dupCString(c_allocator, id),
+            .label = try dupCString(c_allocator, state.displayLabel()),
+            .subtitle = subtitle,
+            .attributes_text = null,
+            .methods_text = null,
+            .parent_subgraph_id = if (parent_id) |pid| try dupCString(c_allocator, pid) else null,
+            .shape = stateShapeTagForEditable(state.state_type),
+            .x = node.x + offset_x,
+            .y = node.y + offset_y,
+            .width = node.width,
+            .height = node.height,
+            .fill = stateFillColorForEditable(state.state_type),
+            .body_fill = stateFillColorForEditable(state.state_type),
+            .stroke = stateStrokeColorForEditable(state.state_type),
+            .stroke_width = stroke_w,
+            .label_color = stateLabelColorForEditable(state.state_type),
+            .label_font_size = label_font_size,
+        });
+    }
+
+    // Emit transitions as edges.
+    for (diagram.relations.items) |rel| {
+        try buffers.edges.append(c_allocator, .{
+            .source_id = try dupCString(c_allocator, rel.from),
+            .target_id = try dupCString(c_allocator, rel.to),
+            .label = if (rel.label) |l| (if (l.len > 0) try dupCString(c_allocator, l) else null) else null,
+            .label_font_size = 11.0,
+            .color = studioColor(.{ 80, 80, 80, 255 }),
+            .thickness = 1.5,
+            .line_style = 0,
+            .has_arrow = 1,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        });
+    }
+
+    return .{
+        .width = (max_x - min_x) + state_editable_margin * 2.0,
+        .height = (max_y - min_y) + state_editable_margin * 2.0,
+    };
+}
+
 fn finalizeEditableGraph(allocator: std.mem.Allocator, graph_type: StudioGraphType, buffers: *EditableGraphBuffers, width: f64, height: f64) !*StudioEditableGraph {
     const subgraphs_len = buffers.subgraphs.items.len;
     const nodes_len = buffers.nodes.items.len;
@@ -2552,6 +2856,17 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
 
         const layout = try appendErEditableGraph(temp_allocator, &diagram, &buffers);
         return finalizeEditableGraph(c_allocator, .er, &buffers, layout.width, layout.height);
+    }
+
+    if (detectStateDiagram(source)) {
+        var diagram = try StateParser.parse(temp_allocator, source);
+        defer diagram.deinit();
+
+        var buffers = EditableGraphBuffers{};
+        errdefer buffers.deinit(c_allocator);
+
+        const layout = try appendStateEditableGraph(temp_allocator, &diagram, &buffers);
+        return finalizeEditableGraph(c_allocator, .state, &buffers, layout.width, layout.height);
     }
 
     var parser = try Parser.init(temp_allocator, source);
@@ -2804,7 +3119,7 @@ fn renderGenericGraphDiagramToBytes(
 
     const base_config = exportRenderConfig(1.0, raster_scale);
     const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
-    const scaled_layout = layout_scale * layoutScaleForTargetCanvas(
+    const scaled_layout = layout_scale * downscaleForTargetCanvas(
         (base_bounds.width + base_config.padding * 2.0) * raster_scale,
         (base_bounds.height + base_config.padding * 2.0) * raster_scale,
         target_width,
@@ -2908,7 +3223,7 @@ fn renderEditableGraphToBytes(
 
     const base_config = exportRenderConfig(1.0, raster_scale);
     const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
-    const scaled_layout = layoutScaleForTargetCanvas(
+    const scaled_layout = downscaleForTargetCanvas(
         (base_bounds.width + base_config.padding * 2.0) * raster_scale,
         (base_bounds.height + base_config.padding * 2.0) * raster_scale,
         target_width,

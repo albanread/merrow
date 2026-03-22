@@ -50,9 +50,6 @@ pub fn configureShellFonts(child_windows: anytype, shell_font: *?gdi.HFONT, stat
     if (child_windows.diagram_label) |diagram_label| {
         _ = ui.SendMessageA(diagram_label, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
     }
-    if (child_windows.diagram_selector) |diagram_selector| {
-        _ = ui.SendMessageA(diagram_selector, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
-    }
     if (child_windows.diagram_prev_button) |diagram_prev_button| {
         _ = ui.SendMessageA(diagram_prev_button, ui.WM_SETFONT, @intFromPtr(toolbar_font), 1);
     }

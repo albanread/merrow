@@ -45,7 +45,7 @@ pub fn initializeToolbarControl(toolbar_hwnd: ?foundation.HWND) void {
         toolbar,
         controls.TB_SETBUTTONSIZE,
         0,
-        (@as(isize, layout.command_bar_height - 6) << 16) | @as(isize, layout.toolbar_button_width),
+        (@as(isize, layout.diagram_selector_height - 4) << 16) | @as(isize, layout.toolbar_button_width),
     );
 
     var buttons = [_]controls.TBBUTTON{

@@ -48,6 +48,16 @@ pub const StudioEditableEdge = extern struct {
     target_end_style: u32,
 };
 
+pub const SubgraphLabelPosition = enum(u32) {
+    top_left = 0,
+    top_center = 1,
+    top_right = 2,
+    bottom_left = 3,
+    bottom_center = 4,
+    bottom_right = 5,
+    _,
+};
+
 pub const StudioEditableSubgraph = extern struct {
     id: [*c]const u8,
     title: [*c]const u8,
@@ -64,6 +74,7 @@ pub const StudioEditableSubgraph = extern struct {
     title_y: f64,
     title_font_size: f32,
     title_color: StudioColor,
+    title_position: u32,
 };
 
 pub const StudioEditableGraph = extern struct {
@@ -647,6 +658,83 @@ fn replaceCString(target: *[*c]const u8, text: [:0]u8) void {
 fn freeCString(ptr: [*c]const u8) void {
     if (ptr == null) return;
     std.heap.c_allocator.free(std.mem.sliceTo(ptr, 0));
+}
+
+/// Attach all nodes and child subgraphs whose bounding-box centre lies
+/// within `sg` to that subgraph (sets their parent_subgraph_id).
+/// Already-parented objects that are within the area keep their existing
+/// parent unless it is null.
+pub fn attachChildrenToSubgraph(graph: *StudioEditableGraph, sg_idx: usize) void {
+    if (sg_idx >= graph.subgraph_count or graph.subgraphs == null) return;
+    const sg = &graph.subgraphs[sg_idx];
+    if (sg.id == null) return;
+    const sg_id = std.mem.span(sg.id);
+
+    // Nodes
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count]) |*node| {
+            // Centre of the node.
+            const cx = node.x + node.width / 2.0;
+            const cy = node.y + node.height / 2.0;
+            if (cx >= sg.x and cx <= sg.x + sg.width and
+                cy >= sg.y and cy <= sg.y + sg.height)
+            {
+                // Overwrite only if not already parented.
+                if (node.parent_subgraph_id == null) {
+                    const new_id = std.heap.c_allocator.dupeZ(u8, sg_id) catch continue;
+                    node.parent_subgraph_id = new_id.ptr;
+                }
+            }
+        }
+    }
+
+    // Child subgraphs (but not self).
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count], 0..) |*child, idx| {
+            if (idx == sg_idx) continue;
+            if (child.id == null) continue;
+            const cx = child.x + child.width / 2.0;
+            const cy = child.y + child.height / 2.0;
+            if (cx >= sg.x and cx <= sg.x + sg.width and
+                cy >= sg.y and cy <= sg.y + sg.height)
+            {
+                if (child.parent_subgraph_id == null) {
+                    const new_id = std.heap.c_allocator.dupeZ(u8, sg_id) catch continue;
+                    child.parent_subgraph_id = new_id.ptr;
+                }
+            }
+        }
+    }
+}
+
+/// Remove the parent_subgraph_id from all nodes and child subgraphs that
+/// are directly parented to `sg` (one level only — deeper nesting is kept).
+pub fn detachChildrenFromSubgraph(graph: *StudioEditableGraph, sg_idx: usize) void {
+    if (sg_idx >= graph.subgraph_count or graph.subgraphs == null) return;
+    const sg = &graph.subgraphs[sg_idx];
+    if (sg.id == null) return;
+    const sg_id = std.mem.span(sg.id);
+
+    if (graph.nodes != null) {
+        for (graph.nodes[0..graph.node_count]) |*node| {
+            if (node.parent_subgraph_id == null) continue;
+            if (std.mem.eql(u8, std.mem.span(node.parent_subgraph_id), sg_id)) {
+                freeCString(node.parent_subgraph_id);
+                node.parent_subgraph_id = null;
+            }
+        }
+    }
+
+    if (graph.subgraphs != null) {
+        for (graph.subgraphs[0..graph.subgraph_count], 0..) |*child, idx| {
+            if (idx == sg_idx) continue;
+            if (child.parent_subgraph_id == null) continue;
+            if (std.mem.eql(u8, std.mem.span(child.parent_subgraph_id), sg_id)) {
+                freeCString(child.parent_subgraph_id);
+                child.parent_subgraph_id = null;
+            }
+        }
+    }
 }
 
 // FFI declaration — defined in app/preview.zig.
