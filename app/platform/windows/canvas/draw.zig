@@ -491,6 +491,61 @@ fn drawEdge(
     label_fill_brush: *d2d.ID2D1SolidColorBrush,
     text_brush: *d2d.ID2D1SolidColorBrush,
 ) void {
+    // Detect self-message (source_id == target_id).
+    const is_self = edge.source_id != null and edge.target_id != null and
+        std.mem.eql(u8, std.mem.span(edge.source_id), std.mem.span(edge.target_id));
+
+    if (is_self) {
+        // Draw a right-hook: three segments forming a loop to the right.
+        const src = findNodeOrSubgraphCentre(graph, edge.source_id) orelse return;
+        const src_s = vp.canvasToScreen(src[0], src[1]);
+        const cx: f32 = @floatCast(src_s.x);
+        const cy: f32 = @floatCast(src_s.y);
+        const zoom_scale: f32 = @floatCast(@max(vp.zoom, 0.25));
+        const stroke_w: f32 = @max(1.0, edge.thickness * zoom_scale);
+        const hook_w: f32 = 36.0 * zoom_scale;
+        const hook_h: f32 = 24.0 * zoom_scale;
+        const tip_len: f32 = @max(8.0, stroke_w * 4.5);
+
+        // Build dashed style if needed.
+        var dash_style: ?*d2d.ID2D1StrokeStyle = null;
+        if (edge.line_style != 0) {
+            const props = d2d.D2D1_STROKE_STYLE_PROPERTIES{
+                .startCap = d2d.D2D1_CAP_STYLE_FLAT,
+                .endCap = d2d.D2D1_CAP_STYLE_FLAT,
+                .dashCap = d2d.D2D1_CAP_STYLE_FLAT,
+                .lineJoin = d2d.D2D1_LINE_JOIN_MITER,
+                .miterLimit = 10.0,
+                .dashStyle = d2d.D2D1_DASH_STYLE_DASH,
+                .dashOffset = 0.0,
+            };
+            var s: *d2d.ID2D1StrokeStyle = undefined;
+            if (factory.CreateStrokeStyle(&props, null, 0, &s) >= 0) dash_style = s;
+        }
+        defer if (dash_style) |s| { _ = s.IUnknown.Release(); };
+
+        // Three segments: right → down → left-to-return (with arrow at bottom).
+        const p0 = point2F(cx, cy);
+        const p1 = point2F(cx + hook_w, cy);
+        const p2 = point2F(cx + hook_w, cy + hook_h);
+        const p3_full = point2F(cx, cy + hook_h);
+        // Shorten last segment so arrowhead base lands at cx.
+        const p3_short = point2F(cx + tip_len, cy + hook_h);
+
+        rt.DrawLine(p0, p1, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
+        rt.DrawLine(p1, p2, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
+        if (edge.has_arrow != 0) {
+            rt.DrawLine(p2, p3_short, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
+            drawArrowTip(factory, rt, stroke_brush, p2.x, p2.y, p3_full.x, p3_full.y, stroke_w);
+        } else {
+            rt.DrawLine(p2, p3_full, @ptrCast(stroke_brush), stroke_w, @ptrCast(dash_style));
+        }
+
+        const label_pts = EdgeScreenEndpoints{ .src_x = cx, .src_y = cy, .dst_x = cx + hook_w, .dst_y = cy + hook_h };
+        drawEdgeLabel(rt, dwrite_factory, font_family, edge, label_pts, label_fill_brush, text_brush);
+        return;
+    }
+
     const points = edgeScreenEndpoints(graph, edge, vp) orelse return;
     drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0, vp.zoom);
     drawEdgeLabel(rt, dwrite_factory, font_family, edge, points, label_fill_brush, text_brush);
@@ -546,6 +601,25 @@ fn drawEdgeSegment(
     const stroke_w: f32 = @max(1.0, edge.thickness * zoom_scale * stroke_scale);
     const tip_len: f32 = @max(10.0, stroke_w * 5.0);
 
+    // Build a dashed stroke style when line_style != 0.
+    var dash_style: ?*d2d.ID2D1StrokeStyle = null;
+    if (edge.line_style != 0) {
+        const props = d2d.D2D1_STROKE_STYLE_PROPERTIES{
+            .startCap = d2d.D2D1_CAP_STYLE_FLAT,
+            .endCap = d2d.D2D1_CAP_STYLE_FLAT,
+            .dashCap = d2d.D2D1_CAP_STYLE_FLAT,
+            .lineJoin = d2d.D2D1_LINE_JOIN_MITER,
+            .miterLimit = 10.0,
+            .dashStyle = d2d.D2D1_DASH_STYLE_DASH,
+            .dashOffset = 0.0,
+        };
+        var s: *d2d.ID2D1StrokeStyle = undefined;
+        if (factory.CreateStrokeStyle(&props, null, 0, &s) >= 0) {
+            dash_style = s;
+        }
+    }
+    defer if (dash_style) |s| { _ = s.IUnknown.Release(); };
+
     // Shorten the line endpoints so it stops at each arrowhead base, not the tip.
     const seg_dx = dst_x - src_x;
     const seg_dy = dst_y - src_y;
@@ -571,7 +645,7 @@ fn drawEdgeSegment(
         point2F(line_dst_x, line_dst_y),
         @ptrCast(stroke_brush),
         stroke_w,
-        null,
+        @ptrCast(dash_style),
     );
 
     // Arrow tip at target end.
