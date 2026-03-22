@@ -2539,8 +2539,9 @@ fn stateNodeSizeForEditable(s: *const state_model.State) NodeSize {
 
 fn stateShapeTagForEditable(state_type: state_model.StateType) u32 {
     return switch (state_type) {
-        .start, .end => 3, // circle
-        .fork, .join => 0, // rectangle
+        .start => 3, // solid filled circle
+        .end => 12, // circle within a circle
+        .fork, .join => 0, // rectangle (black filled)
         .choice => 2, // diamond
         .divider => 0, // rectangle
         .default => 1, // rounded_rectangle
@@ -2737,7 +2738,7 @@ fn appendStateEditableGraph(
         const state = diagram.states.getPtr(id) orelse continue;
         const parent_id = graph.getParent(id);
 
-        const subtitle: ?[*c]const u8 = if (state.description) |desc|
+        const subtitle: [*c]const u8 = if (state.description) |desc|
             try dupCString(c_allocator, desc)
         else
             null;

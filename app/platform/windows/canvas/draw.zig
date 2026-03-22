@@ -122,6 +122,7 @@ const Shape = enum(u32) {
     parallelogram = 9,
     parallelogram_alt = 10,
     subroutine = 11,
+    end_state = 12, // circle within a circle (mermaid state diagram end node)
     other = 0xffff_ffff,
     _,
 };
@@ -183,6 +184,20 @@ fn drawNodeShape(
             const el = ellipseF(cx, cy, rx, ry);
             rt.FillEllipse(&el, @ptrCast(fill_brush));
             rt.DrawEllipse(&el, @ptrCast(stroke_brush), stroke_w, null);
+        },
+        .end_state => {
+            // Outer ring (white fill + stroke).
+            const cx = (sr.l + sr.r) / 2.0;
+            const cy = (sr.t + sr.b) / 2.0;
+            const rx = (sr.r - sr.l) / 2.0;
+            const ry = (sr.b - sr.t) / 2.0;
+            const outer = ellipseF(cx, cy, rx, ry);
+            rt.FillEllipse(&outer, @ptrCast(fill_brush));
+            rt.DrawEllipse(&outer, @ptrCast(stroke_brush), stroke_w, null);
+            // Inner filled circle (40% of outer radius).
+            const inner_r = rx * 0.52;
+            const inner = ellipseF(cx, cy, inner_r, inner_r);
+            rt.FillEllipse(&inner, @ptrCast(stroke_brush));
         },
         .diamond => {
             const cx = (sr.l + sr.r) / 2.0;
@@ -929,12 +944,66 @@ pub fn drawCanvas(
             sb.SetColor(&d2dColor(node.stroke));
             drawNodeShape(ctx.d2d_factory, rt, fb, sb, node, vp);
 
-            // Label.
-            if (node.label != null) {
-                tb.SetColor(&d2dColor(node.label_color));
-                const centre_s = vp.canvasToScreen(node.x + node.width / 2.0, node.y + node.height / 2.0);
-                const max_w: f32 = @floatCast(node.width * vp.zoom);
-                drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, std.math.clamp(node.label_font_size, 6.0, 48.0), @floatCast(centre_s.x), @floatCast(centre_s.y), max_w);
+            const has_subtitle = node.subtitle != null and std.mem.span(node.subtitle.?).len > 0;
+            const has_attrs = node.attributes_text != null and std.mem.span(node.attributes_text.?).len > 0;
+            const has_body = has_subtitle or has_attrs;
+
+            const sr_n = canvasRectToScreen(vp, node.x, node.y, node.width, node.height);
+            const stroke_w_n: f32 = @floatCast(@as(f64, node.stroke_width) * vp.zoom);
+            const font_size_n = std.math.clamp(node.label_font_size, 6.0, 48.0);
+            const max_w_n: f32 = @floatCast(node.width * vp.zoom);
+            const cx_n = (sr_n.l + sr_n.r) / 2.0;
+
+            if (has_body) {
+                // Estimate header height in screen space from font size.
+                const hdr_h_screen: f32 = font_size_n * 3.2;
+                const divider_y = sr_n.t + hdr_h_screen;
+
+                // Always paint body_fill over the lower panel so the background is correct.
+                if (divider_y < sr_n.b - 2.0) {
+                    fb.SetColor(&d2dColor(node.body_fill));
+                    const body_rect = rectF(sr_n.l + stroke_w_n, divider_y, sr_n.r - stroke_w_n, sr_n.b - stroke_w_n);
+                    rt.FillRectangle(&body_rect, @ptrCast(fb));
+                    fb.SetColor(&d2dColor(node.fill));
+                }
+
+                // Divider line.
+                if (divider_y < sr_n.b - 2.0) {
+                    sb.SetColor(&d2dColor(node.stroke));
+                    rt.DrawLine(point2F(sr_n.l, divider_y), point2F(sr_n.r, divider_y), @ptrCast(sb), stroke_w_n, null);
+                }
+
+                // Label in header region.
+                if (node.label != null) {
+                    tb.SetColor(&d2dColor(node.label_color));
+                    const hdr_cy = (sr_n.t + @min(divider_y, sr_n.b)) / 2.0;
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, hdr_cy, max_w_n);
+                }
+
+                // Subtitle in body region.
+                if (has_subtitle and divider_y < sr_n.b - 4.0) {
+                    tb.SetColor(&d2dColor(node.label_color));
+                    const body_available = sr_n.b - divider_y;
+                    var line_h = font_size_n * 1.5;
+                    if (line_h > body_available) line_h = body_available * 0.8;
+                    const subtitle_cy = divider_y + line_h / 2.0 + 6.0;
+                    const sub_font = font_size_n * 0.85;
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.subtitle, sub_font, cx_n, subtitle_cy, max_w_n - 8.0);
+                }
+
+                // Attributes text below subtitle.
+                if (has_attrs and divider_y < sr_n.b - 4.0) {
+                    tb.SetColor(&d2dColor(node.label_color));
+                    const sub_offset: f32 = if (has_subtitle) font_size_n * 1.5 + 6.0 else 6.0;
+                    const attrs_cy = divider_y + sub_offset + font_size_n;
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.attributes_text, font_size_n * 0.8, cx_n, attrs_cy, max_w_n - 8.0);
+                }
+            } else {
+                // No body — label centered in the whole node.
+                if (node.label != null) {
+                    tb.SetColor(&d2dColor(node.label_color));
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, (sr_n.t + sr_n.b) / 2.0, max_w_n);
+                }
             }
             _ = idx;
         }
