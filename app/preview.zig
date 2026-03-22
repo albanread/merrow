@@ -1667,8 +1667,8 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = sequenceParticipantShapeTag(participant.kind),
-            .x = participant.center_x,
-            .y = layout.header_y + participant.box_height / 2.0,
+            .x = participant.center_x - participant.box_width / 2.0,
+            .y = layout.header_y,
             .width = participant.box_width,
             .height = participant.box_height,
             .fill = participant_fill,
@@ -1690,8 +1690,8 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = sequenceParticipantShapeTag(participant.kind),
-            .x = participant.center_x,
-            .y = layout.footer_y + participant.box_height / 2.0,
+            .x = participant.center_x - participant.box_width / 2.0,
+            .y = layout.footer_y,
             .width = participant.box_width,
             .height = participant.box_height,
             .fill = participant_fill,
@@ -1721,10 +1721,14 @@ fn appendSequenceEditableGraph(
         const note_id = try std.fmt.allocPrint(allocator, "note-{d}", .{idx});
         defer allocator.free(note_id);
 
-        const x = switch (note.position) {
-            .left_of => diag.participants.items[note.participant1].center_x - note.width / 2.0 - 48.0,
-            .right_of => diag.participants.items[note.participant1].center_x + note.width / 2.0 + 48.0,
-            .over => (diag.participants.items[note.participant1].center_x + diag.participants.items[note.participant2].center_x) / 2.0,
+        // note.y is the centre-Y from layout; x positions are left-edges (top-left coords).
+        const note_x = switch (note.position) {
+            .left_of => diag.participants.items[note.participant1].center_x -
+                diag.participants.items[note.participant1].box_width / 2.0 - note.width - 8.0,
+            .right_of => diag.participants.items[note.participant1].center_x +
+                diag.participants.items[note.participant1].box_width / 2.0 + 8.0,
+            .over => (diag.participants.items[note.participant1].center_x +
+                diag.participants.items[note.participant2].center_x) / 2.0 - note.width / 2.0,
         };
 
         try buffers.nodes.append(c_allocator, .{
@@ -1735,8 +1739,8 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 1,
-            .x = x,
-            .y = note.y,
+            .x = note_x,
+            .y = note.y - note.height / 2.0,
             .width = note.width,
             .height = note.height,
             .fill = note_fill,
@@ -1753,7 +1757,8 @@ fn appendSequenceEditableGraph(
         defer allocator.free(activation_id);
         const participant = &diag.participants.items[activation.participant];
         const height = @max(activation.end_y - activation.start_y, 20.0);
-        const x = participant.center_x + @as(f64, @floatFromInt(activation.depth)) * 6.0;
+        // Activation bar is centred on the lifeline; shift right by depth, then convert to top-left.
+        const act_cx = participant.center_x + @as(f64, @floatFromInt(activation.depth)) * 6.0;
 
         try buffers.nodes.append(c_allocator, .{
             .id = try dupCString(c_allocator, activation_id),
@@ -1763,8 +1768,8 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 0,
-            .x = x,
-            .y = activation.start_y + height / 2.0,
+            .x = act_cx - 8.0,
+            .y = activation.start_y,
             .width = 16.0,
             .height = height,
             .fill = activation_fill,
@@ -1794,8 +1799,8 @@ fn appendSequenceEditableGraph(
             .methods_text = null,
             .parent_subgraph_id = null,
             .shape = 0,
-            .x = source_participant.center_x,
-            .y = message.y,
+            .x = source_participant.center_x - 4.0,
+            .y = message.y - 4.0,
             .width = 8.0,
             .height = 8.0,
             .fill = anchor_clear,
@@ -1819,8 +1824,8 @@ fn appendSequenceEditableGraph(
                 .methods_text = null,
                 .parent_subgraph_id = null,
                 .shape = 0,
-                .x = target_participant.center_x,
-                .y = message.y,
+                .x = target_participant.center_x - 4.0,
+                .y = message.y - 4.0,
                 .width = 8.0,
                 .height = 8.0,
                 .fill = anchor_clear,
