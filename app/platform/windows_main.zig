@@ -2,6 +2,8 @@ const std = @import("std");
 const win32 = @import("win32");
 const merrow = @import("merrow");
 const ffm_serializer = @import("../ffm_serializer.zig");
+const mermaid_export = @import("../mermaid_export.zig");
+const mermaid_serializer = @import("../mermaid_serializer.zig");
 const library_db = @import("../library_db.zig");
 const markdown_parser = @import("../markdown_parser.zig");
 const document_model = @import("../document_model.zig");
@@ -35,10 +37,16 @@ const dpi = win32.ui.hi_dpi;
 const mouse = win32.ui.input.keyboard_and_mouse;
 const ui = win32.ui.windows_and_messaging;
 
+const build_options = @import("build_options");
+const about_image_png = @embedFile("../assets/merrow-studio-icon.png");
+
 const c_allocator = std.heap.c_allocator;
 const class_name = windows_constants.class_name;
 const preview_class_name = windows_constants.preview_class_name;
 const canvas_class_name = windows_constants.canvas_class_name;
+const about_class_name: [*:0]const u8 = "MerrowStudioAboutWindowClass";
+const about_image_class_name: [*:0]const u8 = "MerrowStudioAboutImageWindowClass";
+const about_window_title: [*:0]const u8 = "About Merrow Studio";
 const window_title = windows_constants.window_title;
 const static_class = windows_constants.static_class;
 const edit_class = windows_constants.edit_class;
@@ -49,6 +57,7 @@ const combo_box_class = windows_constants.combo_box_class;
 const status_placeholder = windows_constants.status_placeholder;
 const file_menu_label = windows_constants.file_menu_label;
 const menu_open_label = windows_constants.menu_open_label;
+const menu_open_recent_label = windows_constants.menu_open_recent_label;
 const menu_save_label = windows_constants.menu_save_label;
 const menu_save_as_label = windows_constants.menu_save_as_label;
 const menu_export_word_label = windows_constants.menu_export_word_label;
@@ -61,10 +70,15 @@ const mermaid_dialog_filter = windows_constants.mermaid_dialog_filter;
 const word_dialog_filter = windows_constants.word_dialog_filter;
 const initial_source = windows_constants.initial_source;
 const menu_id_open = windows_constants.menu_id_open;
+const menu_id_open_recent_empty = windows_constants.menu_id_open_recent_empty;
+const menu_id_open_recent_first = windows_constants.menu_id_open_recent_first;
+const menu_id_open_recent_last = windows_constants.menu_id_open_recent_last;
 const menu_id_save = windows_constants.menu_id_save;
 const menu_id_save_as = windows_constants.menu_id_save_as;
 const menu_id_font_settings = windows_constants.menu_id_font_settings;
 const menu_id_export_word = windows_constants.menu_id_export_word;
+const menu_id_export_mermaid = windows_constants.menu_id_export_mermaid;
+const menu_id_about = windows_constants.menu_id_about;
 const control_id_editor = windows_constants.control_id_editor;
 const control_id_command = windows_constants.control_id_command;
 const control_id_apply_button = windows_constants.control_id_apply_button;
@@ -72,6 +86,11 @@ const control_id_diagram_selector = windows_constants.control_id_diagram_selecto
 const control_id_diagram_prev = windows_constants.control_id_diagram_prev;
 const control_id_diagram_next = windows_constants.control_id_diagram_next;
 const control_id_diagram_label = windows_constants.control_id_diagram_label;
+const control_id_about_image = windows_constants.control_id_about_image;
+const control_id_about_title = windows_constants.control_id_about_title;
+const control_id_about_version = windows_constants.control_id_about_version;
+const control_id_about_license = windows_constants.control_id_about_license;
+const control_id_about_ok = windows_constants.control_id_about_ok;
 const main_timer_id_editor_refresh = windows_constants.main_timer_id_editor_refresh;
 const main_timer_id_ffm_persist = windows_constants.main_timer_id_ffm_persist;
 const menu_id_mode_mermaid = windows_constants.menu_id_mode_mermaid;
@@ -245,6 +264,7 @@ const WordComGlueApi = struct {
 };
 
 extern fn merrow_studio_build_editable_graph(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) ?*windows_canvas.StudioEditableGraph;
+extern fn merrow_studio_free_editable_graph(graph: ?*windows_canvas.StudioEditableGraph) callconv(.c) void;
 extern fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) c_int;
 extern fn merrow_studio_render_editable_graph_png_bytes(graph: ?*const windows_canvas.StudioEditableGraph, target_width: u32, target_height: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_render_preview_png_bytes(source_ptr: [*]const u8, source_len: u32, target_width: u32, target_height: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
@@ -254,6 +274,7 @@ extern fn merrow_studio_free_string(text: [*c]u8) callconv(.c) void;
 extern fn merrow_studio_free_buffer(buffer: [*c]u8, buffer_len: u32) callconv(.c) void;
 
 var app_mode: AppMode = .mermaid;
+const recent_file_menu_limit: usize = menu_id_open_recent_last - menu_id_open_recent_first + 1;
 var child_windows = ChildWindows{};
 var preview_renderer = PreviewRenderer{};
 var canvas_renderer = CanvasRenderer.init(c_allocator);
@@ -281,6 +302,11 @@ var is_document_dirty = false;
 var suppress_editor_change = false;
 var last_editor_text_hash: u64 = 0;
 var startup_layout_done = false;
+var about_window: ?foundation.HWND = null;
+var about_controls = AboutControls{};
+var about_image_renderer = AboutImageRenderer{};
+var about_title_font: ?gdi.HFONT = null;
+var about_body_font: ?gdi.HFONT = null;
 /// Last known mouse position within the canvas window (screen coords), for link preview.
 var canvas_mouse_screen_x: i32 = 0;
 var canvas_mouse_screen_y: i32 = 0;
@@ -306,9 +332,26 @@ const preview_bitmap_scale: f64 = 4.0;
 const preview_min_zoom: f64 = 0.25;
 const preview_max_zoom: f64 = 32.0;
 const ffm_persist_debounce_ms: u32 = 450;
+const about_auto_close_timer_id: usize = 2303;
 // Minimum virtual border around the image in display pixels; actual margin is
 // max(preview_pan_margin, viewport/4) so it grows with window size.
 const preview_pan_margin: i32 = 200;
+const app_version = build_options.app_version;
+
+const AboutControls = struct {
+    image: ?foundation.HWND = null,
+    title: ?foundation.HWND = null,
+    version: ?foundation.HWND = null,
+    license: ?foundation.HWND = null,
+    ok_button: ?foundation.HWND = null,
+};
+
+const AboutImageRenderer = struct {
+    render_target: ?*d2d.ID2D1HwndRenderTarget = null,
+    bitmap: ?*d2d.ID2D1Bitmap = null,
+    bitmap_width: u32 = 0,
+    bitmap_height: u32 = 0,
+};
 
 const PreviewAxisBounds = struct {
     min: i32,
@@ -387,6 +430,13 @@ fn releasePreviewBitmap() void {
     releaseUnknown(&preview_renderer.bitmap);
 }
 
+fn releaseAboutImageResources() void {
+    releaseUnknown(&about_image_renderer.bitmap);
+    releaseUnknown(&about_image_renderer.render_target);
+    about_image_renderer.bitmap_width = 0;
+    about_image_renderer.bitmap_height = 0;
+}
+
 fn freePreviewPng() void {
     if (preview_renderer.preview_png) |png| {
         c_allocator.free(png);
@@ -431,6 +481,57 @@ fn ensurePreviewImagingFactory() bool {
         preview_renderer.wic_factory = factory;
     }
 
+    return true;
+}
+
+fn createBitmapFromPngBytes(
+    render_target: *d2d.ID2D1HwndRenderTarget,
+    png_bytes: []const u8,
+    out_bitmap: *?*d2d.ID2D1Bitmap,
+    out_width: *u32,
+    out_height: *u32,
+) bool {
+    if (!ensurePreviewImagingFactory()) return false;
+    const wic_factory = preview_renderer.wic_factory orelse return false;
+
+    var stream: ?*imaging.IWICStream = null;
+    if (hrFailed(wic_factory.CreateStream(&stream)) or stream == null) return false;
+    defer releaseUnknown(&stream);
+
+    if (hrFailed(stream.?.InitializeFromMemory(@ptrCast(@constCast(png_bytes.ptr)), @intCast(png_bytes.len)))) return false;
+
+    var decoder: ?*imaging.IWICBitmapDecoder = null;
+    if (hrFailed(wic_factory.CreateDecoderFromStream(@ptrCast(stream.?), null, imaging.WICDecodeMetadataCacheOnLoad, &decoder)) or decoder == null) {
+        return false;
+    }
+    defer releaseUnknown(&decoder);
+
+    var frame: ?*imaging.IWICBitmapFrameDecode = null;
+    if (hrFailed(decoder.?.GetFrame(0, &frame)) or frame == null) return false;
+    defer releaseUnknown(&frame);
+
+    var converter: ?*imaging.IWICFormatConverter = null;
+    if (hrFailed(wic_factory.CreateFormatConverter(&converter)) or converter == null) return false;
+    defer releaseUnknown(&converter);
+
+    var pixel_format = imaging.GUID_WICPixelFormat32bppPBGRA;
+    if (hrFailed(converter.?.Initialize(
+        @ptrCast(frame.?),
+        &pixel_format,
+        imaging.WICBitmapDitherTypeNone,
+        null,
+        0.0,
+        imaging.WICBitmapPaletteTypeCustom,
+    ))) return false;
+
+    if (hrFailed((@as(*imaging.IWICBitmapSource, @ptrCast(converter.?))).GetSize(out_width, out_height))) return false;
+
+    var bitmap_raw: *d2d.ID2D1Bitmap = undefined;
+    if (hrFailed(render_target.ID2D1RenderTarget.CreateBitmapFromWicBitmap(@ptrCast(converter.?), null, &bitmap_raw))) {
+        return false;
+    }
+
+    out_bitmap.* = bitmap_raw;
     return true;
 }
 
@@ -606,6 +707,7 @@ fn openLibraryDatabase() void {
     };
 
     library_database = db;
+    refreshRecentFilesMenu();
 }
 
 fn releaseEditorFont() void {
@@ -668,11 +770,57 @@ fn chooseExportWordPath() ?[]u8 {
         c_allocator,
         main_window,
         suggested_path,
+        null,
         true,
         word_dialog_filter,
         export_word_dialog_title,
         word_default_extension,
     );
+}
+
+fn getRecentFilesMenu() ?ui.HMENU {
+    const hwnd = main_window orelse return null;
+    const main_menu = ui.GetMenu(hwnd) orelse return null;
+    const file_menu = ui.GetSubMenu(main_menu, 0) orelse return null;
+    return ui.GetSubMenu(file_menu, 1);
+}
+
+fn clearMenuItems(menu: ui.HMENU) void {
+    while (ui.GetMenuItemCount(menu) > 0) {
+        _ = ui.DeleteMenu(menu, 0, ui.MF_BYPOSITION);
+    }
+}
+
+fn refreshRecentFilesMenu() void {
+    const recent_menu = getRecentFilesMenu() orelse return;
+    clearMenuItems(recent_menu);
+
+    var db = &(library_database orelse {
+        _ = ui.AppendMenuA(recent_menu, ui.MF_STRING, menu_id_open_recent_empty, "(No recent files)");
+        return;
+    });
+
+    const records = db.loadRecentFiles(c_allocator, recent_file_menu_limit) catch {
+        _ = ui.AppendMenuA(recent_menu, ui.MF_STRING, menu_id_open_recent_empty, "(No recent files)");
+        return;
+    };
+    defer {
+        for (records) |*record| record.deinit(c_allocator);
+        c_allocator.free(records);
+    }
+
+    if (records.len == 0) {
+        _ = ui.AppendMenuA(recent_menu, ui.MF_STRING, menu_id_open_recent_empty, "(No recent files)");
+        return;
+    }
+
+    for (records, 0..) |record, idx| {
+        const label = std.fmt.allocPrint(c_allocator, "&{d} {s}", .{ idx + 1, std.fs.path.basename(record.path) }) catch continue;
+        defer c_allocator.free(label);
+        const label_z = c_allocator.dupeZ(u8, label) catch continue;
+        defer c_allocator.free(label_z);
+        _ = ui.AppendMenuA(recent_menu, ui.MF_STRING, menu_id_open_recent_first + idx, label_z.ptr);
+    }
 }
 
 fn loadSourceFromPath(path: []const u8) ![]u8 {
@@ -1615,14 +1763,14 @@ fn applyPersistedCanvasSize(width_cm: ?f64, height_cm: ?f64) void {
 }
 
 fn loadPersistedFreeformGraph() ?PersistedDiagramGraph {
-    const diagram = selectedDiagramBlock() orelse return null;
-    return loadPersistedGraphForDiagram(diagram);
+    return null;
 }
 
 fn rememberCurrentRecentFile() void {
     var db = &(library_database orelse return);
     const path = current_document_path orelse return;
     db.saveRecentFile(path, selected_diagram_index) catch {};
+    refreshRecentFilesMenu();
 }
 
 fn scheduleFreeformPersist() void {
@@ -1642,33 +1790,6 @@ fn flushPendingFreeformPersist() void {
 
 fn persistCurrentFreeformGraph() void {
     if (app_mode != .freeform) return;
-
-    var db = &(library_database orelse return);
-    const diagram = selectedDiagramBlock() orelse return;
-    const graph = canvas_renderer.canvas_state.graph orelse return;
-
-    var hash_buffer: [16]u8 = undefined;
-    const content_hash = selectedDiagramHashText(&hash_buffer) orelse return;
-
-    const graph_blob = ffm_serializer.serializeGraph(c_allocator, graph) catch {
-        setStatusMessage("Failed to serialize freeform diagram");
-        return;
-    };
-    defer c_allocator.free(graph_blob);
-
-    db.saveFfm(content_hash, .{
-        .graph_type = graph.graph_type,
-        .diagram_name = diagram.name,
-        .source_file = current_document_path,
-        .mermaid_source = diagram.mermaid_source,
-        .graph_blob = graph_blob,
-        .canvas_width_cm = project_font_settings.canvas_width_cm,
-        .canvas_height_cm = project_font_settings.canvas_height_cm,
-    }) catch {
-        setStatusMessage("Failed to save freeform diagram");
-        return;
-    };
-
     rememberCurrentRecentFile();
 }
 
@@ -1732,24 +1853,51 @@ fn toggleFontInspector() void {
     setStatusMessage(if (active) "Project inspector" else "Selection inspector");
 }
 
-fn openDocumentFromDialog() void {
-    const selected_path = chooseDocumentPath(false) orelse return;
-    defer c_allocator.free(selected_path);
-
-    const source = loadSourceFromPath(selected_path) catch {
+fn openDocumentPath(path: []const u8, preferred_diagram_index: ?usize) void {
+    const source = loadSourceFromPath(path) catch {
         setStatusMessage("Failed to open file");
         return;
     };
     defer c_allocator.free(source);
 
     setEditorText(source);
-    loadProjectFontSettingsForPath(selected_path);
-    setCurrentDocumentPath(selected_path);
+    loadProjectFontSettingsForPath(path);
+    setCurrentDocumentPath(path);
+    if (preferred_diagram_index) |idx| {
+        selected_diagram_index = idx;
+    }
     updateEditorDerivedState(true);
+    if (preferred_diagram_index) |idx| {
+        selectDiagramIndex(idx, false);
+        updateEditorDerivedState(true);
+    }
     if (app_mode == .freeform) rebuildFreeformCanvas(true);
     setDocumentDirty(false);
     rememberCurrentRecentFile();
+    refreshRecentFilesMenu();
     setStatusMessage("Opened source document");
+}
+
+fn openRecentDocument(slot: usize) void {
+    var db = &(library_database orelse return);
+    const records = db.loadRecentFiles(c_allocator, recent_file_menu_limit) catch {
+        setStatusMessage("Failed to load recent files");
+        return;
+    };
+    defer {
+        for (records) |*record| record.deinit(c_allocator);
+        c_allocator.free(records);
+    }
+
+    if (slot >= records.len) return;
+    openDocumentPath(records[slot].path, records[slot].diagram_index);
+}
+
+fn openDocumentFromDialog() void {
+    const selected_path = chooseDocumentPath(false) orelse return;
+    defer c_allocator.free(selected_path);
+
+    openDocumentPath(selected_path, null);
 }
 
 fn saveDocumentToPath(path: []const u8) bool {
@@ -2034,6 +2182,79 @@ fn exportDiagramToWord() void {
     setStatusMessage(status_text);
 }
 
+fn exportDiagramToMermaid() void {
+    const active_graph = canvas_renderer.canvas_state.graph orelse {
+        setStatusMessage("No diagram loaded");
+        return;
+    };
+
+    const fallback_source = if (mermaid_export.graphHasSourceRecords(active_graph)) null else duplicateSelectedDiagramSource(c_allocator) catch {
+        setStatusMessage("Failed to rebuild Mermaid export graph");
+        return;
+    };
+    defer if (fallback_source) |text| c_allocator.free(text);
+
+    const mermaid_text = mermaid_export.serializeForMenuExport(c_allocator, active_graph, fallback_source) catch {
+        setStatusMessage("Failed to serialize diagram to Mermaid");
+        return;
+    };
+    defer c_allocator.free(mermaid_text);
+
+    const mermaid_export_text = if (app_mode == .freeform)
+        std.fmt.allocPrint(
+            c_allocator,
+            "%% @canvas width={d:.2}cm height={d:.2}cm\n%% @font family={s} node={d:.1} group={d:.1} edge={d:.1}\n{s}",
+            .{
+                project_font_settings.canvas_width_cm,
+                project_font_settings.canvas_height_cm,
+                @tagName(project_font_settings.font_family),
+                project_font_settings.node_label_size,
+                project_font_settings.group_title_size,
+                project_font_settings.edge_label_size,
+                mermaid_text,
+            },
+        ) catch {
+            setStatusMessage("Failed to serialize export directives");
+            return;
+        }
+    else
+        c_allocator.dupe(u8, mermaid_text) catch {
+            setStatusMessage("Failed to finalize Mermaid export");
+            return;
+        };
+    defer c_allocator.free(mermaid_export_text);
+
+    const export_path = windows_document.chooseCustomPath(
+        c_allocator,
+        main_window,
+        null,
+        null,
+        true,
+        windows_constants.mermaid_export_filter,
+        windows_constants.export_mermaid_dialog_title,
+        windows_constants.mermaid_default_extension,
+    ) orelse return;
+    defer c_allocator.free(export_path);
+
+    const file = std.fs.createFileAbsolute(export_path, .{}) catch {
+        setStatusMessage("Failed to create Mermaid export file");
+        return;
+    };
+    defer file.close();
+
+    file.writeAll(mermaid_export_text) catch {
+        setStatusMessage("Failed to write Mermaid export file");
+        return;
+    };
+
+    const status_text = std.fmt.allocPrint(c_allocator, "Exported Mermaid: {s}", .{std.fs.path.basename(export_path)}) catch {
+        setStatusMessage("Exported Mermaid file");
+        return;
+    };
+    defer c_allocator.free(status_text);
+    setStatusMessage(status_text);
+}
+
 fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library, document_handle: wcg_document, markdown_document: *const document_model.MarkdownDocument) bool {
     var temp_png_paths = std.ArrayList([]u8){};
     defer {
@@ -2043,6 +2264,8 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
         }
         temp_png_paths.deinit(c_allocator);
     }
+
+    var diagram_index: usize = 0;
 
     for (markdown_document.blocks) |block| {
         switch (block) {
@@ -2060,10 +2283,23 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
                     };
                 } else currentProjectCanvasSizeCm();
 
-                const diagram_png_path = renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
-                    setStatusMessage(@errorName(err));
-                    return false;
+                const diagram_png_path = blk: {
+                    if (app_mode == .freeform and diagram_index == selected_diagram_index) {
+                        if (canvas_renderer.canvas_state.graph) |active_graph| {
+                            break :blk renderEditableGraphToExportPng(active_graph, canvas_size_cm) catch renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
+                                setStatusMessage(@errorName(err));
+                                return false;
+                            };
+                        }
+                    }
+                    break :blk renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
+                        setStatusMessage(@errorName(err));
+                        return false;
+                    };
                 };
+
+                diagram_index += 1;
+
                 temp_png_paths.append(c_allocator, diagram_png_path) catch {
                     std.fs.deleteFileAbsolute(diagram_png_path) catch {};
                     c_allocator.free(diagram_png_path);
@@ -2408,25 +2644,37 @@ fn renderEditableGraphToTempPng(graph: *const windows_canvas.StudioEditableGraph
     return temp_path;
 }
 
-fn loadPersistedGraphForDiagram(diagram: *const document_model.DiagramBlock) ?PersistedDiagramGraph {
-    var db = &(library_database orelse return null);
-    var hash_buffer: [16]u8 = undefined;
-    const content_hash = diagramHashText(diagram, &hash_buffer) orelse return null;
-    var record = db.loadFfm(c_allocator, content_hash) catch return null;
-    if (record) |*saved| {
-        defer saved.deinit(c_allocator);
-        const graph = ffm_serializer.deserializeGraph(saved.graph_blob) catch return null;
-        if (saved.canvas_width_cm != null and saved.canvas_height_cm != null) {
-            const canvas_dims = windows_project_settings.canvasDimensionsFromCentimeters(saved.canvas_width_cm.?, saved.canvas_height_cm.?);
-            graph.width = @floatFromInt(canvas_dims.width);
-            graph.height = @floatFromInt(canvas_dims.height);
+fn sourceHasEditableElementAnnotations(source: []const u8) bool {
+    var line_iter = std.mem.splitScalar(u8, source, '\n');
+    while (line_iter.next()) |raw_line| {
+        const trimmed = std.mem.trim(u8, std.mem.trimRight(u8, raw_line, "\r"), " \t");
+        if (!std.mem.startsWith(u8, trimmed, "%%")) continue;
+        const ann = std.mem.trimLeft(u8, trimmed[2..], " \t");
+        if (std.mem.startsWith(u8, ann, "@shape=") or
+            std.mem.startsWith(u8, ann, "@edge") or
+            std.mem.startsWith(u8, ann, "@pos="))
+        {
+            return true;
         }
-        return .{
-            .graph = graph,
-            .canvas_width_cm = saved.canvas_width_cm,
-            .canvas_height_cm = saved.canvas_height_cm,
-        };
     }
+    return false;
+}
+
+fn buildEditableGraphFromAnnotatedSource(source: []const u8) ?*windows_canvas.StudioEditableGraph {
+    if (!sourceHasEditableElementAnnotations(source)) return null;
+
+    var eg_message: [256]u8 = std.mem.zeroes([256]u8);
+    const graph = merrow_studio_build_editable_graph(
+        source.ptr,
+        @intCast(source.len),
+        &eg_message,
+        eg_message.len,
+    );
+    return graph;
+}
+
+fn loadPersistedGraphForDiagram(diagram: *const document_model.DiagramBlock) ?PersistedDiagramGraph {
+    _ = diagram;
     return null;
 }
 
@@ -2486,6 +2734,12 @@ fn renderDiagramBlockToExportPng(diagram: *const document_model.DiagramBlock, si
             return renderEditableGraphToExportPng(saved.graph, size_cm) catch renderDiagramToExportPng(diagram.mermaid_source, size_cm);
         }
     }
+
+    if (buildEditableGraphFromAnnotatedSource(diagram.mermaid_source)) |graph| {
+        defer merrow_studio_free_editable_graph(graph);
+        return renderEditableGraphToExportPng(graph, size_cm) catch renderDiagramToExportPng(diagram.mermaid_source, size_cm);
+    }
+
     return renderDiagramToExportPng(diagram.mermaid_source, size_cm);
 }
 
@@ -3041,6 +3295,345 @@ fn requestPreviewRefresh() void {
     if (child_windows.preview) |preview| {
         updatePreviewScrollbars(preview);
         _ = gdi.InvalidateRect(preview, null, 1);
+    }
+}
+
+fn applyControlFont(hwnd: ?foundation.HWND) void {
+    const font = ensureShellFont() orelse return;
+    _ = ui.SendMessageA(hwnd, ui.WM_SETFONT, @intFromPtr(font), 1);
+}
+
+fn createAboutFont(height: i32, weight: i32) ?gdi.HFONT {
+    var logfont = std.mem.zeroes(gdi.LOGFONTA);
+    logfont.lfHeight = -height;
+    logfont.lfWeight = @enumFromInt(@as(u32, @intCast(weight)));
+    const face_name = "Lato";
+    for (face_name, 0..) |char, idx| {
+        logfont.lfFaceName[idx] = @as(@TypeOf(logfont.lfFaceName[0]), @intCast(char));
+    }
+    return gdi.CreateFontIndirectA(&logfont);
+}
+
+fn ensureAboutFonts() void {
+    if (about_title_font == null) {
+        about_title_font = createAboutFont(24, 700);
+    }
+    if (about_body_font == null) {
+        about_body_font = createAboutFont(16, 500);
+    }
+}
+
+fn releaseAboutFonts() void {
+    if (about_title_font) |font| {
+        _ = gdi.DeleteObject(font);
+        about_title_font = null;
+    }
+    if (about_body_font) |font| {
+        _ = gdi.DeleteObject(font);
+        about_body_font = null;
+    }
+}
+
+fn applyAboutFonts() void {
+    ensureAboutFonts();
+    if (about_controls.title) |control| {
+        _ = ui.SendMessageA(control, ui.WM_SETFONT, @intFromPtr(about_title_font orelse ensureShellFont() orelse return), 1);
+    }
+    if (about_controls.version) |control| {
+        _ = ui.SendMessageA(control, ui.WM_SETFONT, @intFromPtr(about_body_font orelse ensureShellFont() orelse return), 1);
+    }
+    if (about_controls.license) |control| {
+        _ = ui.SendMessageA(control, ui.WM_SETFONT, @intFromPtr(about_body_font orelse ensureShellFont() orelse return), 1);
+    }
+    if (about_controls.ok_button) |control| {
+        applyControlFont(control);
+    }
+}
+
+fn currentAboutImagePixelSize(hwnd: ?foundation.HWND) ?d2d_common.D2D_SIZE_U {
+    var rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &rect) == 0) return null;
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    if (width <= 0 or height <= 0) return null;
+    return .{ .width = @intCast(width), .height = @intCast(height) };
+}
+
+fn ensureAboutImageRenderTarget(hwnd: ?foundation.HWND) bool {
+    if (!ensurePreviewFactory()) return false;
+
+    const pixel_size = currentAboutImagePixelSize(hwnd) orelse return false;
+    const factory = preview_renderer.factory orelse return false;
+
+    if (about_image_renderer.render_target) |render_target| {
+        if (hrFailed(render_target.Resize(&pixel_size))) {
+            releaseAboutImageResources();
+        } else {
+            return true;
+        }
+    }
+
+    var target_properties = d2d.D2D1_RENDER_TARGET_PROPERTIES{
+        .type = d2d.D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        .pixelFormat = .{
+            .format = dxgi_common.DXGI_FORMAT_UNKNOWN,
+            .alphaMode = d2d_common.D2D1_ALPHA_MODE_IGNORE,
+        },
+        .dpiX = 0,
+        .dpiY = 0,
+        .usage = d2d.D2D1_RENDER_TARGET_USAGE_NONE,
+        .minLevel = d2d.D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    var hwnd_properties = d2d.D2D1_HWND_RENDER_TARGET_PROPERTIES{
+        .hwnd = hwnd,
+        .pixelSize = pixel_size,
+        .presentOptions = d2d.D2D1_PRESENT_OPTIONS_NONE,
+    };
+
+    var render_target: ?*d2d.ID2D1HwndRenderTarget = null;
+    if (hrFailed(factory.CreateHwndRenderTarget(&target_properties, &hwnd_properties, @ptrCast(&render_target))) or render_target == null) {
+        return false;
+    }
+
+    about_image_renderer.render_target = render_target;
+    return true;
+}
+
+fn ensureAboutImageBitmap(hwnd: ?foundation.HWND) bool {
+    if (!ensureAboutImageRenderTarget(hwnd)) return false;
+    if (about_image_renderer.bitmap != null) return true;
+    const render_target = about_image_renderer.render_target orelse return false;
+    return createBitmapFromPngBytes(
+        render_target,
+        about_image_png,
+        &about_image_renderer.bitmap,
+        &about_image_renderer.bitmap_width,
+        &about_image_renderer.bitmap_height,
+    );
+}
+
+fn drawAboutImage(hwnd: ?foundation.HWND) void {
+    if (!ensureAboutImageRenderTarget(hwnd)) return;
+    _ = ensureAboutImageBitmap(hwnd);
+
+    const render_target = about_image_renderer.render_target orelse return;
+    render_target.ID2D1RenderTarget.BeginDraw();
+    var background = rgba8Color(248, 247, 242, 255);
+    render_target.ID2D1RenderTarget.Clear(&background);
+
+    if (about_image_renderer.bitmap) |bitmap| {
+        const pixel_size = currentAboutImagePixelSize(hwnd) orelse {
+            _ = render_target.ID2D1RenderTarget.EndDraw(null, null);
+            return;
+        };
+        const viewport_width = @as(f32, @floatFromInt(pixel_size.width));
+        const viewport_height = @as(f32, @floatFromInt(pixel_size.height));
+        const image_width = @as(f32, @floatFromInt(about_image_renderer.bitmap_width));
+        const image_height = @as(f32, @floatFromInt(about_image_renderer.bitmap_height));
+        if (image_width > 0 and image_height > 0) {
+            const max_width = viewport_width - 24.0;
+            const max_height = viewport_height - 24.0;
+            const scale = @min(max_width / image_width, max_height / image_height);
+            const drawn_width = image_width * scale;
+            const drawn_height = image_height * scale;
+            const dest_rect = d2d_common.D2D_RECT_F{
+                .left = (viewport_width - drawn_width) / 2.0,
+                .top = (viewport_height - drawn_height) / 2.0,
+                .right = (viewport_width + drawn_width) / 2.0,
+                .bottom = (viewport_height + drawn_height) / 2.0,
+            };
+            const src_rect = d2d_common.D2D_RECT_F{
+                .left = 0,
+                .top = 0,
+                .right = image_width,
+                .bottom = image_height,
+            };
+            render_target.ID2D1RenderTarget.DrawBitmap(
+                bitmap,
+                &dest_rect,
+                1.0,
+                d2d.D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                &src_rect,
+            );
+        }
+    }
+
+    _ = render_target.ID2D1RenderTarget.EndDraw(null, null);
+}
+
+fn layoutAboutWindow(hwnd: ?foundation.HWND) void {
+    var rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &rect) == 0) return;
+
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    const padding: i32 = 16;
+    const image_height: i32 = 176;
+    const text_top = padding + image_height + 12;
+    const content_width = width - padding * 2;
+
+    if (about_controls.image) |control| {
+        _ = ui.SetWindowPos(control, null, padding, padding, content_width, image_height, ui.SWP_NOZORDER);
+    }
+    if (about_controls.title) |control| {
+        _ = ui.SetWindowPos(control, null, padding, text_top, content_width, 30, ui.SWP_NOZORDER);
+    }
+    if (about_controls.version) |control| {
+        _ = ui.SetWindowPos(control, null, padding, text_top + 36, content_width, 24, ui.SWP_NOZORDER);
+    }
+    if (about_controls.license) |control| {
+        _ = ui.SetWindowPos(control, null, padding, text_top + 66, content_width, 40, ui.SWP_NOZORDER);
+    }
+    if (about_controls.ok_button) |control| {
+        const button_width = 96;
+        const button_height = 28;
+        _ = ui.SetWindowPos(control, null, @divTrunc(width - button_width, 2), height - padding - button_height, button_width, button_height, ui.SWP_NOZORDER);
+    }
+}
+
+fn createAboutWindowText(text: []const u8) ?[:0]u8 {
+    return dupeSentinel(c_allocator, text) catch null;
+}
+
+fn showAboutWindow() void {
+    if (about_window) |existing| {
+        _ = ui.ShowWindow(existing, ui.SW_SHOW);
+        _ = ui.SetForegroundWindow(existing);
+        return;
+    }
+
+    const owner = main_window;
+    var owner_rect = foundation.RECT{ .left = 120, .top = 120, .right = 600, .bottom = 640 };
+    if (owner != null) {
+        _ = ui.GetWindowRect(owner, &owner_rect);
+    }
+
+    const width = 420;
+    const height = 360;
+    const x = owner_rect.left + @divTrunc((owner_rect.right - owner_rect.left - width), 2);
+    const y = owner_rect.top + @divTrunc((owner_rect.bottom - owner_rect.top - height), 2);
+
+    const hwnd = ui.CreateWindowExA(
+        makeExStyle(exStyleBits(ui.WS_EX_DLGMODALFRAME)),
+        about_class_name,
+        about_window_title,
+        makeStyle(styleBits(ui.WS_OVERLAPPED) | styleBits(ui.WS_CAPTION) | styleBits(ui.WS_SYSMENU) | styleBits(ui.WS_CLIPCHILDREN)),
+        x,
+        y,
+        width,
+        height,
+        owner,
+        null,
+        loader.GetModuleHandleA(null),
+        null,
+    ) orelse return;
+
+    about_window = hwnd;
+    _ = ui.ShowWindow(hwnd, ui.SW_SHOW);
+    _ = ui.SetForegroundWindow(hwnd);
+}
+
+fn aboutImageWindowProc(
+    hwnd: ?foundation.HWND,
+    message: u32,
+    w_param: foundation.WPARAM,
+    l_param: foundation.LPARAM,
+) callconv(.winapi) foundation.LRESULT {
+    switch (message) {
+        ui.WM_ERASEBKGND => return 1,
+        ui.WM_SIZE => {
+            if (about_image_renderer.render_target) |render_target| {
+                if (currentAboutImagePixelSize(hwnd)) |size| {
+                    _ = render_target.Resize(&size);
+                }
+            }
+            _ = gdi.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        ui.WM_PAINT => {
+            var paint = std.mem.zeroes(gdi.PAINTSTRUCT);
+            _ = gdi.BeginPaint(hwnd, &paint);
+            drawAboutImage(hwnd);
+            _ = gdi.EndPaint(hwnd, &paint);
+            return 0;
+        },
+        else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
+    }
+}
+
+fn aboutWindowProc(
+    hwnd: ?foundation.HWND,
+    message: u32,
+    w_param: foundation.WPARAM,
+    l_param: foundation.LPARAM,
+) callconv(.winapi) foundation.LRESULT {
+    switch (message) {
+        ui.WM_CREATE => {
+            const title_text = createAboutWindowText("Merrow Studio") orelse return -1;
+            defer c_allocator.free(title_text);
+            const version_plain = std.fmt.allocPrint(c_allocator, "Version {s}", .{app_version}) catch return -1;
+            defer c_allocator.free(version_plain);
+            const version_text = createAboutWindowText(version_plain) orelse return -1;
+            defer c_allocator.free(version_text);
+            const license_text = createAboutWindowText("(c) Alban Read 2026\r\nMIT Licensed") orelse return -1;
+            defer c_allocator.free(license_text);
+
+            about_controls = .{};
+            about_controls.image = ui.CreateWindowExA(.{}, about_image_class_name, "", makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE)), 0, 0, 100, 100, hwnd, @ptrFromInt(control_id_about_image), loader.GetModuleHandleA(null), null);
+            about_controls.title = ui.CreateWindowExA(.{}, static_class, title_text.ptr, makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE)), 0, 0, 100, 20, hwnd, @ptrFromInt(control_id_about_title), loader.GetModuleHandleA(null), null);
+            about_controls.version = ui.CreateWindowExA(.{}, static_class, version_text.ptr, makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE)), 0, 0, 100, 20, hwnd, @ptrFromInt(control_id_about_version), loader.GetModuleHandleA(null), null);
+            about_controls.license = ui.CreateWindowExA(.{}, static_class, license_text.ptr, makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE)), 0, 0, 100, 40, hwnd, @ptrFromInt(control_id_about_license), loader.GetModuleHandleA(null), null);
+            about_controls.ok_button = ui.CreateWindowExA(.{}, button_class, "OK", makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE)), 0, 0, 96, 28, hwnd, @ptrFromInt(control_id_about_ok), loader.GetModuleHandleA(null), null);
+
+            if (about_controls.image == null or about_controls.title == null or about_controls.version == null or about_controls.license == null or about_controls.ok_button == null) {
+                return -1;
+            }
+
+            applyAboutFonts();
+            layoutAboutWindow(hwnd);
+            _ = ui.SetTimer(hwnd, about_auto_close_timer_id, 6000, null);
+            return 0;
+        },
+        ui.WM_COMMAND => {
+            const command_id: u16 = @truncate(w_param & 0xffff);
+            if (command_id == control_id_about_ok) {
+                _ = ui.DestroyWindow(hwnd);
+                return 0;
+            }
+            return ui.DefWindowProcA(hwnd, message, w_param, l_param);
+        },
+        ui.WM_SIZE => {
+            layoutAboutWindow(hwnd);
+            return 0;
+        },
+        ui.WM_TIMER => {
+            if (@as(usize, @bitCast(w_param)) == about_auto_close_timer_id) {
+                _ = ui.DestroyWindow(hwnd);
+                return 0;
+            }
+            return ui.DefWindowProcA(hwnd, message, w_param, l_param);
+        },
+        ui.WM_KEYDOWN => {
+            const vkey: u16 = @truncate(w_param);
+            if (vkey == @intFromEnum(mouse.VK_ESCAPE) or vkey == @intFromEnum(mouse.VK_RETURN)) {
+                _ = ui.DestroyWindow(hwnd);
+                return 0;
+            }
+            return ui.DefWindowProcA(hwnd, message, w_param, l_param);
+        },
+        ui.WM_CLOSE => {
+            _ = ui.DestroyWindow(hwnd);
+            return 0;
+        },
+        ui.WM_DESTROY => {
+            _ = ui.KillTimer(hwnd, about_auto_close_timer_id);
+            releaseAboutImageResources();
+            releaseAboutFonts();
+            about_controls = .{};
+            about_window = null;
+            return 0;
+        },
+        else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
     }
 }
 
@@ -4106,6 +4699,9 @@ fn windowProc(
                         openDocumentFromDialog();
                         return 0;
                     },
+                    menu_id_open_recent_empty => {
+                        return 0;
+                    },
                     menu_id_save => {
                         saveDocument(false);
                         return 0;
@@ -4116,6 +4712,10 @@ fn windowProc(
                     },
                     menu_id_export_word => {
                         exportDiagramToWord();
+                        return 0;
+                    },
+                    menu_id_export_mermaid => {
+                        exportDiagramToMermaid();
                         return 0;
                     },
                     menu_id_font_settings => {
@@ -4134,7 +4734,16 @@ fn windowProc(
                         toggleSourcePanelVisibility();
                         return 0;
                     },
+                    menu_id_about => {
+                        showAboutWindow();
+                        return 0;
+                    },
                     else => {},
+                }
+
+                if (command_id >= menu_id_open_recent_first and command_id <= menu_id_open_recent_last) {
+                    openRecentDocument(command_id - menu_id_open_recent_first);
+                    return 0;
                 }
             }
             if (notification_code == ui.BN_CLICKED and (command_id == control_id_apply_button or source_hwnd == child_windows.apply_button)) {
@@ -4176,6 +4785,7 @@ fn windowProc(
             return ui.DefWindowProcA(hwnd, message, w_param, l_param);
         },
         ui.WM_INITMENUPOPUP => {
+            refreshRecentFilesMenu();
             // Tick the active mode in the View menu and keep the project inspector command freeform-only.
             const hmenu: ui.HMENU = @ptrFromInt(@as(usize, @bitCast(w_param)));
             _ = ui.CheckMenuItem(hmenu, menu_id_mode_mermaid, if (app_mode == .mermaid) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
@@ -4240,6 +4850,10 @@ fn windowProc(
             return 0;
         },
         ui.WM_DESTROY => {
+            if (about_window) |window| {
+                _ = ui.DestroyWindow(window);
+                about_window = null;
+            }
             _ = ui.KillTimer(hwnd, main_timer_id_editor_refresh);
             _ = ui.KillTimer(hwnd, main_timer_id_ffm_persist);
             persistCurrentFreeformGraph();
@@ -4317,6 +4931,26 @@ pub export fn merrow_studio_main(argc: c_int, argv: [*]const [*:0]const u8) call
     canvas_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
     canvas_class.lpszClassName = canvas_class_name;
     if (ui.RegisterClassExA(&canvas_class) == 0) {
+        return 1;
+    }
+
+    var about_class = std.mem.zeroes(ui.WNDCLASSEXA);
+    about_class.cbSize = @sizeOf(ui.WNDCLASSEXA);
+    about_class.lpfnWndProc = aboutWindowProc;
+    about_class.hInstance = h_instance;
+    about_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
+    about_class.lpszClassName = about_class_name;
+    if (ui.RegisterClassExA(&about_class) == 0) {
+        return 1;
+    }
+
+    var about_image_class = std.mem.zeroes(ui.WNDCLASSEXA);
+    about_image_class.cbSize = @sizeOf(ui.WNDCLASSEXA);
+    about_image_class.lpfnWndProc = aboutImageWindowProc;
+    about_image_class.hInstance = h_instance;
+    about_image_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
+    about_image_class.lpszClassName = about_image_class_name;
+    if (ui.RegisterClassExA(&about_image_class) == 0) {
         return 1;
     }
 

@@ -63,6 +63,18 @@ pub fn setCurrentDocumentPath(
     hwnd: ?foundation.HWND,
     is_document_dirty: bool,
 ) void {
+    if (path) |value| {
+        if (current_document_path.*) |existing| {
+            if (std.mem.eql(u8, existing, value)) {
+                updateWindowTitle(allocator, hwnd, current_document_path.*, is_document_dirty);
+                return;
+            }
+        }
+    } else if (current_document_path.* == null) {
+        updateWindowTitle(allocator, hwnd, current_document_path.*, is_document_dirty);
+        return;
+    }
+
     freeCurrentDocumentPath(allocator, current_document_path);
     if (path) |value| {
         current_document_path.* = allocator.dupe(u8, value) catch null;
@@ -87,16 +99,23 @@ pub fn chooseDocumentPath(
     current_document_path: ?[]u8,
     save: bool,
 ) ?[]u8 {
-    const initial_path = if (current_document_path) |path|
-        allocator.dupe(u8, path) catch null
+    const initial_path = if (save)
+        if (current_document_path) |path|
+            allocator.dupe(u8, path) catch null
+        else
+            defaultDocumentPath(allocator) catch null
     else
-        defaultDocumentPath(allocator) catch null;
+        null;
     defer if (initial_path) |path| allocator.free(path);
+
+    const initial_dir = if (save) null else defaultLibraryOpenDirectory(allocator) catch null;
+    defer if (initial_dir) |path| allocator.free(path);
 
     return chooseCustomPath(
         allocator,
         owner_hwnd,
         initial_path,
+        initial_dir,
         save,
         constants.mermaid_dialog_filter,
         if (save) constants.save_dialog_title else constants.open_dialog_title,
@@ -108,6 +127,7 @@ pub fn chooseCustomPath(
     allocator: std.mem.Allocator,
     owner_hwnd: ?foundation.HWND,
     initial_path: ?[]const u8,
+    initial_dir: ?[]const u8,
     save: bool,
     filter: [*:0]const u8,
     title: [*:0]const u8,
@@ -120,12 +140,16 @@ pub fn chooseCustomPath(
         path_buffer[copy_len] = 0;
     }
 
+    const initial_dir_z = if (initial_dir) |path| allocator.dupeZ(u8, path) catch null else null;
+    defer if (initial_dir_z) |path| allocator.free(path);
+
     var dialog = std.mem.zeroes(dialogs.OPENFILENAMEA);
     dialog.lStructSize = @sizeOf(dialogs.OPENFILENAMEA);
     dialog.hwndOwner = owner_hwnd;
     dialog.lpstrFilter = filter;
     dialog.lpstrFile = @ptrCast(path_buffer[0..].ptr);
     dialog.nMaxFile = path_buffer.len;
+    dialog.lpstrInitialDir = if (initial_dir_z) |path| path.ptr else null;
     dialog.lpstrTitle = title;
     dialog.lpstrDefExt = default_extension;
     dialog.Flags = common.makeFileDialogFlags(
@@ -186,6 +210,12 @@ pub fn defaultLibraryDbPath(allocator: std.mem.Allocator) ![]u8 {
     const folders = try getMerrowUserFolders(allocator);
     defer folders.deinit(allocator);
     return library_db.defaultDatabasePath(allocator, folders.library);
+}
+
+pub fn defaultLibraryOpenDirectory(allocator: std.mem.Allocator) ![]u8 {
+    const folders = try getMerrowUserFolders(allocator);
+    defer folders.deinit(allocator);
+    return allocator.dupe(u8, folders.library);
 }
 
 pub fn defaultDocumentPath(allocator: std.mem.Allocator) ![]u8 {

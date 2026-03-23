@@ -27,6 +27,7 @@ const SeqPngRender = merrow.sequence.png_render;
 const graph_render = merrow.render.graph;
 const svg_render = merrow.render.svg_render;
 const commands = @import("commands.zig");
+const mermaid_serializer = @import("mermaid_serializer.zig");
 const Font = graph_render.Font;
 const RenderConfig = graph_render.RenderConfig;
 const LabelPlacement = graph_render.LabelPlacement;
@@ -209,10 +210,27 @@ pub const StudioEditableSubgraph = extern struct {
     title_position: u32,
 };
 
+pub const StudioMermaidSourceRecord = extern struct {
+    kind: u32,
+    object_id: [*c]const u8,
+    secondary_id: [*c]const u8,
+    aux_text: [*c]const u8,
+    match_index: u32,
+    text: [*c]const u8,
+};
+
+const mermaid_record_kind_raw: u32 = 0;
+const mermaid_record_kind_header: u32 = 1;
+const mermaid_record_kind_node: u32 = 2;
+const mermaid_record_kind_edge: u32 = 3;
+const mermaid_record_kind_subgraph_start: u32 = 4;
+const mermaid_record_kind_subgraph_end: u32 = 5;
+
 pub const StudioEditableGraph = extern struct {
     width: f64,
     height: f64,
     graph_type: u32,
+    direction: u32,
     background: StudioColor,
     subgraphs: [*c]StudioEditableSubgraph,
     subgraph_count: usize,
@@ -220,6 +238,8 @@ pub const StudioEditableGraph = extern struct {
     node_count: usize,
     edges: [*c]StudioEditableEdge,
     edge_count: usize,
+    source_records: [*c]StudioMermaidSourceRecord,
+    source_record_count: usize,
 };
 
 const SceneBuffers = struct {
@@ -281,6 +301,16 @@ const EditableGraphBuffers = struct {
         self.edges.deinit(allocator);
     }
 };
+
+fn freeSourceRecords(allocator: std.mem.Allocator, records: []StudioMermaidSourceRecord) void {
+    for (records) |item| {
+        freeCString(allocator, item.object_id);
+        freeCString(allocator, item.secondary_id);
+        freeCString(allocator, item.aux_text);
+        freeCString(allocator, item.text);
+    }
+    allocator.free(records);
+}
 
 fn studioColor(rgba: [4]u8) StudioColor {
     return .{ .r = rgba[0], .g = rgba[1], .b = rgba[2], .a = rgba[3] };
@@ -377,6 +407,13 @@ fn rankDirFromText(text: []const u8) dagre.RankDir {
     if (std.mem.eql(u8, text, "RL")) return .RL;
     if (std.mem.eql(u8, text, "BT")) return .BT;
     return .TB;
+}
+
+fn directionFromText(text: []const u8) u32 {
+    if (std.mem.eql(u8, text, "LR")) return 1;
+    if (std.mem.eql(u8, text, "BT")) return 2;
+    if (std.mem.eql(u8, text, "RL")) return 3;
+    return 0; // TD/TB
 }
 
 fn rankDirText(rankdir: dagre.RankDir) []const u8 {
@@ -2816,7 +2853,7 @@ fn appendStateEditableGraph(
     };
 }
 
-fn finalizeEditableGraph(allocator: std.mem.Allocator, graph_type: StudioGraphType, buffers: *EditableGraphBuffers, width: f64, height: f64) !*StudioEditableGraph {
+fn finalizeEditableGraph(allocator: std.mem.Allocator, graph_type: StudioGraphType, direction: u32, buffers: *EditableGraphBuffers, width: f64, height: f64) !*StudioEditableGraph {
     const subgraphs_len = buffers.subgraphs.items.len;
     const nodes_len = buffers.nodes.items.len;
     const edges_len = buffers.edges.items.len;
@@ -2828,6 +2865,7 @@ fn finalizeEditableGraph(allocator: std.mem.Allocator, graph_type: StudioGraphTy
     const graph = try allocator.create(StudioEditableGraph);
     graph.* = .{
         .graph_type = @intFromEnum(graph_type),
+        .direction = direction,
         .width = width,
         .height = height,
         .background = studioColor(.{ 255, 255, 255, 255 }),
@@ -2837,8 +2875,727 @@ fn finalizeEditableGraph(allocator: std.mem.Allocator, graph_type: StudioGraphTy
         .node_count = nodes_len,
         .edges = if (edges_len > 0) @ptrCast(@constCast(edges.ptr)) else null,
         .edge_count = edges_len,
+        .source_records = null,
+        .source_record_count = 0,
     };
     return graph;
+}
+
+fn appendSourceRecord(records: *std.ArrayListUnmanaged(StudioMermaidSourceRecord), kind: u32, object_id: ?[]const u8, secondary_id: ?[]const u8, aux_text: ?[]const u8, match_index: u32, text: []const u8) !void {
+    try records.append(c_allocator, .{
+        .kind = kind,
+        .object_id = if (object_id) |value| try dupCString(c_allocator, value) else null,
+        .secondary_id = if (secondary_id) |value| try dupCString(c_allocator, value) else null,
+        .aux_text = if (aux_text) |value| try dupCString(c_allocator, value) else null,
+        .match_index = match_index,
+        .text = try dupCString(c_allocator, text),
+    });
+}
+
+fn captureSourceRecords(source: []const u8, graph: *StudioEditableGraph) void {
+    var records = std.ArrayListUnmanaged(StudioMermaidSourceRecord){};
+    errdefer records.deinit(c_allocator);
+
+    if (graph.graph_type == @intFromEnum(StudioGraphType.flowchart)) {
+        captureFlowchartSourceRecords(source, &records) catch {
+            for (records.items) |item| {
+                freeCString(c_allocator, item.object_id);
+                freeCString(c_allocator, item.secondary_id);
+                freeCString(c_allocator, item.aux_text);
+                freeCString(c_allocator, item.text);
+            }
+            records.deinit(c_allocator);
+            return;
+        };
+    } else {
+        captureRawSourceRecords(source, &records) catch {
+            for (records.items) |item| {
+                freeCString(c_allocator, item.object_id);
+                freeCString(c_allocator, item.secondary_id);
+                freeCString(c_allocator, item.aux_text);
+                freeCString(c_allocator, item.text);
+            }
+            records.deinit(c_allocator);
+            return;
+        };
+    }
+
+    if (records.items.len == 0) return;
+    const owned = records.toOwnedSlice(c_allocator) catch {
+        for (records.items) |item| {
+            freeCString(c_allocator, item.object_id);
+            freeCString(c_allocator, item.secondary_id);
+            freeCString(c_allocator, item.aux_text);
+            freeCString(c_allocator, item.text);
+        }
+        records.deinit(c_allocator);
+        return;
+    };
+    graph.source_records = owned.ptr;
+    graph.source_record_count = owned.len;
+}
+
+fn captureRawSourceRecords(source: []const u8, records: *std.ArrayListUnmanaged(StudioMermaidSourceRecord)) !void {
+    var line_iter = std.mem.splitScalar(u8, source, '\n');
+    while (line_iter.next()) |raw_line| {
+        const line = std.mem.trimRight(u8, raw_line, "\r");
+        try appendSourceRecord(records, mermaid_record_kind_raw, null, null, null, 0, line);
+    }
+}
+
+fn captureFlowchartSourceRecords(source: []const u8, records: *std.ArrayListUnmanaged(StudioMermaidSourceRecord)) !void {
+    var subgraph_stack = std.ArrayListUnmanaged([]u8){};
+    defer {
+        for (subgraph_stack.items) |item| c_allocator.free(item);
+        subgraph_stack.deinit(c_allocator);
+    }
+
+    var line_iter = std.mem.splitScalar(u8, source, '\n');
+    while (line_iter.next()) |raw_line| {
+        const line = std.mem.trimRight(u8, raw_line, "\r");
+        const trimmed = std.mem.trim(u8, line, " \t");
+
+        if (std.mem.startsWith(u8, trimmed, "%% @")) continue;
+
+        if (trimmed.len == 0 or std.mem.startsWith(u8, trimmed, "%%")) {
+            try appendSourceRecord(records, mermaid_record_kind_raw, null, null, null, 0, line);
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "graph ") or std.mem.startsWith(u8, trimmed, "flowchart ")) {
+            try appendSourceRecord(records, mermaid_record_kind_header, null, null, null, 0, line);
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "subgraph ")) {
+            const sg_id = extractSubgraphIdFromDecl(trimmed) orelse {
+                try appendSourceRecord(records, mermaid_record_kind_raw, null, null, null, 0, line);
+                continue;
+            };
+            const title = extractFlowchartSubgraphTitle(trimmed);
+            try appendSourceRecord(records, mermaid_record_kind_subgraph_start, sg_id, null, title, 0, line);
+            try subgraph_stack.append(c_allocator, try c_allocator.dupe(u8, sg_id));
+            continue;
+        }
+
+        if (std.mem.eql(u8, trimmed, "end")) {
+            const sg_id = if (subgraph_stack.items.len > 0) subgraph_stack.pop() else null;
+            defer if (sg_id) |owned| c_allocator.free(owned);
+            try appendSourceRecord(records, mermaid_record_kind_subgraph_end, sg_id, null, null, 0, line);
+            continue;
+        }
+
+        if (parseAnnotatedEdgeDecl(@intFromEnum(StudioGraphType.flowchart), trimmed)) |edge_decl| {
+            const match_index = @as(u32, @intCast(edgeDuplicateIndexForSourceRecord(records.items, edge_decl.source_id, edge_decl.target_id, edge_decl.label)));
+            try appendSourceRecord(records, mermaid_record_kind_edge, edge_decl.source_id, edge_decl.target_id, edge_decl.label, match_index, line);
+            continue;
+        }
+
+        if (extractNodeIdFromDecl(trimmed)) |node_id| {
+            try appendSourceRecord(records, mermaid_record_kind_node, node_id, null, null, 0, line);
+            continue;
+        }
+
+        try appendSourceRecord(records, mermaid_record_kind_raw, null, null, null, 0, line);
+    }
+}
+
+fn edgeDuplicateIndexForSourceRecord(records: []const StudioMermaidSourceRecord, source_id: []const u8, target_id: []const u8, label: ?[]const u8) usize {
+    var duplicate_index: usize = 0;
+    const normalized_label = std.mem.trim(u8, label orelse "", " \t\r\"");
+    for (records) |record| {
+        if (record.kind != mermaid_record_kind_edge) continue;
+        if (!std.mem.eql(u8, std.mem.span(record.object_id), source_id)) continue;
+        if (!std.mem.eql(u8, std.mem.span(record.secondary_id), target_id)) continue;
+        const record_label = if (record.aux_text) |ptr| std.mem.trim(u8, std.mem.span(ptr), " \t\r\"") else "";
+        if (!std.mem.eql(u8, record_label, normalized_label)) continue;
+        duplicate_index += 1;
+    }
+    return duplicate_index;
+}
+
+fn extractFlowchartSubgraphTitle(line: []const u8) ?[]const u8 {
+    const after = std.mem.trimLeft(u8, line["subgraph".len..], " \t");
+    if (after.len == 0) return null;
+    if (after[0] == '"') {
+        const end_quote = std.mem.indexOfScalar(u8, after[1..], '"') orelse return null;
+        const remainder = std.mem.trimLeft(u8, after[end_quote + 2 ..], " \t");
+        if (remainder.len >= 2 and remainder[0] == '[' and remainder[remainder.len - 1] == ']') {
+            return remainder[1 .. remainder.len - 1];
+        }
+        return null;
+    }
+    if (std.mem.indexOfScalar(u8, after, '[')) |open_idx| {
+        if (after.len > open_idx + 1 and after[after.len - 1] == ']') {
+            return after[open_idx + 1 .. after.len - 1];
+        }
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Annotation parsing – reads %% @key=value comments from mermaid source to
+// restore visual properties (positions, colors, strokes, fonts) that were
+// written by the mermaid serializer.
+// ---------------------------------------------------------------------------
+
+fn applyAnnotationsToEditableGraph(source: []const u8, graph: *StudioEditableGraph) void {
+    var any_applied = false;
+    var edge_index: usize = 0;
+    var pending_annotation: ?[]const u8 = null;
+    var matched_edges: []bool = &.{};
+    if (graph.edge_count > 0) {
+        matched_edges = c_allocator.alloc(bool, graph.edge_count) catch &.{};
+        if (matched_edges.len > 0) @memset(matched_edges, false);
+    }
+    defer if (matched_edges.len > 0) c_allocator.free(matched_edges);
+    var line_iter = std.mem.splitScalar(u8, source, '\n');
+
+    while (line_iter.next()) |raw_line| {
+        const trimmed = std.mem.trim(u8, raw_line, " \t\r");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.startsWith(u8, trimmed, "%%")) {
+            const after_pct = std.mem.trimLeft(u8, trimmed[2..], " \t");
+            if (std.mem.startsWith(u8, after_pct, "@shape=") or
+                std.mem.startsWith(u8, after_pct, "@edge") or
+                std.mem.startsWith(u8, after_pct, "@pos="))
+            {
+                pending_annotation = after_pct;
+                continue;
+            }
+            continue;
+        }
+
+        if (pending_annotation) |ann| {
+            defer pending_annotation = null;
+
+            if (std.mem.startsWith(u8, ann, "@shape=")) {
+                if (graph.nodes) |nodes_ptr| {
+                    const node_id = extractNodeIdFromDecl(trimmed) orelse continue;
+                    const nodes = nodes_ptr[0..graph.node_count];
+                    for (nodes) |*node| {
+                        if (std.mem.eql(u8, std.mem.span(node.id), node_id)) {
+                            applyNodeAnnotation(node, ann);
+                            any_applied = true;
+                            break;
+                        }
+                    }
+                }
+            } else if (std.mem.startsWith(u8, ann, "@edge")) {
+                if (graph.edges) |edges_ptr| {
+                    const edges = edges_ptr[0..graph.edge_count];
+                    if (findAnnotatedEdgeIndex(graph.graph_type, edges, trimmed, annUsize(annValue(ann, "match-index") orelse ""), matched_edges, edge_index)) |matched_index| {
+                        applyEdgeAnnotation(&edges[matched_index], ann);
+                        if (matched_index < matched_edges.len) matched_edges[matched_index] = true;
+                        any_applied = true;
+                    }
+                }
+                edge_index += 1;
+            } else if (std.mem.startsWith(u8, ann, "@pos=")) {
+                if (graph.subgraphs) |sgs_ptr| {
+                    const sg_id = extractSubgraphIdFromDecl(trimmed) orelse continue;
+                    const subgraphs = sgs_ptr[0..graph.subgraph_count];
+                    for (subgraphs) |*sg| {
+                        if (std.mem.eql(u8, std.mem.span(sg.id), sg_id)) {
+                            applySubgraphAnnotation(sg, ann);
+                            any_applied = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (any_applied) recalculateGraphBounds(graph);
+}
+
+fn applyNodeAnnotation(node: *StudioEditableNode, annotation: []const u8) void {
+    if (annValue(annotation, "shape")) |shape_val| {
+        var parts = std.mem.splitScalar(u8, shape_val, ',');
+        const name = parts.next() orelse "";
+        if (shapeTagFromName(name)) |tag| node.shape = tag;
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            node.x = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            node.y = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            node.width = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            node.height = v;
+        };
+    }
+    if (annValue(annotation, "fill")) |v| if (annColor(v)) |c| {
+        node.fill = c;
+    };
+    if (annValue(annotation, "body-fill")) |v| if (annColor(v)) |c| {
+        node.body_fill = c;
+    };
+    if (annValue(annotation, "stroke")) |v| if (annColor(v)) |c| {
+        node.stroke = c;
+    };
+    if (annValue(annotation, "stroke-width")) |v| if (annF32(v)) |f| {
+        node.stroke_width = f;
+    };
+    if (annValue(annotation, "ink")) |v| if (annColor(v)) |c| {
+        node.label_color = c;
+    };
+    if (annValue(annotation, "font-size")) |v| if (annF32(v)) |f| {
+        node.label_font_size = f;
+    };
+}
+
+fn applyEdgeAnnotation(edge: *StudioEditableEdge, annotation: []const u8) void {
+    if (annValue(annotation, "stroke")) |v| if (annColor(v)) |c| {
+        edge.color = c;
+    };
+    if (annValue(annotation, "thickness")) |v| if (annF32(v)) |f| {
+        edge.thickness = f;
+    };
+    if (annValue(annotation, "line-style")) |v| if (lineStyleTagFromName(v)) |tag| {
+        edge.line_style = tag;
+    };
+    if (annValue(annotation, "font-size")) |v| if (annF32(v)) |f| {
+        edge.label_font_size = f;
+    };
+    if (annValue(annotation, "end-style")) |v| {
+        var parts = std.mem.splitScalar(u8, v, ',');
+        if (parts.next()) |s| if (annU32(s)) |val| {
+            edge.source_end_style = val;
+        };
+        if (parts.next()) |s| if (annU32(s)) |val| {
+            edge.target_end_style = val;
+        };
+    }
+}
+
+const ParsedEdgeDecl = struct {
+    source_id: []const u8,
+    target_id: []const u8,
+    label: ?[]const u8,
+};
+
+fn findAnnotatedEdgeIndex(
+    graph_type: u32,
+    edges: []StudioEditableEdge,
+    line: []const u8,
+    desired_match_index: ?usize,
+    matched_edges: []bool,
+    fallback_index: usize,
+) ?usize {
+    if (parseAnnotatedEdgeDecl(graph_type, line)) |decl| {
+        if (findEdgeIndexByDecl(edges, matched_edges, decl, desired_match_index, true)) |idx| return idx;
+        if (findEdgeIndexByDecl(edges, matched_edges, decl, desired_match_index, false)) |idx| return idx;
+    }
+    return fallbackUnmatchedEdgeIndex(edges.len, matched_edges, fallback_index);
+}
+
+fn findEdgeIndexByDecl(
+    edges: []StudioEditableEdge,
+    matched_edges: []bool,
+    decl: ParsedEdgeDecl,
+    desired_match_index: ?usize,
+    require_label_match: bool,
+) ?usize {
+    for (edges, 0..) |edge, idx| {
+        if (idx < matched_edges.len and matched_edges[idx]) continue;
+        if (!std.mem.eql(u8, std.mem.span(edge.source_id), decl.source_id)) continue;
+        if (!std.mem.eql(u8, std.mem.span(edge.target_id), decl.target_id)) continue;
+        if (require_label_match and !annotatedEdgeLabelMatches(edge.label, decl.label)) continue;
+        if (desired_match_index) |match_index| {
+            if (edgeSemanticDuplicateIndexForEditable(edges, idx) != match_index) continue;
+        }
+        return idx;
+    }
+
+    for (edges, 0..) |edge, idx| {
+        if (!std.mem.eql(u8, std.mem.span(edge.source_id), decl.source_id)) continue;
+        if (!std.mem.eql(u8, std.mem.span(edge.target_id), decl.target_id)) continue;
+        if (require_label_match and !annotatedEdgeLabelMatches(edge.label, decl.label)) continue;
+        if (desired_match_index) |match_index| {
+            if (edgeSemanticDuplicateIndexForEditable(edges, idx) != match_index) continue;
+        }
+        return idx;
+    }
+
+    return null;
+}
+
+fn annotatedEdgeLabelMatches(edge_label_ptr: [*c]const u8, parsed_label: ?[]const u8) bool {
+    const edge_label = if (edge_label_ptr) |ptr| std.mem.span(ptr) else "";
+    const normalized_parsed = std.mem.trim(u8, parsed_label orelse "", " \t\r\"");
+    const normalized_edge = std.mem.trim(u8, edge_label, " \t\r\"");
+    return std.mem.eql(u8, normalized_edge, normalized_parsed);
+}
+
+fn fallbackUnmatchedEdgeIndex(edge_count: usize, matched_edges: []bool, fallback_index: usize) ?usize {
+    if (edge_count == 0) return null;
+    if (matched_edges.len == 0) return if (fallback_index < edge_count) fallback_index else edge_count - 1;
+
+    var idx = fallback_index;
+    while (idx < edge_count) : (idx += 1) {
+        if (!matched_edges[idx]) return idx;
+    }
+    idx = 0;
+    while (idx < edge_count) : (idx += 1) {
+        if (!matched_edges[idx]) return idx;
+    }
+    return null;
+}
+
+fn parseAnnotatedEdgeDecl(graph_type: u32, line: []const u8) ?ParsedEdgeDecl {
+    var body = std.mem.trim(u8, line, " \t\r");
+    if (body.len == 0) return null;
+
+    var label: ?[]const u8 = null;
+    if (graph_type == @intFromEnum(StudioGraphType.flowchart)) {
+        if (std.mem.indexOfScalar(u8, body, '|')) |start_bar| {
+            if (std.mem.lastIndexOfScalar(u8, body, '|')) |end_bar| {
+                if (end_bar > start_bar) label = body[start_bar + 1 .. end_bar];
+            }
+        }
+    } else if (std.mem.lastIndexOfScalar(u8, body, ':')) |colon| {
+        label = std.mem.trim(u8, body[colon + 1 ..], " \t\r\"");
+        body = std.mem.trimRight(u8, body[0..colon], " \t\r");
+    }
+
+    const source_token = parseLeadingMermaidId(body) orelse return null;
+    const before_target = std.mem.trim(u8, body[source_token.end..], " \t\r");
+    if (before_target.len == 0) return null;
+    const target_token = parseTrailingMermaidId(before_target) orelse return null;
+
+    return .{
+        .source_id = source_token.id,
+        .target_id = target_token.id,
+        .label = label,
+    };
+}
+
+const ParsedLeadingId = struct {
+    id: []const u8,
+    end: usize,
+};
+
+fn parseLeadingMermaidId(line: []const u8) ?ParsedLeadingId {
+    const trimmed = std.mem.trimLeft(u8, line, " \t\r");
+    if (trimmed.len == 0) return null;
+    const leading_ws = line.len - trimmed.len;
+
+    if (std.mem.startsWith(u8, trimmed, "[*]")) {
+        return .{ .id = trimmed[0..3], .end = leading_ws + 3 };
+    }
+    if (trimmed[0] == '"') {
+        const end_quote = std.mem.indexOfScalar(u8, trimmed[1..], '"') orelse return null;
+        return .{ .id = trimmed[1 .. 1 + end_quote], .end = leading_ws + end_quote + 2 };
+    }
+
+    var end: usize = 0;
+    while (end < trimmed.len) : (end += 1) {
+        const char = trimmed[end];
+        if (char == '-' and end + 1 < trimmed.len and isMermaidRelationStart(trimmed[end + 1])) break;
+        if (char == '<' or char == ':') break;
+        if (!isMermaidIdChar(char)) break;
+    }
+    if (end == 0) return null;
+    return .{ .id = trimmed[0..end], .end = leading_ws + end };
+}
+
+const ParsedTrailingId = struct {
+    id: []const u8,
+};
+
+fn parseTrailingMermaidId(line: []const u8) ?ParsedTrailingId {
+    const trimmed = std.mem.trimRight(u8, line, " \t\r");
+    if (trimmed.len == 0) return null;
+
+    if (std.mem.endsWith(u8, trimmed, "[*]")) {
+        return .{ .id = trimmed[trimmed.len - 3 ..] };
+    }
+    if (trimmed[trimmed.len - 1] == '"') {
+        const start_quote = std.mem.lastIndexOfScalar(u8, trimmed[0 .. trimmed.len - 1], '"') orelse return null;
+        return .{ .id = trimmed[start_quote + 1 .. trimmed.len - 1] };
+    }
+
+    if (trimmed[trimmed.len - 1] == ']' or trimmed[trimmed.len - 1] == ')' or trimmed[trimmed.len - 1] == '}') {
+        if (flowchartDeclIdBeforeShape(trimmed)) |shape_id| {
+            return .{ .id = shape_id };
+        }
+    }
+
+    var start = trimmed.len;
+    while (start > 0 and isMermaidIdChar(trimmed[start - 1])) : (start -= 1) {}
+    if (start == trimmed.len) return null;
+    return .{ .id = trimmed[start..] };
+}
+
+fn flowchartDeclIdBeforeShape(line: []const u8) ?[]const u8 {
+    if (line.len == 0) return null;
+    const close_char = line[line.len - 1];
+    const open_char: u8 = switch (close_char) {
+        ']' => '[',
+        ')' => '(',
+        '}' => '{',
+        else => return null,
+    };
+
+    var depth: usize = 0;
+    var open_idx_opt: ?usize = null;
+    var idx = line.len;
+    while (idx > 0) {
+        idx -= 1;
+        const char = line[idx];
+        if (char == close_char) {
+            depth += 1;
+            continue;
+        }
+        if (char == open_char) {
+            if (depth == 0) return null;
+            depth -= 1;
+            if (depth == 0) {
+                open_idx_opt = idx;
+                break;
+            }
+        }
+    }
+
+    var open_idx = open_idx_opt orelse return null;
+    while (open_idx > 0) {
+        const prev = line[open_idx - 1];
+        switch (prev) {
+            '[', '(', '{', '/', '\\' => open_idx -= 1,
+            else => break,
+        }
+    }
+
+    var start = open_idx;
+    while (start > 0 and isMermaidIdChar(line[start - 1])) : (start -= 1) {}
+    if (start == open_idx) return null;
+    return line[start..open_idx];
+}
+
+fn isMermaidIdChar(char: u8) bool {
+    return switch (char) {
+        'a'...'z', 'A'...'Z', '0'...'9', '_', '-', '.', '/' => true,
+        else => false,
+    };
+}
+
+fn isMermaidRelationStart(char: u8) bool {
+    return switch (char) {
+        '-', '.', '>', 'x' => true,
+        else => false,
+    };
+}
+
+fn applySubgraphAnnotation(sg: *StudioEditableSubgraph, annotation: []const u8) void {
+    if (annValue(annotation, "pos")) |pos_val| {
+        var parts = std.mem.splitScalar(u8, pos_val, ',');
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            sg.x = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            sg.y = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            sg.width = v;
+        };
+        if (parts.next()) |s| if (annF64(s)) |v| {
+            sg.height = v;
+        };
+    }
+    if (annValue(annotation, "fill")) |v| if (annColor(v)) |c| {
+        sg.fill = c;
+    };
+    if (annValue(annotation, "stroke")) |v| if (annColor(v)) |c| {
+        sg.stroke = c;
+    };
+    if (annValue(annotation, "stroke-width")) |v| if (annF32(v)) |f| {
+        sg.stroke_width = f;
+    };
+    if (annValue(annotation, "corner-radius")) |v| if (annF64(v)) |f| {
+        sg.corner_radius = f;
+    };
+    if (annValue(annotation, "title-color")) |v| if (annColor(v)) |c| {
+        sg.title_color = c;
+    };
+    if (annValue(annotation, "title-font-size")) |v| if (annF32(v)) |f| {
+        sg.title_font_size = f;
+    };
+    // Recalculate title position from the updated subgraph geometry.
+    sg.title_x = sg.x + sg.corner_radius + 6.0;
+    sg.title_y = sg.y + 16.0;
+}
+
+fn recalculateGraphBounds(graph: *StudioEditableGraph) void {
+    var max_x: f64 = 0;
+    var max_y: f64 = 0;
+    if (graph.nodes) |n| {
+        for (n[0..graph.node_count]) |node| {
+            const right = node.x + node.width / 2.0;
+            const bottom = node.y + node.height / 2.0;
+            if (right > max_x) max_x = right;
+            if (bottom > max_y) max_y = bottom;
+        }
+    }
+    if (graph.subgraphs) |s| {
+        for (s[0..graph.subgraph_count]) |sg| {
+            const right = sg.x + sg.width;
+            const bottom = sg.y + sg.height;
+            if (right > max_x) max_x = right;
+            if (bottom > max_y) max_y = bottom;
+        }
+    }
+    const padding = 40.0;
+    if (max_x + padding > graph.width) graph.width = max_x + padding;
+    if (max_y + padding > graph.height) graph.height = max_y + padding;
+}
+
+// --- Annotation key=value helpers ---
+
+fn annValue(annotation: []const u8, key: []const u8) ?[]const u8 {
+    var iter = std.mem.tokenizeAny(u8, annotation, " \t");
+    while (iter.next()) |token| {
+        if (token.len == 0 or token[0] != '@') continue;
+        const rest = token[1..];
+        if (!std.mem.startsWith(u8, rest, key)) continue;
+        if (rest.len == key.len) return ""; // boolean key (e.g. @edge)
+        if (rest[key.len] == '=') return rest[key.len + 1 ..];
+    }
+    return null;
+}
+
+fn annColor(value: []const u8) ?StudioColor {
+    if (value.len == 0 or value[0] != '#') return null;
+    const hex = value[1..];
+    if (hex.len == 6) {
+        return .{
+            .r = hexByte(hex[0..2]) orelse return null,
+            .g = hexByte(hex[2..4]) orelse return null,
+            .b = hexByte(hex[4..6]) orelse return null,
+            .a = 255,
+        };
+    } else if (hex.len == 8) {
+        return .{
+            .r = hexByte(hex[0..2]) orelse return null,
+            .g = hexByte(hex[2..4]) orelse return null,
+            .b = hexByte(hex[4..6]) orelse return null,
+            .a = hexByte(hex[6..8]) orelse return null,
+        };
+    }
+    return null;
+}
+
+fn hexByte(s: *const [2]u8) ?u8 {
+    return std.fmt.parseInt(u8, s, 16) catch null;
+}
+
+fn annF64(s: []const u8) ?f64 {
+    return std.fmt.parseFloat(f64, s) catch null;
+}
+
+fn annF32(s: []const u8) ?f32 {
+    return std.fmt.parseFloat(f32, s) catch null;
+}
+
+fn annU32(s: []const u8) ?u32 {
+    return std.fmt.parseInt(u32, s, 10) catch null;
+}
+
+fn annUsize(s: []const u8) ?usize {
+    return std.fmt.parseInt(usize, s, 10) catch null;
+}
+
+fn edgeSemanticDuplicateIndexForEditable(edges: []StudioEditableEdge, edge_idx: usize) usize {
+    if (edge_idx >= edges.len) return 0;
+
+    const edge = edges[edge_idx];
+    const source_id = std.mem.span(edge.source_id);
+    const target_id = std.mem.span(edge.target_id);
+    const label = if (edge.label) |ptr| std.mem.span(ptr) else "";
+
+    var duplicate_index: usize = 0;
+    for (edges[0..edge_idx]) |candidate| {
+        if (!std.mem.eql(u8, std.mem.span(candidate.source_id), source_id)) continue;
+        if (!std.mem.eql(u8, std.mem.span(candidate.target_id), target_id)) continue;
+        const candidate_label = if (candidate.label) |ptr| std.mem.span(ptr) else "";
+        if (!std.mem.eql(u8, candidate_label, label)) continue;
+        duplicate_index += 1;
+    }
+    return duplicate_index;
+}
+
+fn shapeTagFromName(name: []const u8) ?u32 {
+    const names = [_]struct { n: []const u8, t: u32 }{
+        .{ .n = "rect", .t = 0 },
+        .{ .n = "round", .t = 1 },
+        .{ .n = "diamond", .t = 2 },
+        .{ .n = "circle", .t = 3 },
+        .{ .n = "hexagon", .t = 4 },
+        .{ .n = "cylinder", .t = 5 },
+        .{ .n = "stadium", .t = 6 },
+        .{ .n = "trapezoid", .t = 7 },
+        .{ .n = "trap_alt", .t = 8 },
+        .{ .n = "parallelogram", .t = 9 },
+        .{ .n = "para_alt", .t = 10 },
+        .{ .n = "subroutine", .t = 11 },
+        .{ .n = "end_state", .t = 12 },
+        .{ .n = "note", .t = 13 },
+        .{ .n = "actor", .t = 14 },
+    };
+    for (names) |entry| {
+        if (std.mem.eql(u8, name, entry.n)) return entry.t;
+    }
+    return null;
+}
+
+fn lineStyleTagFromName(name: []const u8) ?u32 {
+    if (std.mem.eql(u8, name, "solid")) return 0;
+    if (std.mem.eql(u8, name, "dashed")) return 1;
+    if (std.mem.eql(u8, name, "dotted")) return 2;
+    if (std.mem.eql(u8, name, "thick")) return 3;
+    return null;
+}
+
+// --- Element-ID extractors ---
+
+fn extractNodeIdFromDecl(line: []const u8) ?[]const u8 {
+    const t = std.mem.trimLeft(u8, line, " \t");
+    if (t.len == 0) return null;
+    if (t[0] == '"') {
+        const end = std.mem.indexOfScalar(u8, t[1..], '"') orelse return null;
+        return t[1 .. 1 + end];
+    }
+    var end: usize = 0;
+    for (t) |c| {
+        switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_', '-' => end += 1,
+            else => break,
+        }
+    }
+    return if (end > 0) t[0..end] else null;
+}
+
+fn extractSubgraphIdFromDecl(line: []const u8) ?[]const u8 {
+    const t = std.mem.trimLeft(u8, line, " \t");
+    if (!std.mem.startsWith(u8, t, "subgraph")) return null;
+    const after = std.mem.trimLeft(u8, t["subgraph".len..], " \t");
+    if (after.len == 0) return null;
+    if (after[0] == '"') {
+        const end = std.mem.indexOfScalar(u8, after[1..], '"') orelse return null;
+        return after[1 .. 1 + end];
+    }
+    var end: usize = 0;
+    for (after) |c| {
+        switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_', '-' => end += 1,
+            else => break,
+        }
+    }
+    return if (end > 0) after[0..end] else null;
 }
 
 fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioEditableGraph {
@@ -2854,7 +3611,10 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
         errdefer buffers.deinit(c_allocator);
 
         try appendSequenceEditableGraph(temp_allocator, &diag, layout, &buffers);
-        return finalizeEditableGraph(c_allocator, .sequence, &buffers, layout.width, layout.height);
+        const result = try finalizeEditableGraph(c_allocator, .sequence, 0, &buffers, layout.width, layout.height);
+        applyAnnotationsToEditableGraph(source, result);
+        captureSourceRecords(source, result);
+        return result;
     }
 
     if (detectClassDiagram(source)) {
@@ -2865,7 +3625,10 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
         errdefer buffers.deinit(c_allocator);
 
         const layout = try appendClassEditableGraph(temp_allocator, &diagram, &buffers);
-        return finalizeEditableGraph(c_allocator, .class, &buffers, layout.width, layout.height);
+        const result = try finalizeEditableGraph(c_allocator, .class, directionFromText(diagram.direction), &buffers, layout.width, layout.height);
+        applyAnnotationsToEditableGraph(source, result);
+        captureSourceRecords(source, result);
+        return result;
     }
 
     if (detectErDiagram(source)) {
@@ -2876,7 +3639,16 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
         errdefer buffers.deinit(c_allocator);
 
         const layout = try appendErEditableGraph(temp_allocator, &diagram, &buffers);
-        return finalizeEditableGraph(c_allocator, .er, &buffers, layout.width, layout.height);
+        const er_dir: u32 = switch (diagram.direction) {
+            .LR => 1,
+            .BT => 2,
+            .RL => 3,
+            .TB => 0,
+        };
+        const er_result = try finalizeEditableGraph(c_allocator, .er, er_dir, &buffers, layout.width, layout.height);
+        applyAnnotationsToEditableGraph(source, er_result);
+        captureSourceRecords(source, er_result);
+        return er_result;
     }
 
     if (detectStateDiagram(source)) {
@@ -2887,7 +3659,16 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
         errdefer buffers.deinit(c_allocator);
 
         const layout = try appendStateEditableGraph(temp_allocator, &diagram, &buffers);
-        return finalizeEditableGraph(c_allocator, .state, &buffers, layout.width, layout.height);
+        const state_dir: u32 = switch (diagram.direction) {
+            .LR => 1,
+            .BT => 2,
+            .RL => 3,
+            .TB => 0,
+        };
+        const state_result = try finalizeEditableGraph(c_allocator, .state, state_dir, &buffers, layout.width, layout.height);
+        applyAnnotationsToEditableGraph(source, state_result);
+        captureSourceRecords(source, state_result);
+        return state_result;
     }
 
     var parser = try Parser.init(temp_allocator, source);
@@ -2937,7 +3718,18 @@ fn buildEditableGraphFromSource(temp_allocator: std.mem.Allocator, source: []con
     try appendEditableNodes(temp_allocator, c_allocator, &graph, &buffers, offset_x, offset_y, config);
     try appendEditableEdges(c_allocator, &graph, &buffers, config);
 
-    return finalizeEditableGraph(c_allocator, .flowchart, &buffers, bounds.width + config.padding * 2.0, bounds.height + config.padding * 2.0);
+    const flow_result = try finalizeEditableGraph(c_allocator, .flowchart, directionFromText(graph.getGraphLabel().rankdir), &buffers, bounds.width + config.padding * 2.0, bounds.height + config.padding * 2.0);
+    applyAnnotationsToEditableGraph(source, flow_result);
+    captureSourceRecords(source, flow_result);
+    return flow_result;
+}
+
+pub fn buildEditableGraphForZigCaller(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioEditableGraph {
+    return buildEditableGraphFromSource(temp_allocator, source);
+}
+
+pub fn freeEditableGraphForZigCaller(graph: ?*StudioEditableGraph) void {
+    merrow_studio_free_editable_graph(graph);
 }
 
 fn buildSceneFromSource(temp_allocator: std.mem.Allocator, source: []const u8) !*StudioScene {
@@ -3926,6 +4718,10 @@ pub export fn merrow_studio_free_scene(scene: ?*StudioScene) callconv(.c) void {
 pub export fn merrow_studio_free_editable_graph(graph: ?*StudioEditableGraph) callconv(.c) void {
     const g = graph orelse return;
 
+    if (g.source_records) |records| {
+        freeSourceRecords(c_allocator, records[0..g.source_record_count]);
+    }
+
     if (g.subgraphs) |subgraphs| {
         for (subgraphs[0..g.subgraph_count]) |item| {
             freeCString(c_allocator, item.id);
@@ -4184,6 +4980,99 @@ fn expectEditableGraphFixtureBuilds(relative_path: []const u8) !void {
     try std.testing.expect(graph.node_count > 0 or graph.subgraph_count > 0);
 }
 
+fn serializeEditableGraphForTest(graph: *const StudioEditableGraph) ![]u8 {
+    return mermaid_serializer.serializeGraph(std.testing.allocator, @ptrCast(graph));
+}
+
+fn stripAnnotationCommentsAndNormalizeForTest(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
+    var buffer = std.ArrayList(u8){};
+    errdefer buffer.deinit(allocator);
+
+    var line_iter = std.mem.splitScalar(u8, source, '\n');
+    var wrote_any = false;
+    while (line_iter.next()) |raw_line| {
+        const line_no_cr = std.mem.trimRight(u8, raw_line, "\r");
+        const trimmed = std.mem.trim(u8, line_no_cr, " \t");
+        if (std.mem.startsWith(u8, trimmed, "%% @")) continue;
+
+        const clean_line = std.mem.trimRight(u8, line_no_cr, " \t");
+        if (wrote_any) try buffer.append(allocator, '\n');
+        try buffer.appendSlice(allocator, clean_line);
+        wrote_any = true;
+    }
+
+    return buffer.toOwnedSlice(allocator);
+}
+
+fn expectEditableGraphFixtureRoundTrips(relative_path: []const u8) !void {
+    const source = try loadTestDiagramFixture(std.testing.allocator, relative_path);
+    defer std.testing.allocator.free(source);
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    const exported = try serializeEditableGraphForTest(graph);
+    defer std.testing.allocator.free(exported);
+
+    const rebuilt = try buildEditableGraphFromSource(std.testing.allocator, exported);
+    defer merrow_studio_free_editable_graph(rebuilt);
+
+    try std.testing.expectEqual(graph.graph_type, rebuilt.graph_type);
+    try std.testing.expectEqual(graph.direction, rebuilt.direction);
+    try std.testing.expect(rebuilt.width > 0);
+    try std.testing.expect(rebuilt.height > 0);
+    try std.testing.expect(rebuilt.node_count > 0 or rebuilt.subgraph_count > 0);
+    try std.testing.expect(exported.len > 0);
+}
+
+fn expectEditableGraphFixtureLosslessRoundTrips(relative_path: []const u8) !void {
+    const source = try loadTestDiagramFixture(std.testing.allocator, relative_path);
+    defer std.testing.allocator.free(source);
+
+    // Build the initial editable graph from source.
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    // Export from the object graph (canonical: captures all editable state including styling).
+    const exported = try serializeEditableGraphForTest(graph);
+    defer std.testing.allocator.free(exported);
+
+    // Rebuild from the export: object graph must survive the round-trip.
+    const rebuilt = try buildEditableGraphFromSource(std.testing.allocator, exported);
+    defer merrow_studio_free_editable_graph(rebuilt);
+
+    // Graph type and direction must be preserved.
+    try std.testing.expectEqual(graph.graph_type, rebuilt.graph_type);
+    try std.testing.expectEqual(graph.direction, rebuilt.direction);
+
+    // All nodes must survive: same count and same IDs.
+    try std.testing.expectEqual(graph.node_count, rebuilt.node_count);
+    if (graph.nodes) |orig_nodes| {
+        for (orig_nodes[0..graph.node_count]) |*orig_node| {
+            const orig_id = std.mem.span(orig_node.id);
+            var found = false;
+            if (rebuilt.nodes) |reb_nodes| {
+                for (reb_nodes[0..rebuilt.node_count]) |*reb_node| {
+                    if (std.mem.eql(u8, std.mem.span(reb_node.id), orig_id)) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                std.debug.print("lossless round-trip: node '{s}' lost after export/import\n", .{orig_id});
+                return error.TestExpectedEqual;
+            }
+        }
+    }
+
+    // All edges must survive: same count.
+    try std.testing.expectEqual(graph.edge_count, rebuilt.edge_count);
+
+    // All subgraphs must survive: same count and same IDs.
+    try std.testing.expectEqual(graph.subgraph_count, rebuilt.subgraph_count);
+}
+
 test "editable graph conversion preserves nested subgraphs and container edges" {
     const source =
         "flowchart LR\n" ++
@@ -4238,6 +5127,20 @@ test "editable graph conversion fixture flowchart nested" {
     try expectEditableGraphFixtureBuilds("test-diagrams/flowchart_nested.mmd");
 }
 
+test "editable graph conversion fixture flowchart nested has no synthetic greater-than node" {
+    const source = try loadTestDiagramFixture(std.testing.allocator, "test-diagrams/flowchart_nested.mmd");
+    defer std.testing.allocator.free(source);
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    try std.testing.expect(!editableGraphHasNode(graph, ">"));
+    try std.testing.expect(!editableGraphHasEdge(graph, "Auth", ">"));
+    try std.testing.expect(!editableGraphHasEdge(graph, "W1", ">"));
+    try std.testing.expect(editableGraphHasEdge(graph, "Auth", "W1"));
+    try std.testing.expect(editableGraphHasEdge(graph, "User", "WebApp"));
+}
+
 test "editable graph conversion fixture ai platform" {
     const source = try loadTestDiagramFixture(std.testing.allocator, "test-diagrams/ai_platform.mmd");
     defer std.testing.allocator.free(source);
@@ -4277,7 +5180,7 @@ test "editable graph conversion fixture sequence features" {
     try std.testing.expect(editableGraphHasNode(graph, "message-0-from"));
     try std.testing.expect(editableGraphHasNode(graph, "message-0-to"));
     try std.testing.expect(editableGraphHasNode(graph, "message-4-anchor"));
-    try std.testing.expect(editableGraphNodeHasShape(graph, "U", 3));
+    try std.testing.expect(editableGraphNodeHasShape(graph, "U", 14));
     try std.testing.expect(editableGraphHasSubgraph(graph, "fragment-0"));
     try std.testing.expect(editableGraphHasEdge(graph, "U", "U-footer"));
     try std.testing.expect(editableGraphHasEdge(graph, "API", "API-footer"));
@@ -4374,6 +5277,46 @@ test "editable graph conversion fixture saas architecture" {
     try expectEditableGraphFixtureBuilds("test-diagrams/saas_architecture.mmd");
 }
 
+test "editable graph roundtrip export fixture flowchart simple" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/flowchart_simple.mmd");
+}
+
+test "editable graph roundtrip export fixture flowchart subgraphs" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/flowchart_subgraphs.mmd");
+}
+
+test "editable graph roundtrip export fixture sequence features" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/sequence_features.mmd");
+}
+
+test "editable graph roundtrip export fixture class simple" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/class_simple.mmd");
+}
+
+test "editable graph roundtrip export fixture er simple" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/er_simple.mmd");
+}
+
+test "editable graph roundtrip export fixture state simple" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/state_simple.mmd");
+}
+
+test "editable graph roundtrip export fixture saas architecture" {
+    try expectEditableGraphFixtureRoundTrips("test-diagrams/saas_architecture.mmd");
+}
+
+test "editable graph lossless roundtrip flowchart simple" {
+    try expectEditableGraphFixtureLosslessRoundTrips("test-diagrams/flowchart_simple.mmd");
+}
+
+test "editable graph lossless roundtrip sequence simple" {
+    try expectEditableGraphFixtureLosslessRoundTrips("test-diagrams/sequence_simple.mmd");
+}
+
+test "editable graph lossless roundtrip class simple" {
+    try expectEditableGraphFixtureLosslessRoundTrips("test-diagrams/class_simple.mmd");
+}
+
 test "editable graph can render to png bytes" {
     const source =
         \\flowchart TB
@@ -4400,4 +5343,361 @@ test "editable graph can render to png bytes" {
     defer std.testing.allocator.free(png);
 
     try std.testing.expect(png.len > 0);
+}
+
+test "editable graph conversion annotation annValue extracts key values" {
+    const ann = "@shape=rect,10,20,30,40 @fill=#ff0000 @stroke=#00ff00 @stroke-width=2.0";
+    try std.testing.expectEqualStrings("rect,10,20,30,40", annValue(ann, "shape").?);
+    try std.testing.expectEqualStrings("#ff0000", annValue(ann, "fill").?);
+    try std.testing.expectEqualStrings("#00ff00", annValue(ann, "stroke").?);
+    try std.testing.expectEqualStrings("2.0", annValue(ann, "stroke-width").?);
+    try std.testing.expect(annValue(ann, "nonexistent") == null);
+}
+
+test "editable graph conversion annotation annColor parses hex colors" {
+    const c6 = annColor("#ff8040").?;
+    try std.testing.expectEqual(@as(u8, 0xff), c6.r);
+    try std.testing.expectEqual(@as(u8, 0x80), c6.g);
+    try std.testing.expectEqual(@as(u8, 0x40), c6.b);
+    try std.testing.expectEqual(@as(u8, 255), c6.a);
+
+    const c8 = annColor("#e6f0ffa0").?;
+    try std.testing.expectEqual(@as(u8, 0xe6), c8.r);
+    try std.testing.expectEqual(@as(u8, 0xf0), c8.g);
+    try std.testing.expectEqual(@as(u8, 0xff), c8.b);
+    try std.testing.expectEqual(@as(u8, 0xa0), c8.a);
+
+    try std.testing.expect(annColor("invalid") == null);
+    try std.testing.expect(annColor("#zz0000") == null);
+}
+
+test "editable graph conversion annotation extractNodeIdFromDecl" {
+    try std.testing.expectEqualStrings("Step", extractNodeIdFromDecl("Step[Windows Framework]").?);
+    try std.testing.expectEqualStrings("Start", extractNodeIdFromDecl("Start([Begin Again])").?);
+    try std.testing.expectEqualStrings("n5", extractNodeIdFromDecl("n5{Decision}").?);
+    try std.testing.expectEqualStrings("my id", extractNodeIdFromDecl("\"my id\"[Label]").?);
+    try std.testing.expect(extractNodeIdFromDecl("") == null);
+}
+
+test "editable graph conversion annotation extractSubgraphIdFromDecl" {
+    try std.testing.expectEqualStrings("sg6", extractSubgraphIdFromDecl("subgraph sg6 [Group]").?);
+    try std.testing.expectEqualStrings("my-sg", extractSubgraphIdFromDecl("    subgraph my-sg [Title]").?);
+    try std.testing.expect(extractSubgraphIdFromDecl("Step[Label]") == null);
+}
+
+test "editable graph conversion annotation shapeTagFromName and lineStyleTagFromName" {
+    try std.testing.expectEqual(@as(u32, 0), shapeTagFromName("rect").?);
+    try std.testing.expectEqual(@as(u32, 6), shapeTagFromName("stadium").?);
+    try std.testing.expectEqual(@as(u32, 2), shapeTagFromName("diamond").?);
+    try std.testing.expect(shapeTagFromName("unknown") == null);
+
+    try std.testing.expectEqual(@as(u32, 0), lineStyleTagFromName("solid").?);
+    try std.testing.expectEqual(@as(u32, 1), lineStyleTagFromName("dashed").?);
+    try std.testing.expect(lineStyleTagFromName("nope") == null);
+}
+
+test "editable graph conversion annotations are applied from mermaid source" {
+    const source =
+        \\graph TD
+        \\    %% @pos=0,8,548,127 @fill=#e6f0ffa0 @stroke=#5078c8 @stroke-width=1.5 @corner-radius=8 @title-color=#282828 @title-font-size=12.0
+        \\    subgraph sg6 [Group]
+        \\        %% @shape=rect,123,50,72,23 @fill=#f0f0fa @body-fill=#f0f0fa @stroke=#646496 @stroke-width=2.0 @ink=#282828 @font-size=14.0
+        \\        Step[Windows Framework]
+        \\        %% @shape=stadium,12,93,67,30 @fill=#aabbcc @body-fill=#ddeeff @stroke=#112233 @stroke-width=3.0 @ink=#445566 @font-size=16.0
+        \\        Start([Begin Again])
+        \\    end
+        \\    %% @edge @stroke=#505050 @thickness=2.0 @line-style=dashed @font-size=11.0 @end-style=0,4
+        \\    Start --> Step
+    ;
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    // Verify subgraph annotation was applied
+    try std.testing.expect(graph.subgraph_count >= 1);
+    const sg = graph.subgraphs[0];
+    try std.testing.expectApproxEqAbs(@as(f64, 0), sg.x, 1.0);
+    try std.testing.expectApproxEqAbs(@as(f64, 8), sg.y, 1.0);
+    try std.testing.expectApproxEqAbs(@as(f64, 548), sg.width, 1.0);
+    try std.testing.expectApproxEqAbs(@as(f64, 127), sg.height, 1.0);
+    try std.testing.expectEqual(@as(u8, 0x50), sg.stroke.r);
+    try std.testing.expectEqual(@as(u8, 0x78), sg.stroke.g);
+    try std.testing.expectEqual(@as(u8, 0xc8), sg.stroke.b);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), sg.stroke_width, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f64, 8.0), sg.corner_radius, 0.01);
+
+    // Verify node annotations were applied
+    const nodes = graph.nodes[0..graph.node_count];
+    var found_start = false;
+    for (nodes) |node| {
+        if (std.mem.eql(u8, std.mem.span(node.id), "Start")) {
+            found_start = true;
+            try std.testing.expectEqual(@as(u32, 6), node.shape); // stadium
+            try std.testing.expectApproxEqAbs(@as(f64, 12), node.x, 1.0);
+            try std.testing.expectApproxEqAbs(@as(f64, 93), node.y, 1.0);
+            try std.testing.expectApproxEqAbs(@as(f64, 67), node.width, 1.0);
+            try std.testing.expectApproxEqAbs(@as(f64, 30), node.height, 1.0);
+            try std.testing.expectEqual(@as(u8, 0xaa), node.fill.r);
+            try std.testing.expectEqual(@as(u8, 0xbb), node.fill.g);
+            try std.testing.expectEqual(@as(u8, 0xcc), node.fill.b);
+            try std.testing.expectApproxEqAbs(@as(f32, 3.0), node.stroke_width, 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 16.0), node.label_font_size, 0.01);
+        }
+    }
+    try std.testing.expect(found_start);
+
+    // Verify edge annotation was applied
+    try std.testing.expect(graph.edge_count >= 1);
+    const edge = graph.edges[0];
+    try std.testing.expectEqual(@as(u8, 0x50), edge.color.r);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), edge.thickness, 0.01);
+    try std.testing.expectEqual(@as(u32, 1), edge.line_style); // dashed
+    try std.testing.expectApproxEqAbs(@as(f32, 11.0), edge.label_font_size, 0.01);
+    try std.testing.expectEqual(@as(u32, 0), edge.source_end_style);
+    try std.testing.expectEqual(@as(u32, 4), edge.target_end_style);
+}
+
+test "editable graph conversion edge annotations match by endpoints instead of order" {
+    var edges = [_]StudioEditableEdge{
+        .{
+            .source_id = "B",
+            .target_id = "C",
+            .label = "second",
+            .label_font_size = 10.0,
+            .color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .thickness = 1.0,
+            .line_style = 0,
+            .has_arrow = 1,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        },
+        .{
+            .source_id = "A",
+            .target_id = "B",
+            .label = "first",
+            .label_font_size = 10.0,
+            .color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .thickness = 1.0,
+            .line_style = 0,
+            .has_arrow = 1,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        },
+    };
+    var graph = StudioEditableGraph{
+        .width = 100,
+        .height = 100,
+        .graph_type = @intFromEnum(StudioGraphType.flowchart),
+        .direction = 0,
+        .background = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+        .subgraphs = null,
+        .subgraph_count = 0,
+        .nodes = null,
+        .node_count = 0,
+        .edges = &edges,
+        .edge_count = edges.len,
+        .source_records = null,
+        .source_record_count = 0,
+    };
+
+    const source =
+        \\graph TD
+        \\    %% @edge @stroke=#101112 @thickness=2.5 @line-style=dashed @font-size=13.0
+        \\    A ---|first|> B
+        \\    %% @edge @stroke=#202122 @thickness=3.5 @line-style=solid @font-size=15.0
+        \\    B ---|second|> C
+    ;
+
+    applyAnnotationsToEditableGraph(source, &graph);
+
+    try std.testing.expectEqual(@as(u8, 0x20), graph.edges[0].color.r);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.5), graph.edges[0].thickness, 0.01);
+    try std.testing.expectEqual(@as(u32, 0), graph.edges[0].line_style);
+    try std.testing.expectApproxEqAbs(@as(f32, 15.0), graph.edges[0].label_font_size, 0.01);
+
+    try std.testing.expectEqual(@as(u8, 0x10), graph.edges[1].color.r);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), graph.edges[1].thickness, 0.01);
+    try std.testing.expectEqual(@as(u32, 1), graph.edges[1].line_style);
+    try std.testing.expectApproxEqAbs(@as(f32, 13.0), graph.edges[1].label_font_size, 0.01);
+}
+
+test "editable graph conversion duplicate edge annotations use match index" {
+    var edges = [_]StudioEditableEdge{
+        .{
+            .source_id = "A",
+            .target_id = "B",
+            .label = "same",
+            .label_font_size = 10.0,
+            .color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .thickness = 1.0,
+            .line_style = 0,
+            .has_arrow = 1,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        },
+        .{
+            .source_id = "A",
+            .target_id = "B",
+            .label = "same",
+            .label_font_size = 10.0,
+            .color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .thickness = 1.0,
+            .line_style = 0,
+            .has_arrow = 1,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        },
+    };
+    var graph = StudioEditableGraph{
+        .width = 100,
+        .height = 100,
+        .graph_type = @intFromEnum(StudioGraphType.flowchart),
+        .direction = 0,
+        .background = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+        .subgraphs = null,
+        .subgraph_count = 0,
+        .nodes = null,
+        .node_count = 0,
+        .edges = &edges,
+        .edge_count = edges.len,
+        .source_records = null,
+        .source_record_count = 0,
+    };
+
+    const source =
+        \\graph TD
+        \\    %% @edge @match-index=1 @stroke=#111213 @thickness=4.0 @line-style=dashed
+        \\    A ---|same|> B
+        \\    %% @edge @match-index=0 @stroke=#212223 @thickness=2.0 @line-style=solid
+        \\    A ---|same|> B
+    ;
+
+    applyAnnotationsToEditableGraph(source, &graph);
+
+    try std.testing.expectEqual(@as(u8, 0x21), graph.edges[0].color.r);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), graph.edges[0].thickness, 0.01);
+    try std.testing.expectEqual(@as(u32, 0), graph.edges[0].line_style);
+
+    try std.testing.expectEqual(@as(u8, 0x11), graph.edges[1].color.r);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), graph.edges[1].thickness, 0.01);
+    try std.testing.expectEqual(@as(u32, 1), graph.edges[1].line_style);
+}
+
+test "editable graph conversion can reimport exported flowchart with quoted ids" {
+    var nodes = [_]mermaid_serializer.StudioEditableNode{
+        .{
+            .id = ">",
+            .label = ">",
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
+            .parent_subgraph_id = null,
+            .shape = 0,
+            .x = 50,
+            .y = 50,
+            .width = 84,
+            .height = 44,
+            .fill = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+            .body_fill = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+            .stroke = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .stroke_width = 1.0,
+            .label_color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .label_font_size = 14.0,
+        },
+        .{
+            .id = "Auth",
+            .label = "Auth Service",
+            .subtitle = null,
+            .attributes_text = null,
+            .methods_text = null,
+            .parent_subgraph_id = null,
+            .shape = 0,
+            .x = 150,
+            .y = 50,
+            .width = 115,
+            .height = 44,
+            .fill = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+            .body_fill = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+            .stroke = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .stroke_width = 1.0,
+            .label_color = .{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            .label_font_size = 14.0,
+        },
+    };
+    var edges = [_]mermaid_serializer.StudioEditableEdge{
+        .{
+            .source_id = "Auth",
+            .target_id = ">",
+            .label = null,
+            .label_font_size = 11.0,
+            .color = .{ .r = 0x50, .g = 0x50, .b = 0x50, .a = 255 },
+            .thickness = 2.0,
+            .line_style = 0,
+            .has_arrow = 0,
+            .has_source_arrow = 0,
+            .source_end_style = 0,
+            .target_end_style = 0,
+        },
+    };
+    var graph = mermaid_serializer.StudioEditableGraph{
+        .width = 300,
+        .height = 150,
+        .graph_type = @intFromEnum(StudioGraphType.flowchart),
+        .direction = 0,
+        .background = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
+        .subgraphs = null,
+        .subgraph_count = 0,
+        .nodes = &nodes,
+        .node_count = nodes.len,
+        .edges = &edges,
+        .edge_count = edges.len,
+        .source_records = null,
+        .source_record_count = 0,
+    };
+
+    const exported = try mermaid_serializer.serializeGraph(std.testing.allocator, &graph);
+    defer std.testing.allocator.free(exported);
+
+    const rebuilt = try buildEditableGraphFromSource(std.testing.allocator, exported);
+    defer merrow_studio_free_editable_graph(rebuilt);
+
+    try std.testing.expect(editableGraphHasNode(rebuilt, ">"));
+    try std.testing.expect(editableGraphHasNode(rebuilt, "Auth"));
+    try std.testing.expect(editableGraphHasEdge(rebuilt, "Auth", ">"));
+}
+
+test "editable graph conversion annotation parses edge declarations" {
+    const flow = parseAnnotatedEdgeDecl(@intFromEnum(StudioGraphType.flowchart), "A ---|hello|> B").?;
+    try std.testing.expectEqualStrings("A", flow.source_id);
+    try std.testing.expectEqualStrings("B", flow.target_id);
+    try std.testing.expectEqualStrings("hello", flow.label.?);
+
+    const seq = parseAnnotatedEdgeDecl(@intFromEnum(StudioGraphType.sequence), "Alice->>Bob: ping").?;
+    try std.testing.expectEqualStrings("Alice", seq.source_id);
+    try std.testing.expectEqualStrings("Bob", seq.target_id);
+    try std.testing.expectEqualStrings("ping", seq.label.?);
+
+    const class_rel = parseAnnotatedEdgeDecl(@intFromEnum(StudioGraphType.class), "Order <|-- LineItem : owns").?;
+    try std.testing.expectEqualStrings("Order", class_rel.source_id);
+    try std.testing.expectEqualStrings("LineItem", class_rel.target_id);
+    try std.testing.expectEqualStrings("owns", class_rel.label.?);
+}
+
+test "editable graph conversion without annotations keeps dagre layout" {
+    const source =
+        \\graph TD
+        \\    A[Start] --> B[End]
+    ;
+
+    const graph = try buildEditableGraphFromSource(std.testing.allocator, source);
+    defer merrow_studio_free_editable_graph(graph);
+
+    try std.testing.expect(graph.node_count >= 2);
+    try std.testing.expect(graph.edge_count >= 1);
+    try std.testing.expect(graph.width > 0);
+    try std.testing.expect(graph.height > 0);
 }

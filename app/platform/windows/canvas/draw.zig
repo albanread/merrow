@@ -123,8 +123,8 @@ const Shape = enum(u32) {
     parallelogram_alt = 10,
     subroutine = 11,
     end_state = 12, // circle within a circle (mermaid state diagram end node)
-    note = 13,      // rectangle with folded top-right corner
-    actor = 14,     // stick figure (sequence diagram participant)
+    note = 13, // rectangle with folded top-right corner
+    actor = 14, // stick figure (sequence diagram participant)
     other = 0xffff_ffff,
     _,
 };

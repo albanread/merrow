@@ -6,9 +6,10 @@ pub const StudioEditableGraph = windows_canvas.StudioEditableGraph;
 pub const StudioEditableNode = windows_canvas.StudioEditableNode;
 pub const StudioEditableSubgraph = windows_canvas.StudioEditableSubgraph;
 pub const StudioEditableEdge = windows_canvas.StudioEditableEdge;
+pub const StudioMermaidSourceRecord = windows_canvas.state.StudioMermaidSourceRecord;
 
 pub const magic = "MROW-FFM";
-pub const version: u16 = 3;
+pub const version: u16 = 5;
 const null_string_len = std.math.maxInt(u32);
 
 pub const DeserializeError = error{
@@ -25,6 +26,7 @@ pub fn serializeGraph(allocator: std.mem.Allocator, graph: *const StudioEditable
     try buffer.appendSlice(allocator, magic);
     try appendU16(&buffer, allocator, version);
     try appendU32(&buffer, allocator, graph.graph_type);
+    try appendU32(&buffer, allocator, graph.direction);
     try appendF64(&buffer, allocator, graph.width);
     try appendF64(&buffer, allocator, graph.height);
     try appendColor(&buffer, allocator, graph.background);
@@ -91,6 +93,18 @@ pub fn serializeGraph(allocator: std.mem.Allocator, graph: *const StudioEditable
         }
     }
 
+    try appendU32(&buffer, allocator, try castCount(graph.source_record_count));
+    if (graph.source_records) |records| {
+        for (records[0..graph.source_record_count]) |item| {
+            try appendU32(&buffer, allocator, item.kind);
+            try appendOptionalCString(&buffer, allocator, item.object_id);
+            try appendOptionalCString(&buffer, allocator, item.secondary_id);
+            try appendOptionalCString(&buffer, allocator, item.aux_text);
+            try appendU32(&buffer, allocator, item.match_index);
+            try appendOptionalCString(&buffer, allocator, item.text);
+        }
+    }
+
     return buffer.toOwnedSlice(allocator);
 }
 
@@ -108,6 +122,7 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
 
     graph.* = .{
         .graph_type = try reader.readU32(),
+        .direction = if (file_version >= 4) try reader.readU32() else 0,
         .width = try reader.readF64(),
         .height = try reader.readF64(),
         .background = try reader.readColor(),
@@ -117,6 +132,8 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
         .node_count = 0,
         .edges = null,
         .edge_count = 0,
+        .source_records = null,
+        .source_record_count = 0,
     };
     errdefer freeGraph(graph);
 
@@ -244,6 +261,32 @@ pub fn deserializeGraph(blob: []const u8) !*StudioEditableGraph {
         }
     }
 
+    if (file_version >= 5) {
+        graph.source_record_count = try reader.readCount();
+        if (graph.source_record_count > 0) {
+            const records = try std.heap.c_allocator.alloc(StudioMermaidSourceRecord, graph.source_record_count);
+            graph.source_records = records.ptr;
+            for (records, 0..) |*item, index| {
+                item.* = .{
+                    .kind = 0,
+                    .object_id = null,
+                    .secondary_id = null,
+                    .aux_text = null,
+                    .match_index = 0,
+                    .text = null,
+                };
+                errdefer freeSourceRecords(records[0 .. index + 1]);
+
+                item.kind = try reader.readU32();
+                item.object_id = try reader.readOptionalCString();
+                item.secondary_id = try reader.readOptionalCString();
+                item.aux_text = try reader.readOptionalCString();
+                item.match_index = try reader.readU32();
+                item.text = try reader.readOptionalCString();
+            }
+        }
+    }
+
     return graph;
 }
 
@@ -252,6 +295,7 @@ pub fn freeGraph(graph: ?*StudioEditableGraph) void {
     if (g.subgraphs) |subgraphs| freeSubgraphs(subgraphs[0..g.subgraph_count]);
     if (g.nodes) |nodes| freeNodes(nodes[0..g.node_count]);
     if (g.edges) |edges| freeEdges(edges[0..g.edge_count]);
+    if (g.source_records) |records| freeSourceRecords(records[0..g.source_record_count]);
     std.heap.c_allocator.destroy(g);
 }
 
@@ -283,6 +327,16 @@ fn freeEdges(edges: []StudioEditableEdge) void {
         freeCString(item.label);
     }
     std.heap.c_allocator.free(edges);
+}
+
+fn freeSourceRecords(records: []StudioMermaidSourceRecord) void {
+    for (records) |item| {
+        freeCString(item.object_id);
+        freeCString(item.secondary_id);
+        freeCString(item.aux_text);
+        freeCString(item.text);
+    }
+    std.heap.c_allocator.free(records);
 }
 
 fn freeCString(text: [*c]const u8) void {
@@ -507,6 +561,7 @@ fn makeTestGraph() !*StudioEditableGraph {
         .width = 320,
         .height = 180,
         .graph_type = 2,
+        .direction = 0,
         .background = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
         .subgraphs = subgraphs.ptr,
         .subgraph_count = subgraphs.len,
@@ -514,6 +569,8 @@ fn makeTestGraph() !*StudioEditableGraph {
         .node_count = nodes.len,
         .edges = edges.ptr,
         .edge_count = edges.len,
+        .source_records = null,
+        .source_record_count = 0,
     };
     return graph;
 }

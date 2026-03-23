@@ -135,6 +135,9 @@ pub fn build(b: *std.Build) void {
         }
         macos_app_step.dependOn(&macos_app_cmd.step);
     } else if (target_query.os.tag == .windows) {
+        const windows_build_options = b.addOptions();
+        windows_build_options.addOption([]const u8, "app_version", "0.0.0");
+
         const windows_app_exe = b.addExecutable(.{
             .name = "merrow-studio",
             .win32_manifest = b.path("app/platform/windows_app.manifest"),
@@ -144,6 +147,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "merrow", .module = mod },
+                    .{ .name = "build_options", .module = windows_build_options.createModule() },
                     .{ .name = "win32", .module = win32_dep.?.module("win32") },
                 },
             }),
@@ -325,6 +329,38 @@ pub fn build(b: *std.Build) void {
     const preview_test_step = b.step("preview-test", "Run filtered preview freeform conversion tests");
     preview_test_step.dependOn(&run_preview_tests.step);
 
+    const preview_roundtrip_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("app/preview.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "merrow", .module = mod },
+            },
+        }),
+        .filters = &.{"editable graph roundtrip export"},
+    });
+
+    const run_preview_roundtrip_tests = b.addRunArtifact(preview_roundtrip_tests);
+    const preview_roundtrip_test_step = b.step("preview-roundtrip-test", "Run Mermaid export/import round-trip tests");
+    preview_roundtrip_test_step.dependOn(&run_preview_roundtrip_tests.step);
+
+    const preview_lossless_roundtrip_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("app/preview.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "merrow", .module = mod },
+            },
+        }),
+        .filters = &.{"editable graph lossless roundtrip"},
+    });
+
+    const run_preview_lossless_roundtrip_tests = b.addRunArtifact(preview_lossless_roundtrip_tests);
+    const preview_lossless_roundtrip_test_step = b.step("preview-lossless-roundtrip-test", "Run lossless Mermaid round-trip tests");
+    preview_lossless_roundtrip_test_step.dependOn(&run_preview_lossless_roundtrip_tests.step);
+
     const markdown_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("app/markdown_parser.zig"),
@@ -344,6 +380,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_preview_tests.step);
+    test_step.dependOn(&run_preview_roundtrip_tests.step);
+    test_step.dependOn(&run_preview_lossless_roundtrip_tests.step);
     test_step.dependOn(&run_markdown_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.

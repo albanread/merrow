@@ -514,13 +514,40 @@ pub const Parser = struct {
                 }
             },
             .string_literal => {
-                // Mermaid accepts title-only subgraph declarations like:
-                //   subgraph "LexisCreate+ US Services"
-                // In that form, use the quoted title as both the display title
-                // and the internal subgraph id.
-                subgraph_id = self.curr.text;
-                title = self.curr.text;
+                const quoted_text = self.curr.text;
+                subgraph_id = quoted_text;
                 self.advance();
+
+                if (self.curr.type == .whitespace) self.advance();
+
+                // Also support quoted IDs followed by an explicit [Title], as
+                // emitted by our serializer when a subgraph id needs quoting.
+                if (self.curr.type == .l_bracket) {
+                    self.advance(); // consume '['
+
+                    var title_buf = std.ArrayListUnmanaged(u8){};
+                    defer title_buf.deinit(self.allocator);
+
+                    while (self.curr.type != .r_bracket and self.curr.type != .eof and self.curr.type != .newline) {
+                        try title_buf.appendSlice(self.allocator, self.curr.text);
+                        self.advance();
+                    }
+
+                    if (self.curr.type == .r_bracket) {
+                        self.advance(); // consume ']'
+                    }
+
+                    if (title_buf.items.len > 0) {
+                        title = try self.allocator.dupe(u8, title_buf.items);
+                        title_owned = true;
+                    }
+                } else {
+                    // Mermaid accepts title-only subgraph declarations like:
+                    //   subgraph "LexisCreate+ US Services"
+                    // In that form, use the quoted title as both the display
+                    // title and the internal subgraph id.
+                    title = quoted_text;
+                }
             },
             else => return ParserError.UnexpectedToken,
         }
@@ -1113,8 +1140,14 @@ pub const Parser = struct {
     /// Adds node to graph if not exists.
     /// Returns the Node ID.
     fn parseNode(self: *Parser) ![]const u8 {
-        const id_token = try self.expect(.identifier);
-        const id = id_token.text;
+        const id = switch (self.curr.type) {
+            .identifier, .string_literal => blk: {
+                const text = self.curr.text;
+                self.advance();
+                break :blk text;
+            },
+            else => return ParserError.UnexpectedToken,
+        };
 
         var label = id;
         var shape = NodeShape.box;

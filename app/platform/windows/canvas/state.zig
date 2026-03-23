@@ -77,10 +77,20 @@ pub const StudioEditableSubgraph = extern struct {
     title_position: u32,
 };
 
+pub const StudioMermaidSourceRecord = extern struct {
+    kind: u32,
+    object_id: [*c]const u8,
+    secondary_id: [*c]const u8,
+    aux_text: [*c]const u8,
+    match_index: u32,
+    text: [*c]const u8,
+};
+
 pub const StudioEditableGraph = extern struct {
     width: f64,
     height: f64,
     graph_type: u32,
+    direction: u32,
     background: StudioColor,
     subgraphs: [*c]StudioEditableSubgraph,
     subgraph_count: usize,
@@ -88,6 +98,8 @@ pub const StudioEditableGraph = extern struct {
     node_count: usize,
     edges: [*c]StudioEditableEdge,
     edge_count: usize,
+    source_records: [*c]StudioMermaidSourceRecord,
+    source_record_count: usize,
 };
 
 // ---------------------------------------------------------------------------

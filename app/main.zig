@@ -4,6 +4,8 @@ const preview = @import("preview.zig");
 
 comptime {
     _ = preview;
+    _ = @import("mermaid_export.zig");
+    _ = @import("mermaid_serializer.zig");
     if (builtin.os.tag == .windows) {
         _ = @import("platform/windows_main.zig");
     }

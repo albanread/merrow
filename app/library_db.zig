@@ -70,6 +70,16 @@ pub const FfmRecord = struct {
     }
 };
 
+pub const RecentFileRecord = struct {
+    path: []u8,
+    diagram_index: usize,
+
+    pub fn deinit(self: *RecentFileRecord, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        self.* = undefined;
+    }
+};
+
 pub const LibraryDb = struct {
     handle: *sqlite.sqlite3,
 
@@ -170,6 +180,33 @@ pub const LibraryDb = struct {
         try bindText(statement, 1, path);
         try bindInt(statement, 2, diagram_index);
         try stepDone(statement);
+    }
+
+    pub fn loadRecentFiles(self: *LibraryDb, allocator: std.mem.Allocator, limit: usize) ![]RecentFileRecord {
+        const sql =
+            "SELECT path, diagram_index " ++
+            "FROM recent_files ORDER BY last_opened DESC LIMIT ?1;";
+
+        const statement = try prepare(self.handle, sql);
+        defer _ = sqlite.sqlite3_finalize(statement);
+
+        try bindInt(statement, 1, limit);
+
+        var records = std.ArrayList(RecentFileRecord){};
+        defer records.deinit(allocator);
+
+        while (true) {
+            const rc = sqlite.sqlite3_step(statement);
+            if (rc == sqlite.SQLITE_DONE) break;
+            if (rc != sqlite.SQLITE_ROW) return DbError.StepFailed;
+
+            try records.append(allocator, .{
+                .path = try dupeColumnText(allocator, statement, 0),
+                .diagram_index = @intCast(sqlite.sqlite3_column_int64(statement, 1)),
+            });
+        }
+
+        return records.toOwnedSlice(allocator);
     }
 };
 
