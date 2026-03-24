@@ -62,6 +62,7 @@ const SpanKind = enum {
     keyword,
     direction,
     comment,
+    annotation,
     string_literal,
     symbol,
     identifier,
@@ -110,11 +111,17 @@ const MermaidScanner = struct {
                 '%' => {
                     if (self.at_line_start and self.peek(1) == '%') {
                         self.index += 2;
+                        // Skip whitespace after %%
+                        while (self.index < self.source.len and (self.source[self.index] == ' ' or self.source[self.index] == '\t')) {
+                            self.index += 1;
+                        }
+                        // Check for Merrow annotation: %% @keyword=...
+                        const is_annotation = self.index < self.source.len and self.source[self.index] == '@';
                         while (self.index < self.source.len and self.source[self.index] != '\n') {
                             self.index += 1;
                         }
                         self.at_line_start = false;
-                        return .{ .start = start, .end = self.index, .kind = .comment };
+                        return .{ .start = start, .end = self.index, .kind = if (is_annotation) .annotation else .comment };
                     }
                 },
                 '"' => {
@@ -320,6 +327,7 @@ fn styleForSpan(span: Span) EditorTokenStyle {
         .keyword => .{ .color = editor_theme.keyword_text, .bold = true },
         .direction => .{ .color = editor_theme.direction_text, .bold = true },
         .comment => .{ .color = editor_theme.comment_text, .bold = false },
+        .annotation => .{ .color = editor_theme.comment_text, .bold = false, .font_height = 160 }, // 8pt (160 twips)
         .string_literal => .{ .color = editor_theme.string_text, .bold = false },
         .symbol => .{ .color = editor_theme.symbol_text, .bold = false },
         .identifier => .{ .color = editor_theme.default_text, .bold = false },
@@ -383,6 +391,10 @@ pub fn setEditorText(allocator: std.mem.Allocator, editor_hwnd: ?foundation.HWND
     defer allocator.free(z_text);
     @memcpy(z_text[0..text.len], text);
     _ = ui.SetWindowTextA(editor_hwnd, z_text.ptr);
+}
+
+pub fn setEditorReadOnly(editor_hwnd: ?foundation.HWND, read_only: bool) void {
+    _ = sendEditorMessage(editor_hwnd, 0x00CF, @intFromBool(read_only), 0);
 }
 
 pub fn getWindowText(allocator: std.mem.Allocator, hwnd: ?foundation.HWND) ![:0]u8 {

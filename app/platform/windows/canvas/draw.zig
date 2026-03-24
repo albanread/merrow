@@ -354,6 +354,7 @@ fn drawLabel(
     text_brush: *d2d.ID2D1SolidColorBrush,
     text: [*c]const u8,
     font_size_pt: f32,
+    zoom: f64,
     center_x: f32,
     center_y: f32,
     max_w: f32,
@@ -369,6 +370,11 @@ fn drawLabel(
     const wide = std.unicode.utf8ToUtf16LeAllocZ(alloc, text_slice) catch return;
     defer alloc.free(wide);
 
+    // DirectWrite CreateTextFormat expects size in DIPs (1 DIP = 1/96 in),
+    // but font_size_pt is in typographic points (1 pt = 1/72 in).
+    // Multiply by zoom so text scales with the canvas viewport.
+    const font_size_dip: f32 = font_size_pt * (96.0 / 72.0) * @as(f32, @floatCast(zoom));
+
     var format: ?*dwrite.IDWriteTextFormat = null;
     const hr = dwrite_factory.CreateTextFormat(
         fontFamilyNameW(font_family),
@@ -376,7 +382,7 @@ fn drawLabel(
         dwrite.DWRITE_FONT_WEIGHT_NORMAL,
         dwrite.DWRITE_FONT_STYLE_NORMAL,
         dwrite.DWRITE_FONT_STRETCH_NORMAL,
-        font_size_pt,
+        font_size_dip,
         &locale_name_w,
         @ptrCast(&format),
     );
@@ -387,7 +393,7 @@ fn drawLabel(
     _ = format.?.SetParagraphAlignment(dwrite.DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
     const half_w = max_w / 2.0;
-    const half_h: f32 = font_size_pt * 1.4;
+    const half_h: f32 = font_size_dip * 1.4;
     const text_rect = rectF(center_x - half_w, center_y - half_h, center_x + half_w, center_y + half_h);
 
     rt.DrawText(
@@ -408,6 +414,7 @@ fn drawLabelAligned(
     text_brush: *d2d.ID2D1SolidColorBrush,
     text: [*c]const u8,
     font_size_pt: f32,
+    zoom: f64,
     center_x: f32,
     center_y: f32,
     max_w: f32,
@@ -423,6 +430,8 @@ fn drawLabelAligned(
     const wide = std.unicode.utf8ToUtf16LeAllocZ(alloc, text_slice) catch return;
     defer alloc.free(wide);
 
+    const font_size_dip: f32 = font_size_pt * (96.0 / 72.0) * @as(f32, @floatCast(zoom));
+
     var format: ?*dwrite.IDWriteTextFormat = null;
     const hr = dwrite_factory.CreateTextFormat(
         fontFamilyNameW(font_family),
@@ -430,7 +439,7 @@ fn drawLabelAligned(
         dwrite.DWRITE_FONT_WEIGHT_NORMAL,
         dwrite.DWRITE_FONT_STYLE_NORMAL,
         dwrite.DWRITE_FONT_STRETCH_NORMAL,
-        font_size_pt,
+        font_size_dip,
         &locale_name_w,
         @ptrCast(&format),
     );
@@ -441,7 +450,7 @@ fn drawLabelAligned(
     _ = format.?.SetParagraphAlignment(dwrite.DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
     const half_w = max_w / 2.0;
-    const half_h: f32 = font_size_pt * 1.4;
+    const half_h: f32 = font_size_dip * 1.4;
     const text_rect = rectF(center_x - half_w, center_y - half_h, center_x + half_w, center_y + half_h);
 
     rt.DrawText(
@@ -597,13 +606,13 @@ fn drawEdge(
         }
 
         const label_pts = EdgeScreenEndpoints{ .src_x = cx, .src_y = cy, .dst_x = cx + hook_w, .dst_y = cy + hook_h };
-        drawEdgeLabel(rt, dwrite_factory, font_family, edge, label_pts, label_fill_brush, text_brush);
+        drawEdgeLabel(rt, dwrite_factory, font_family, edge, label_pts, label_fill_brush, text_brush, vp.zoom);
         return;
     }
 
     const points = edgeScreenEndpoints(graph, edge, vp) orelse return;
     drawEdgeSegment(factory, rt, points.src_x, points.src_y, points.dst_x, points.dst_y, edge, stroke_brush, 1.0, vp.zoom);
-    drawEdgeLabel(rt, dwrite_factory, font_family, edge, points, label_fill_brush, text_brush);
+    drawEdgeLabel(rt, dwrite_factory, font_family, edge, points, label_fill_brush, text_brush, vp.zoom);
 }
 
 const EdgeScreenEndpoints = struct {
@@ -730,6 +739,7 @@ fn drawEdgeLabel(
     points: EdgeScreenEndpoints,
     label_fill_brush: *d2d.ID2D1SolidColorBrush,
     text_brush: *d2d.ID2D1SolidColorBrush,
+    zoom: f64,
 ) void {
     if (edge.label == null) return;
 
@@ -747,8 +757,9 @@ fn drawEdgeLabel(
     const center_y = (points.src_y + points.dst_y) / 2.0 + ny * 12.0;
 
     const font_size: f32 = std.math.clamp(edge.label_font_size, 6.0, 48.0);
-    const text_w = @max(26.0, @as(f32, @floatFromInt(text.len)) * font_size * 0.56);
-    const text_h: f32 = font_size * 1.55;
+    const zoom_f: f32 = @floatCast(zoom);
+    const text_w = @max(26.0 * zoom_f, @as(f32, @floatFromInt(text.len)) * font_size * zoom_f * 0.56);
+    const text_h: f32 = font_size * zoom_f * 1.55;
     const pad_x: f32 = 7.0;
     const pad_y: f32 = 3.0;
     const bg = rectF(
@@ -762,7 +773,7 @@ fn drawEdgeLabel(
     rt.FillRectangle(&bg, @ptrCast(label_fill_brush));
     text_brush.SetColor(&d2dColorRgb(32, 32, 32));
 
-    drawLabel(rt, dwrite_factory, font_family, text_brush, edge.label, font_size, center_x, center_y, text_w);
+    drawLabel(rt, dwrite_factory, font_family, text_brush, edge.label, font_size, zoom, center_x, center_y, text_w);
 }
 
 fn drawSelectionPass(
@@ -1005,6 +1016,7 @@ pub fn drawCanvas(
     insertion: state.InsertionState,
     link_mouse_x: f32,
     link_mouse_y: f32,
+    show_nudge_grid: bool,
 ) void {
     const rt = ctx.render_target;
 
@@ -1045,6 +1057,10 @@ pub fn drawCanvas(
     const hfb = handle_fill_brush orelse return;
     const hovb = hover_brush orelse return;
 
+    if (show_nudge_grid) {
+        drawNudgeGrid(rt, sb, graph, vp, ctx.viewport_width, ctx.viewport_height);
+    }
+
     // Visible page boundary for the configured working canvas.
     if (graph.width > 0 and graph.height > 0) {
         sb.SetColor(&d2dColorRgb(206, 206, 206));
@@ -1070,7 +1086,7 @@ pub fn drawCanvas(
             if (sg.title != null) {
                 tb.SetColor(&d2dColor(sg.title_color));
                 const font_size = std.math.clamp(sg.title_font_size, 6.0, 48.0);
-                const v_pad: f32 = font_size * 0.85;
+                const v_pad: f32 = font_size * 0.85 * @as(f32, @floatCast(vp.zoom));
                 const h_inset: f32 = 8.0;
                 const sg_center_x = (sr.l + sr.r) / 2.0;
                 const sg_w = (sr.r - sr.l) - h_inset * 2.0;
@@ -1084,7 +1100,7 @@ pub fn drawCanvas(
                     .top_right, .bottom_right => dwrite.DWRITE_TEXT_ALIGNMENT_TRAILING,
                     else => dwrite.DWRITE_TEXT_ALIGNMENT_CENTER,
                 };
-                drawLabelAligned(rt, ctx.dwrite_factory, ctx.font_family, tb, sg.title, font_size, sg_center_x, title_cy, sg_w, h_align);
+                drawLabelAligned(rt, ctx.dwrite_factory, ctx.font_family, tb, sg.title, font_size, vp.zoom, sg_center_x, title_cy, sg_w, h_align);
             }
         }
     }
@@ -1121,7 +1137,7 @@ pub fn drawCanvas(
 
             if (has_body) {
                 // Estimate header height in screen space from font size.
-                const hdr_h_screen: f32 = font_size_n * 3.2;
+                const hdr_h_screen: f32 = font_size_n * 3.2 * @as(f32, @floatCast(vp.zoom));
                 const divider_y = sr_n.t + hdr_h_screen;
 
                 // Always paint body_fill over the lower panel so the background is correct.
@@ -1142,26 +1158,26 @@ pub fn drawCanvas(
                 if (node.label != null) {
                     tb.SetColor(&d2dColor(node.label_color));
                     const hdr_cy = (sr_n.t + @min(divider_y, sr_n.b)) / 2.0;
-                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, hdr_cy, max_w_n);
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, vp.zoom, cx_n, hdr_cy, max_w_n);
                 }
 
                 // Subtitle in body region.
                 if (has_subtitle and divider_y < sr_n.b - 4.0) {
                     tb.SetColor(&d2dColor(node.label_color));
                     const body_available = sr_n.b - divider_y;
-                    var line_h = font_size_n * 1.5;
+                    var line_h = font_size_n * 1.5 * @as(f32, @floatCast(vp.zoom));
                     if (line_h > body_available) line_h = body_available * 0.8;
                     const subtitle_cy = divider_y + line_h / 2.0 + 6.0;
                     const sub_font = font_size_n * 0.85;
-                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.subtitle, sub_font, cx_n, subtitle_cy, max_w_n - 8.0);
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.subtitle, sub_font, vp.zoom, cx_n, subtitle_cy, max_w_n - 8.0);
                 }
 
                 // Attributes text below subtitle.
                 if (has_attrs and divider_y < sr_n.b - 4.0) {
                     tb.SetColor(&d2dColor(node.label_color));
-                    const sub_offset: f32 = if (has_subtitle) font_size_n * 1.5 + 6.0 else 6.0;
-                    const attrs_cy = divider_y + sub_offset + font_size_n;
-                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.attributes_text, font_size_n * 0.8, cx_n, attrs_cy, max_w_n - 8.0);
+                    const sub_offset: f32 = if (has_subtitle) font_size_n * 1.5 * @as(f32, @floatCast(vp.zoom)) + 6.0 else 6.0;
+                    const attrs_cy = divider_y + sub_offset + font_size_n * @as(f32, @floatCast(vp.zoom));
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.attributes_text, font_size_n * 0.8, vp.zoom, cx_n, attrs_cy, max_w_n - 8.0);
                 }
             } else {
                 // No body — label centered in the full node rect.
@@ -1172,7 +1188,7 @@ pub fn drawCanvas(
                         sr_n.t + (sr_n.b - sr_n.t) * 0.80 // 80% down = in the name-box
                     else
                         (sr_n.t + sr_n.b) / 2.0;
-                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, cx_n, label_cy, max_w_n);
+                    drawLabel(rt, ctx.dwrite_factory, ctx.font_family, tb, node.label, font_size_n, vp.zoom, cx_n, label_cy, max_w_n);
                 }
             }
             _ = idx;
@@ -1226,5 +1242,58 @@ pub fn drawCanvas(
                 }
             }
         }
+    }
+}
+
+fn drawNudgeGrid(
+    rt: *d2d.ID2D1RenderTarget,
+    brush: *d2d.ID2D1SolidColorBrush,
+    graph: *const StudioEditableGraph,
+    vp: Viewport,
+    viewport_width: f32,
+    viewport_height: f32,
+) void {
+    const grid_size_canvas: f64 = 10.0;
+    const screen_spacing = grid_size_canvas * vp.zoom;
+    if (screen_spacing < 6.0) return;
+
+    var clip_left: f32 = 0.0;
+    var clip_top: f32 = 0.0;
+    var clip_right: f32 = viewport_width;
+    var clip_bottom: f32 = viewport_height;
+    if (graph.width > 0 and graph.height > 0) {
+        const page_rect = canvasRectToScreen(vp, 0.0, 0.0, graph.width, graph.height);
+        clip_left = @max(0.0, page_rect.l);
+        clip_top = @max(0.0, page_rect.t);
+        clip_right = @min(viewport_width, page_rect.r);
+        clip_bottom = @min(viewport_height, page_rect.b);
+    }
+    if (clip_right <= clip_left or clip_bottom <= clip_top) return;
+
+    const visible_left = vp.pan_x;
+    const visible_top = vp.pan_y;
+    const visible_right = vp.pan_x + @as(f64, viewport_width) / vp.zoom;
+    const visible_bottom = vp.pan_y + @as(f64, viewport_height) / vp.zoom;
+    const min_x = @max(0.0, visible_left);
+    const min_y = @max(0.0, visible_top);
+    const max_x = if (graph.width > 0) @min(graph.width, visible_right) else visible_right;
+    const max_y = if (graph.height > 0) @min(graph.height, visible_bottom) else visible_bottom;
+
+    var x = @floor(min_x / grid_size_canvas) * grid_size_canvas;
+    while (x <= max_x + grid_size_canvas) : (x += grid_size_canvas) {
+        const screen = vp.canvasToScreen(x, 0.0);
+        const step_index = @as(i64, @intFromFloat(@round(x / grid_size_canvas)));
+        const major = @mod(@abs(step_index), 5) == 0;
+        brush.SetColor(&if (major) d2dColorRgba(120, 120, 120, 64) else d2dColorRgba(150, 150, 150, 36));
+        rt.DrawLine(point2F(@floatCast(screen.x), clip_top), point2F(@floatCast(screen.x), clip_bottom), @ptrCast(brush), 1.0, null);
+    }
+
+    var y = @floor(min_y / grid_size_canvas) * grid_size_canvas;
+    while (y <= max_y + grid_size_canvas) : (y += grid_size_canvas) {
+        const screen = vp.canvasToScreen(0.0, y);
+        const step_index = @as(i64, @intFromFloat(@round(y / grid_size_canvas)));
+        const major = @mod(@abs(step_index), 5) == 0;
+        brush.SetColor(&if (major) d2dColorRgba(120, 120, 120, 64) else d2dColorRgba(150, 150, 150, 36));
+        rt.DrawLine(point2F(clip_left, @floatCast(screen.y)), point2F(clip_right, @floatCast(screen.y)), @ptrCast(brush), 1.0, null);
     }
 }

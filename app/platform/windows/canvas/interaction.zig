@@ -314,6 +314,7 @@ pub fn onMouseMove(
     canvas: *CanvasState,
     screen_x: i32,
     screen_y: i32,
+    snap_to_grid: bool,
 ) InteractionResult {
     var result = InteractionResult{};
 
@@ -347,30 +348,24 @@ pub fn onMouseMove(
         },
         .move_object => {
             clearHover(canvas, &result);
-            const g = canvas.graph orelse return result;
-            const dx: f64 = @as(f64, @floatFromInt(screen_x - canvas.drag.last_screen_x)) / canvas.viewport.zoom;
-            const dy: f64 = @as(f64, @floatFromInt(screen_y - canvas.drag.last_screen_y)) / canvas.viewport.zoom;
+            _ = canvas.graph orelse return result;
+            const total_dx: f64 = @as(f64, @floatFromInt(screen_x - canvas.drag.start_screen_x)) / canvas.viewport.zoom;
+            const total_dy: f64 = @as(f64, @floatFromInt(screen_y - canvas.drag.start_screen_y)) / canvas.viewport.zoom;
 
             canvas.drag.last_screen_x = screen_x;
             canvas.drag.last_screen_y = screen_y;
 
-            switch (canvas.selection.kind) {
-                .node => {
-                    if (canvas.selection.index < g.node_count) {
-                        g.nodes[canvas.selection.index].x += dx;
-                        g.nodes[canvas.selection.index].y += dy;
-                    }
-                },
-                .subgraph => {
-                    if (canvas.selection.index < g.subgraph_count) {
-                        state.moveSubgraphWithContents(g, canvas.selection.index, dx, dy);
-                    }
-                },
-                else => {},
-            }
+            const moved = canvas.moveSelectionToward(
+                canvas.drag.object_origin_x,
+                canvas.drag.object_origin_y,
+                total_dx,
+                total_dy,
+                snap_to_grid,
+                10.0,
+            );
             result.needs_redraw = true;
-            result.document_mutated = true;
-            result.selection_changed = true;
+            result.document_mutated = moved;
+            result.selection_changed = moved;
         },
         .resize_object => {
             clearHover(canvas, &result);
@@ -568,6 +563,48 @@ pub fn onKeyDown(
         else => {},
     }
     return result;
+}
+
+pub fn nudgeSelectionOnGrid(canvas: *CanvasState, step_x: i32, step_y: i32) ?InteractionResult {
+    if (!canvas.hasSelection()) return null;
+
+    const moved = canvas.snapNudgeSelection(step_x, step_y, 10.0);
+    return .{
+        .needs_redraw = true,
+        .selection_changed = moved,
+        .document_mutated = moved,
+    };
+}
+
+pub fn nudgeSelectionBy(canvas: *CanvasState, dx: f64, dy: f64) ?InteractionResult {
+    if (!canvas.hasSelection()) return null;
+
+    const moved = canvas.nudgeSelectionBy(dx, dy);
+    return .{
+        .needs_redraw = true,
+        .selection_changed = moved,
+        .document_mutated = moved,
+    };
+}
+
+/// Move the entire graph (all nodes and subgraphs) by (dx, dy). Used for Ctrl+Arrow.
+pub fn nudgeAllBy(canvas: *CanvasState, dx: f64, dy: f64) InteractionResult {
+    const moved = canvas.nudgeAllBy(dx, dy);
+    return .{
+        .needs_redraw = moved,
+        .selection_changed = false,
+        .document_mutated = moved,
+    };
+}
+
+/// Resize every node and subgraph by (dw, dh). Used for Alt+Arrow.
+pub fn resizeAllBy(canvas: *CanvasState, dw: f64, dh: f64) InteractionResult {
+    const resized = canvas.resizeAllBy(dw, dh);
+    return .{
+        .needs_redraw = resized,
+        .selection_changed = false,
+        .document_mutated = resized,
+    };
 }
 
 // ---------------------------------------------------------------------------

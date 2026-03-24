@@ -1,0 +1,10 @@
+^C:\PROJECTS\ZIG\MERROW\S3GLUE\CMAKELISTS.TXT
+setlocal
+C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\bin\cmake.exe -SC:/projects/zig/merrow/s3glue -BC:/projects/zig/merrow/s3glue/build --check-stamp-file C:/projects/zig/merrow/s3glue/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

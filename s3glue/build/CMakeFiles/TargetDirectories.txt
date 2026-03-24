@@ -1,0 +1,4 @@
+C:/projects/zig/merrow/s3glue/build/CMakeFiles/s3glue.dir
+C:/projects/zig/merrow/s3glue/build/CMakeFiles/s3g_smoke_test.dir
+C:/projects/zig/merrow/s3glue/build/CMakeFiles/ALL_BUILD.dir
+C:/projects/zig/merrow/s3glue/build/CMakeFiles/ZERO_CHECK.dir

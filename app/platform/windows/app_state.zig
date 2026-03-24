@@ -6,14 +6,6 @@ const foundation = win32.foundation;
 const d2d = win32.graphics.direct2d;
 const imaging = win32.graphics.imaging;
 
-/// Top-level application mode.
-pub const AppMode = enum {
-    /// Mermaid source editor + preview panel.
-    mermaid,
-    /// Freeform interactive canvas + inspector panel.
-    freeform,
-};
-
 pub const ChildWindows = struct {
     preview: ?foundation.HWND = null,
     diagram_label: ?foundation.HWND = null,
@@ -24,7 +16,7 @@ pub const ChildWindows = struct {
     command: ?foundation.HWND = null,
     apply_button: ?foundation.HWND = null,
     status: ?foundation.HWND = null,
-    /// Freeform canvas draw surface (replaces preview in freeform mode).
+    /// Unified diagram canvas surface.
     canvas: ?foundation.HWND = null,
 };
 

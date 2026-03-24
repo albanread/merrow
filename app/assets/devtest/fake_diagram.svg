@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <style>
+    text { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; }
+  </style>
+  <rect width="1200" height="720" fill="white"/>
+  <rect x="80" y="90" width="280" height="140" rx="20" fill="#eef6ff" stroke="#2c6fb7" stroke-width="6"/>
+  <rect x="470" y="90" width="280" height="140" rx="20" fill="#f5fff0" stroke="#2e8a3b" stroke-width="6"/>
+  <rect x="840" y="90" width="280" height="140" rx="20" fill="#fff6e8" stroke="#c57a17" stroke-width="6"/>
+  <path d="M360 160 C410 160, 430 160, 470 160" fill="none" stroke="#3a3a3a" stroke-width="6"/>
+  <polygon points="470,160 442,146 442,174" fill="#3a3a3a"/>
+  <path d="M750 160 C800 160, 820 160, 840 160" fill="none" stroke="#3a3a3a" stroke-width="6"/>
+  <polygon points="840,160 812,146 812,174" fill="#3a3a3a"/>
+  <text x="220" y="145" font-size="40" text-anchor="middle" fill="#183b63">Author</text>
+  <text x="220" y="190" font-size="28" text-anchor="middle" fill="#30557f">Editable graph SVG</text>
+  <text x="610" y="145" font-size="40" text-anchor="middle" fill="#1d4f26">Word</text>
+  <text x="610" y="190" font-size="28" text-anchor="middle" fill="#3d6a46">Keeps vector geometry</text>
+  <text x="980" y="145" font-size="40" text-anchor="middle" fill="#7d4a10">PDF</text>
+  <text x="980" y="190" font-size="28" text-anchor="middle" fill="#8b632c">Print export target</text>
+  <text x="600" y="420" font-size="52" text-anchor="middle" fill="#202020">Lato smoke test diagram</text>
+  <text x="600" y="485" font-size="30" text-anchor="middle" fill="#505050">This asset verifies that wordcomglue can insert SVG artwork.</text>
+</svg>

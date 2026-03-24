@@ -269,7 +269,7 @@ static VARIANT make_i4_variant(long value) {
 static wcg_pdf_options default_pdf_options() {
     wcg_pdf_options options = {};
     options.open_after_export = 0;
-    options.optimize_for = WCG_PDF_OPTIMIZE_ON_SCREEN;
+    options.optimize_for = WCG_PDF_OPTIMIZE_PRINT;
     options.range = WCG_PDF_RANGE_ALL;
     options.item = WCG_PDF_ITEM_DOCUMENT_CONTENT;
     options.include_doc_props = 0;
@@ -1057,6 +1057,15 @@ wcg_status wcg_set_document_font(wcg_document document,
     }
     content->Release();
 
+    {
+        VARIANT embed_fonts = make_bool_variant(true);
+        VARIANT save_subset = make_bool_variant(false);
+        VARIANT embed_system_fonts = make_bool_variant(false);
+        wcg_put_property(document->doc_dispatch, L"EmbedTrueTypeFonts", &embed_fonts);
+        wcg_put_property(document->doc_dispatch, L"SaveSubsetFonts", &save_subset);
+        wcg_put_property(document->doc_dispatch, L"DoNotEmbedSystemFonts", &embed_system_fonts);
+    }
+
     /* Also update the Normal style so new text inherits the font. */
     VARIANT styles_v;
     VariantInit(&styles_v);
@@ -1410,7 +1419,7 @@ wcg_status wcg_insert_image(wcg_document document,
     DWORD attrs = GetFileAttributesW(wide_path.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES) {
         wcg_record_error(wcg_lib_from_document(document), WCG_PNG_NOT_FOUND, 0,
-                         "wcg_insert_image", "PNG file not found");
+                         "wcg_insert_image", "Image file not found");
         return WCG_PNG_NOT_FOUND;
     }
 
@@ -1422,7 +1431,7 @@ wcg_status wcg_insert_image(wcg_document document,
                                        wide_path.c_str(), &shape);
     if (FAILED(hr)) {
         wcg_record_error(wcg_lib_from_document(document), WCG_PNG_INSERT_FAILED, hr,
-                         "wcg_insert_image", "Inline picture insert failed");
+                         "wcg_insert_image", "Inline image insert failed");
         return WCG_PNG_INSERT_FAILED;
     }
 

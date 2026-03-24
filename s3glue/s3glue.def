@@ -1,0 +1,14 @@
+LIBRARY s3glue
+EXPORTS
+    s3g_get_abi_version
+    s3g_create_library
+    s3g_destroy_library
+    s3g_create_client
+    s3g_destroy_client
+    s3g_list_objects
+    s3g_free_list_result
+    s3g_put_object_file
+    s3g_get_object_file
+    s3g_delete_object
+    s3g_get_last_error
+    s3g_clear_last_error

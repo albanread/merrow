@@ -4050,6 +4050,171 @@ fn renderEditableGraphToBytes(
     return graph_render.renderGraphToPNGBytesWithFont(allocator, &graph, config, maybe_export_font);
 }
 
+fn embedLatoFontFaceCss(allocator: std.mem.Allocator, font_data: []const u8) ![]u8 {
+    const encoded_len = std.base64.standard.Encoder.calcSize(font_data.len);
+    const encoded = try allocator.alloc(u8, encoded_len);
+    defer allocator.free(encoded);
+    _ = std.base64.standard.Encoder.encode(encoded, font_data);
+
+    return std.fmt.allocPrint(
+        allocator,
+        "    @font-face {{ font-family: 'Lato'; src: url(\"data:font/ttf;base64,{s}\") format('truetype'); font-weight: 400; font-style: normal; }}\n",
+        .{encoded},
+    );
+}
+
+const EditableGraphExportScene = struct {
+    graph: Graph,
+    config: graph_render.RenderConfig,
+
+    fn deinit(self: *EditableGraphExportScene) void {
+        self.graph.deinitDeep();
+    }
+};
+
+fn buildEditableGraphExportScene(
+    allocator: std.mem.Allocator,
+    editable_graph: *const StudioEditableGraph,
+    raster_scale: f64,
+    target_width: u32,
+    target_height: u32,
+) !EditableGraphExportScene {
+    var graph = Graph.init(allocator);
+    errdefer graph.deinitDeep();
+
+    const graph_label = graph.getGraphLabel();
+    graph_label.width = editable_graph.width;
+    graph_label.height = editable_graph.height;
+
+    if (editable_graph.subgraphs) |subgraphs| {
+        for (subgraphs[0..editable_graph.subgraph_count]) |subgraph| {
+            const subgraph_id = std.mem.span(subgraph.id);
+            const title = optionalCStringSlice(subgraph.title);
+
+            try graph.setNode(subgraph_id, .{
+                .label = if (title) |text| text else subgraph_id,
+                .width = subgraph.width,
+                .height = subgraph.height,
+                .x = subgraph.x + subgraph.width / 2.0,
+                .y = subgraph.y + subgraph.height / 2.0,
+                .shape = .round,
+                .is_subgraph = true,
+                .subgraph_title = title,
+                .fill_color = studioColorRgba(subgraph.fill),
+                .stroke_color = studioColorRgba(subgraph.stroke),
+                .stroke_width = @intFromFloat(@round(subgraph.stroke_width)),
+                .text_color = studioColorRgba(subgraph.title_color),
+            });
+        }
+    }
+
+    if (editable_graph.nodes) |nodes| {
+        for (nodes[0..editable_graph.node_count]) |node| {
+            const node_id = std.mem.span(node.id);
+            const node_text = try editableNodeText(allocator, node);
+            errdefer if (node_text.owned) allocator.free(node_text.text);
+
+            try graph.setNode(node_id, .{
+                .label = node_text.text,
+                .label_owned = node_text.owned,
+                .width = node.width,
+                .height = node.height,
+                .shape = editableNodeShape(node.shape),
+                .fill_color = studioColorRgba(node.fill),
+                .stroke_color = studioColorRgba(node.stroke),
+                .stroke_width = @intFromFloat(@round(node.stroke_width)),
+                .text_color = studioColorRgba(node.label_color),
+                .x = node.x,
+                .y = node.y,
+            });
+        }
+    }
+
+    if (editable_graph.subgraphs) |subgraphs| {
+        for (subgraphs[0..editable_graph.subgraph_count]) |subgraph| {
+            if (optionalCStringSlice(subgraph.parent_subgraph_id)) |parent_id| {
+                try graph.setParent(std.mem.span(subgraph.id), parent_id);
+            }
+        }
+    }
+
+    if (editable_graph.nodes) |nodes| {
+        for (nodes[0..editable_graph.node_count]) |node| {
+            if (optionalCStringSlice(node.parent_subgraph_id)) |parent_id| {
+                try graph.setParent(std.mem.span(node.id), parent_id);
+            }
+        }
+    }
+
+    if (editable_graph.edges) |edges| {
+        for (edges[0..editable_graph.edge_count]) |edge| {
+            try graph.setEdge(std.mem.span(edge.source_id), std.mem.span(edge.target_id), .{
+                .label = optionalCStringSlice(edge.label),
+                .line_style = editableLineStyle(edge.line_style),
+                .color = studioColorRgba(edge.color),
+                .thickness = @intFromFloat(@round(edge.thickness)),
+                .arrowhead = if (editableGraphEdgeHasTargetArrow(edge)) "normal" else "none",
+                .arrowtail = if (editableGraphEdgeHasSourceArrow(edge)) "normal" else "none",
+            }, null);
+        }
+    }
+
+    const base_config = exportRenderConfig(1.0, raster_scale);
+    const base_bounds = try graph_render.calculateBounds(allocator, &graph, base_config);
+    const scaled_layout = downscaleForTargetCanvas(
+        (base_bounds.width + base_config.padding * 2.0) * raster_scale,
+        (base_bounds.height + base_config.padding * 2.0) * raster_scale,
+        target_width,
+        target_height,
+    );
+
+    try scaleGraphGeometry(allocator, &graph, scaled_layout);
+
+    return .{
+        .graph = graph,
+        .config = exportRenderConfig(scaled_layout, raster_scale),
+    };
+}
+
+fn renderEditableGraphToSvgFile(
+    allocator: std.mem.Allocator,
+    editable_graph: *const StudioEditableGraph,
+    maybe_font: ?*LoadedFont,
+    target_width: u32,
+    target_height: u32,
+    output_path: []const u8,
+) !void {
+    var scene = try buildEditableGraphExportScene(allocator, editable_graph, preview_raster_scale, target_width, target_height);
+    defer scene.deinit();
+
+    var svg_text = try svg_render.renderGraphToSVGString(
+        allocator,
+        &scene.graph,
+        scene.config,
+        if (maybe_font) |loaded| &loaded.font else null,
+    );
+    defer allocator.free(svg_text);
+
+    if (maybe_font) |loaded| {
+        const font_face_css = try embedLatoFontFaceCss(allocator, loaded.data);
+        defer allocator.free(font_face_css);
+
+        const style_tag = "  <style>\n";
+        if (std.mem.indexOf(u8, svg_text, style_tag)) |idx| {
+            const insert_at = idx + style_tag.len;
+            svg_text = try std.fmt.allocPrint(
+                allocator,
+                "{s}{s}{s}",
+                .{ svg_text[0..insert_at], font_face_css, svg_text[insert_at..] },
+            );
+        }
+    }
+
+    const file = try std.fs.cwd().createFile(output_path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(svg_text);
+}
+
 pub export fn merrow_studio_render_preview_png_bytes(
     source_ptr: [*]const u8,
     source_len: u32,
@@ -4201,6 +4366,50 @@ pub export fn merrow_studio_render_editable_graph_png_bytes(
     out_png_len.* = @intCast(preview_bytes.len);
     copyCString(out_message, out_message_len, "Preview render complete");
     return owned.ptr;
+}
+
+pub export fn merrow_studio_render_editable_graph_svg(
+    graph: ?*const StudioEditableGraph,
+    output_path_ptr: [*:0]const u8,
+    target_width: u32,
+    target_height: u32,
+    out_message: [*]u8,
+    out_message_len: u32,
+) callconv(.c) c_int {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const editable_graph = graph orelse {
+        copyCString(out_message, out_message_len, "GraphUnavailable");
+        return 1;
+    };
+    const output_path = std.mem.span(output_path_ptr);
+    if (output_path.len == 0) {
+        copyCString(out_message, out_message_len, "Missing output path");
+        return 2;
+    }
+
+    var maybe_font = loadFont(allocator) catch |err| {
+        copyCString(out_message, out_message_len, @errorName(err));
+        return 3;
+    };
+    defer if (maybe_font) |*loaded| loaded.deinit(allocator);
+
+    renderEditableGraphToSvgFile(
+        allocator,
+        editable_graph,
+        if (maybe_font) |*loaded| loaded else null,
+        target_width,
+        target_height,
+        output_path,
+    ) catch |err| {
+        copyCString(out_message, out_message_len, @errorName(err));
+        return 4;
+    };
+
+    copyCString(out_message, out_message_len, "SVG export complete");
+    return 0;
 }
 
 pub export fn merrow_studio_create_default_scene(out_source_path: [*]u8, out_source_path_len: u32) callconv(.c) ?*StudioScene {

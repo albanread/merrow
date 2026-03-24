@@ -1,5 +1,19 @@
 const std = @import("std");
 
+fn addOptionalInstallFile(b: *std.Build, source_path: []const u8, dest_path: []const u8) void {
+    std.fs.cwd().access(source_path, .{}) catch return;
+    _ = b.addInstallFile(b.path(source_path), dest_path);
+}
+
+fn addFirstExistingInstallFile(b: *std.Build, candidates: []const []const u8, dest_path: []const u8) void {
+    for (candidates) |candidate| {
+        if (std.fs.cwd().access(candidate, .{})) |_| {
+            _ = b.addInstallFile(b.path(candidate), dest_path);
+            return;
+        } else |_| {}
+    }
+}
+
 // Although this function looks imperative, it does not perform the build
 // directly and instead it mutates the build graph (`b`) that will be then
 // executed by an external runner. The functions in `std.Build` implement a DSL
@@ -166,6 +180,7 @@ pub fn build(b: *std.Build) void {
         windows_app_exe.linkSystemLibrary("gdi32");
         windows_app_exe.linkSystemLibrary("comctl32");
         windows_app_exe.linkSystemLibrary("comdlg32");
+        windows_app_exe.linkSystemLibrary("advapi32");
         windows_app_exe.linkSystemLibrary("d2d1");
         windows_app_exe.linkSystemLibrary("dwrite");
         windows_app_exe.linkSystemLibrary("ole32");
@@ -173,6 +188,26 @@ pub fn build(b: *std.Build) void {
         windows_app_exe.linkSystemLibrary("windowscodecs");
         b.installArtifact(windows_app_exe);
         _ = b.addInstallFile(b.path("wordcomglue/build/wordcomglue.dll"), "bin/wordcomglue.dll");
+        addFirstExistingInstallFile(b, &.{
+            "s3glue/build/Release/s3glue.dll",
+            "s3glue/build/RelWithDebInfo/s3glue.dll",
+            "s3glue/build/MinSizeRel/s3glue.dll",
+            "s3glue/build/Debug/s3glue.dll",
+        }, "bin/s3glue.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-auth.dll", "bin/aws-c-auth.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-cal.dll", "bin/aws-c-cal.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-common.dll", "bin/aws-c-common.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-compression.dll", "bin/aws-c-compression.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-event-stream.dll", "bin/aws-c-event-stream.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-http.dll", "bin/aws-c-http.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-io.dll", "bin/aws-c-io.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-mqtt.dll", "bin/aws-c-mqtt.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-s3.dll", "bin/aws-c-s3.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-c-sdkutils.dll", "bin/aws-c-sdkutils.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-checksums.dll", "bin/aws-checksums.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-cpp-sdk-core.dll", "bin/aws-cpp-sdk-core.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-cpp-sdk-s3.dll", "bin/aws-cpp-sdk-s3.dll");
+        addOptionalInstallFile(b, "../aws-sdk-cpp-install/bin/aws-crt-cpp.dll", "bin/aws-crt-cpp.dll");
         _ = b.addInstallFile(b.path("app/assets/diagrams_header.png"), "bin/assets/diagrams_header.png");
         _ = b.addInstallFile(b.path("app/assets/diagrams_trailer.png"), "bin/assets/diagrams_trailer.png");
 
@@ -373,6 +408,24 @@ pub fn build(b: *std.Build) void {
     const markdown_test_step = b.step("markdown-test", "Run markdown document parser tests");
     markdown_test_step.dependOn(&run_markdown_tests.step);
 
+    const windows_credentials_test_step = b.step("windows-credentials-test", "Run Windows credential storage tests");
+    if (target_query.os.tag == .windows) {
+        const windows_credentials_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("app/platform/windows/credentials.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "win32", .module = win32_dep.?.module("win32") },
+                },
+            }),
+        });
+        windows_credentials_tests.linkSystemLibrary("advapi32");
+
+        const run_windows_credentials_tests = b.addRunArtifact(windows_credentials_tests);
+        windows_credentials_test_step.dependOn(&run_windows_credentials_tests.step);
+    }
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
@@ -383,6 +436,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_preview_roundtrip_tests.step);
     test_step.dependOn(&run_preview_lossless_roundtrip_tests.step);
     test_step.dependOn(&run_markdown_tests.step);
+    if (target_query.os.tag == .windows) {
+        test_step.dependOn(windows_credentials_test_step);
+    }
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

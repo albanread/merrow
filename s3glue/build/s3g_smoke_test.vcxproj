@@ -1,0 +1,385 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{ECA67203-8FBE-3DEF-A407-DF696A3F9AA2}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>s3g_smoke_test</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\projects\zig\merrow\s3glue\build\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">s3g_smoke_test.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">s3g_smoke_test</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\projects\zig\merrow\s3glue\build\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">s3g_smoke_test.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">s3g_smoke_test</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\projects\zig\merrow\s3glue\build\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">s3g_smoke_test.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">s3g_smoke_test</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\projects\zig\merrow\s3glue\build\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">s3g_smoke_test.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">s3g_smoke_test</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;USE_IMPORT_EXPORT;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;USE_IMPORT_EXPORT;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>Debug\s3glue.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>C:/projects/zig/merrow/s3glue/build/Debug/s3g_smoke_test.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>C:/projects/zig/merrow/s3glue/build/Debug/s3g_smoke_test.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>Release\s3glue.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>C:/projects/zig/merrow/s3glue/build/Release/s3g_smoke_test.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>C:/projects/zig/merrow/s3glue/build/Release/s3g_smoke_test.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>MinSizeRel\s3glue.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>C:/projects/zig/merrow/s3glue/build/MinSizeRel/s3g_smoke_test.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>C:/projects/zig/merrow/s3glue/build/MinSizeRel/s3g_smoke_test.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;USE_IMPORT_EXPORT;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\projects\zig\merrow\s3glue;C:\projects\zig\aws-sdk-cpp-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>RelWithDebInfo\s3glue.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>C:/projects/zig/merrow/s3glue/build/RelWithDebInfo/s3g_smoke_test.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>C:/projects/zig/merrow/s3glue/build/RelWithDebInfo/s3g_smoke_test.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\projects\zig\merrow\s3glue\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/projects/zig/merrow/s3glue/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\bin\cmake.exe -SC:/projects/zig/merrow/s3glue -BC:/projects/zig/merrow/s3glue/build --check-stamp-file C:/projects/zig/merrow/s3glue/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfig.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfigVersion.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\compiler_settings.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\platformDeps.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\sdksCommon.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\aws-c-auth-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\aws-c-cal-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\aws-c-common-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\aws-c-compression-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\aws-c-event-stream-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\aws-c-http-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\aws-c-io-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\aws-c-mqtt-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\aws-c-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\aws-c-sdkutils-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\aws-checksums-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckCXXSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckIncludeFileCXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckLibraryExists.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageHandleStandardArgs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageMessage.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindThreads.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CheckSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeCXXCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeRCCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\projects\zig\merrow\s3glue\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/projects/zig/merrow/s3glue/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\bin\cmake.exe -SC:/projects/zig/merrow/s3glue -BC:/projects/zig/merrow/s3glue/build --check-stamp-file C:/projects/zig/merrow/s3glue/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfig.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfigVersion.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\compiler_settings.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\platformDeps.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\sdksCommon.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\aws-c-auth-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\aws-c-cal-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\aws-c-common-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\aws-c-compression-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\aws-c-event-stream-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\aws-c-http-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\aws-c-io-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\aws-c-mqtt-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\aws-c-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\aws-c-sdkutils-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\aws-checksums-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckCXXSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckIncludeFileCXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckLibraryExists.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageHandleStandardArgs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageMessage.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindThreads.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CheckSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeCXXCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeRCCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\projects\zig\merrow\s3glue\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/projects/zig/merrow/s3glue/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\bin\cmake.exe -SC:/projects/zig/merrow/s3glue -BC:/projects/zig/merrow/s3glue/build --check-stamp-file C:/projects/zig/merrow/s3glue/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfig.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfigVersion.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\compiler_settings.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\platformDeps.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\sdksCommon.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\aws-c-auth-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\aws-c-cal-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\aws-c-common-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\aws-c-compression-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\aws-c-event-stream-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\aws-c-http-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\aws-c-io-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\aws-c-mqtt-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\aws-c-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\aws-c-sdkutils-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\aws-checksums-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckCXXSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckIncludeFileCXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckLibraryExists.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageHandleStandardArgs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageMessage.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindThreads.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CheckSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeCXXCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeRCCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\projects\zig\merrow\s3glue\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/projects/zig/merrow/s3glue/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\bin\cmake.exe -SC:/projects/zig/merrow/s3glue -BC:/projects/zig/merrow/s3glue/build --check-stamp-file C:/projects/zig/merrow/s3glue/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfig.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\AWSSDKConfigVersion.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\compiler_settings.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\platformDeps.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\AWSSDK\sdksCommon.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\aws-c-auth-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-auth\shared\aws-c-auth-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\aws-c-cal-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-cal\shared\aws-c-cal-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\aws-c-common-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-common\shared\aws-c-common-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\aws-c-compression-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-compression\shared\aws-c-compression-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\aws-c-event-stream-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-event-stream\shared\aws-c-event-stream-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\aws-c-http-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-http\shared\aws-c-http-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\aws-c-io-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-io\shared\aws-c-io-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\aws-c-mqtt-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-mqtt\shared\aws-c-mqtt-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\aws-c-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-s3\shared\aws-c-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\aws-c-sdkutils-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-c-sdkutils\shared\aws-c-sdkutils-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\aws-checksums-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-checksums\shared\aws-checksums-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-core\aws-cpp-sdk-core-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-cpp-sdk-s3\aws-cpp-sdk-s3-targets.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config-version.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\aws-crt-cpp-config.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets-release.cmake;C:\projects\zig\aws-sdk-cpp-install\lib\cmake\aws-crt-cpp\shared\aws-crt-cpp-targets.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckCXXSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckIncludeFileCXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\CheckLibraryExists.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageHandleStandardArgs.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindPackageMessage.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\FindThreads.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Internal\CheckSourceCompiles.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\projects\zig\cmake-portable\cmake-4.2.3-windows-x86_64\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeCXXCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeRCCompiler.cmake;C:\projects\zig\merrow\s3glue\build\CMakeFiles\4.2.3\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\projects\zig\merrow\s3glue\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="C:\projects\zig\merrow\s3glue\tests\smoke_test.cpp" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="C:\projects\zig\merrow\s3glue\build\ZERO_CHECK.vcxproj">
+      <Project>{1D7883FF-52D8-3EE9-A105-8BAFEC71AB35}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="C:\projects\zig\merrow\s3glue\build\s3glue.vcxproj">
+      <Project>{DA492639-D595-3E32-8C03-14EA63356CF2}</Project>
+      <Name>s3glue</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

@@ -17,7 +17,8 @@ pub const default_canvas_height_cm: f64 = 10.0;
 pub const min_canvas_cm: f64 = 1.0;
 pub const max_canvas_cm: f64 = 60.0;
 const preview_pixels_per_cm: f64 = 96.0 / 2.54;
-pub const export_pixels_per_cm: f64 = 300.0 / 2.54;
+pub const export_raster_dpi: f64 = 600.0;
+pub const export_pixels_per_cm: f64 = export_raster_dpi / 2.54;
 
 pub fn fontFamilyDisplayName(family: FontFamily) []const u8 {
     return switch (family) {

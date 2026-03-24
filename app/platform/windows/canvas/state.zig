@@ -499,6 +499,177 @@ pub const CanvasState = struct {
         self.insertion = .{};
     }
 
+    pub fn moveSelectionBy(self: *CanvasState, dx: f64, dy: f64) bool {
+        const g = self.graph orelse return false;
+
+        switch (self.selection.kind) {
+            .node => {
+                if (self.selection.index >= g.node_count or g.nodes == null) return false;
+                g.nodes[self.selection.index].x += dx;
+                g.nodes[self.selection.index].y += dy;
+                return true;
+            },
+            .subgraph => {
+                if (self.selection.index >= g.subgraph_count or g.subgraphs == null) return false;
+                moveSubgraphWithContents(g, self.selection.index, dx, dy);
+                return true;
+            },
+            else => return false,
+        }
+    }
+
+    pub fn moveSelectionToward(self: *CanvasState, origin_x: f64, origin_y: f64, delta_x: f64, delta_y: f64, snap_to_grid: bool, grid_size: f64) bool {
+        var target_x = origin_x + delta_x;
+        var target_y = origin_y + delta_y;
+        if (snap_to_grid and grid_size > 0) {
+            target_x = snapCoordinateToNearestGrid(target_x, grid_size);
+            target_y = snapCoordinateToNearestGrid(target_y, grid_size);
+        }
+
+        var current_x: f64 = 0;
+        var current_y: f64 = 0;
+        switch (self.selection.kind) {
+            .node => {
+                const node = self.selectedNode() orelse return false;
+                current_x = node.x;
+                current_y = node.y;
+            },
+            .subgraph => {
+                const subgraph = self.selectedSubgraph() orelse return false;
+                current_x = subgraph.x;
+                current_y = subgraph.y;
+            },
+            else => return false,
+        }
+
+        const dx = target_x - current_x;
+        const dy = target_y - current_y;
+        if (@abs(dx) < 0.0001 and @abs(dy) < 0.0001) return false;
+        return self.moveSelectionBy(dx, dy);
+    }
+
+    pub fn nudgeSelectionBy(self: *CanvasState, dx: f64, dy: f64) bool {
+        if (@abs(dx) < 0.0001 and @abs(dy) < 0.0001) return false;
+        return self.moveSelectionBy(dx, dy);
+    }
+
+    /// Move every node and every top-level subgraph (with its contents) by (dx, dy).
+    /// This shifts the entire graph layout without changing any relative positions.
+    pub fn nudgeAllBy(self: *CanvasState, dx: f64, dy: f64) bool {
+        if (@abs(dx) < 0.0001 and @abs(dy) < 0.0001) return false;
+        const g = self.graph orelse return false;
+        if (g.node_count == 0 and g.subgraph_count == 0) return false;
+
+        // Move all top-level nodes (not parented to any subgraph).
+        if (g.nodes != null) {
+            for (g.nodes[0..g.node_count]) |*node| {
+                node.x += dx;
+                node.y += dy;
+            }
+        }
+
+        // Move all top-level subgraphs and their contents.
+        if (g.subgraphs != null) {
+            for (g.subgraphs[0..g.subgraph_count]) |*sg| {
+                sg.x += dx;
+                sg.y += dy;
+                sg.title_x += dx;
+                sg.title_y += dy;
+            }
+        }
+
+        return true;
+    }
+
+    /// Resize every node and subgraph by (dw, dh) and translate each object
+    /// away from / toward the layout centroid by the same step, so that
+    /// spacing expands and contracts together with size.
+    pub fn resizeAllBy(self: *CanvasState, dw: f64, dh: f64) bool {
+        if (@abs(dw) < 0.0001 and @abs(dh) < 0.0001) return false;
+        const g = self.graph orelse return false;
+        if (g.node_count == 0 and g.subgraph_count == 0) return false;
+        const min_size: f64 = 20.0;
+
+        // Compute centroid of all object centres.
+        var sum_x: f64 = 0;
+        var sum_y: f64 = 0;
+        var count: f64 = 0;
+        if (g.nodes != null) {
+            for (g.nodes[0..g.node_count]) |*node| {
+                sum_x += node.x + node.width * 0.5;
+                sum_y += node.y + node.height * 0.5;
+                count += 1;
+            }
+        }
+        if (g.subgraphs != null) {
+            for (g.subgraphs[0..g.subgraph_count]) |*sg| {
+                sum_x += sg.x + sg.width * 0.5;
+                sum_y += sg.y + sg.height * 0.5;
+                count += 1;
+            }
+        }
+        if (count == 0) return false;
+        const cx = sum_x / count;
+        const cy = sum_y / count;
+
+        // Resize each object and nudge it away/toward the centroid by `step`.
+        // sign(centre - centroid) * delta drives the spacing change.
+        if (g.nodes != null) {
+            for (g.nodes[0..g.node_count]) |*node| {
+                const ncx = node.x + node.width * 0.5;
+                const ncy = node.y + node.height * 0.5;
+                const sx: f64 = if (ncx > cx + 0.0001) 1.0 else if (ncx < cx - 0.0001) -1.0 else 0.0;
+                const sy: f64 = if (ncy > cy + 0.0001) 1.0 else if (ncy < cy - 0.0001) -1.0 else 0.0;
+                node.width = @max(min_size, node.width + dw);
+                node.height = @max(min_size, node.height + dh);
+                node.x += sx * dw;
+                node.y += sy * dh;
+            }
+        }
+        if (g.subgraphs != null) {
+            for (g.subgraphs[0..g.subgraph_count]) |*sg| {
+                const scx = sg.x + sg.width * 0.5;
+                const scy = sg.y + sg.height * 0.5;
+                const sx: f64 = if (scx > cx + 0.0001) 1.0 else if (scx < cx - 0.0001) -1.0 else 0.0;
+                const sy: f64 = if (scy > cy + 0.0001) 1.0 else if (scy < cy - 0.0001) -1.0 else 0.0;
+                sg.width = @max(min_size, sg.width + dw);
+                sg.height = @max(min_size, sg.height + dh);
+                sg.x += sx * dw;
+                sg.y += sy * dh;
+                sg.title_x += sx * dw;
+                sg.title_y += sy * dh;
+            }
+        }
+        return true;
+    }
+
+    pub fn snapNudgeSelection(self: *CanvasState, step_x: i32, step_y: i32, grid_size: f64) bool {
+        if (grid_size <= 0) return false;
+
+        var origin_x: f64 = 0;
+        var origin_y: f64 = 0;
+        switch (self.selection.kind) {
+            .node => {
+                const node = self.selectedNode() orelse return false;
+                origin_x = node.x;
+                origin_y = node.y;
+            },
+            .subgraph => {
+                const subgraph = self.selectedSubgraph() orelse return false;
+                origin_x = subgraph.x;
+                origin_y = subgraph.y;
+            },
+            else => return false,
+        }
+
+        const target_x = nudgeCoordinateToGrid(origin_x, step_x, grid_size);
+        const target_y = nudgeCoordinateToGrid(origin_y, step_y, grid_size);
+        const dx = target_x - origin_x;
+        const dy = target_y - origin_y;
+        if (@abs(dx) < 0.0001 and @abs(dy) < 0.0001) return false;
+        return self.moveSelectionBy(dx, dy);
+    }
+
     // -----------------------------------------------------------------------
     // Selection helpers
     // -----------------------------------------------------------------------
@@ -661,6 +832,25 @@ pub const CanvasState = struct {
         }
     }
 };
+
+fn nudgeCoordinateToGrid(value: f64, step_count: i32, grid_size: f64) f64 {
+    if (step_count == 0) return value;
+
+    const grid_index = value / grid_size;
+    const epsilon = 0.0001;
+    if (step_count > 0) {
+        const base_index = @floor(grid_index + epsilon);
+        return (base_index + @as(f64, @floatFromInt(step_count))) * grid_size;
+    }
+
+    const base_index = @ceil(grid_index - epsilon);
+    return (base_index + @as(f64, @floatFromInt(step_count))) * grid_size;
+}
+
+fn snapCoordinateToNearestGrid(value: f64, grid_size: f64) f64 {
+    if (grid_size <= 0) return value;
+    return @round(value / grid_size) * grid_size;
+}
 
 fn replaceCString(target: *[*c]const u8, text: [:0]u8) void {
     freeCString(target.*);

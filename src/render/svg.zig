@@ -15,6 +15,7 @@ pub const SvgWriter = struct {
     allocator: Allocator,
     width: f64,
     height: f64,
+    embedded_style: std.ArrayListUnmanaged(u8),
     /// Number of currently-open groups (for indentation).
     group_depth: usize,
 
@@ -31,6 +32,7 @@ pub const SvgWriter = struct {
             .allocator = allocator,
             .width = width,
             .height = height,
+            .embedded_style = std.ArrayListUnmanaged(u8){},
             .group_depth = 0,
             .marker_defs = std.ArrayListUnmanaged(u8){},
             .next_marker_id = 0,
@@ -39,7 +41,12 @@ pub const SvgWriter = struct {
 
     pub fn deinit(self: *SvgWriter) void {
         self.buffer.deinit(self.allocator);
+        self.embedded_style.deinit(self.allocator);
         self.marker_defs.deinit(self.allocator);
+    }
+
+    pub fn appendEmbeddedStyle(self: *SvgWriter, style: []const u8) !void {
+        try self.embedded_style.appendSlice(self.allocator, style);
     }
 
     // ===================================================================
@@ -678,6 +685,9 @@ pub const SvgWriter = struct {
 
         // Embedded stylesheet
         try out.appendSlice(self.allocator, "  <style>\n");
+        if (self.embedded_style.items.len > 0) {
+            try out.appendSlice(self.allocator, self.embedded_style.items);
+        }
         try out.appendSlice(self.allocator, "    text { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; }\n");
         try out.appendSlice(self.allocator, "    .edge-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }\n");
         try out.appendSlice(self.allocator, "  </style>\n");

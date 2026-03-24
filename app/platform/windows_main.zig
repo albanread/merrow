@@ -17,6 +17,8 @@ const windows_dpi = @import("windows/dpi.zig");
 const windows_document = @import("windows/document.zig");
 const windows_editor = @import("windows/editor.zig");
 const windows_layout = @import("windows/layout.zig");
+const windows_credentials = @import("windows/credentials.zig");
+const windows_s3glue = @import("windows/s3glue.zig");
 const windows_project_settings = @import("windows/project_settings.zig");
 const windows_status_bar = @import("windows/status_bar.zig");
 const windows_toolbar = @import("windows/toolbar.zig");
@@ -38,6 +40,11 @@ const mouse = win32.ui.input.keyboard_and_mouse;
 const ui = win32.ui.windows_and_messaging;
 
 const build_options = @import("build_options");
+
+comptime {
+    _ = windows_credentials;
+    _ = windows_s3glue;
+}
 const about_image_png = @embedFile("../assets/merrow-studio-icon.png");
 
 const c_allocator = std.heap.c_allocator;
@@ -47,6 +54,16 @@ const canvas_class_name = windows_constants.canvas_class_name;
 const about_class_name: [*:0]const u8 = "MerrowStudioAboutWindowClass";
 const about_image_class_name: [*:0]const u8 = "MerrowStudioAboutImageWindowClass";
 const about_window_title: [*:0]const u8 = "About Merrow Studio";
+const cloud_storage_class_name: [*:0]const u8 = "MerrowStudioCloudStorageWindowClass";
+const cloud_storage_window_title: [*:0]const u8 = "Cloud Storage";
+const cloud_storage_region_label_text: [*:0]const u8 = "Region";
+const cloud_storage_bucket_label_text: [*:0]const u8 = "Bucket ARN";
+const cloud_storage_api_label_text: [*:0]const u8 = "API ID";
+const cloud_storage_key_label_text: [*:0]const u8 = "Secret Key";
+const cloud_storage_credential_target_region = "merrow_region";
+const cloud_storage_credential_target_bucket = "merrow_bucket";
+const cloud_storage_credential_target_id = "merrow_id";
+const cloud_storage_credential_target_key = "merrow_key";
 const window_title = windows_constants.window_title;
 const static_class = windows_constants.static_class;
 const edit_class = windows_constants.edit_class;
@@ -78,6 +95,8 @@ const menu_id_save_as = windows_constants.menu_id_save_as;
 const menu_id_font_settings = windows_constants.menu_id_font_settings;
 const menu_id_export_word = windows_constants.menu_id_export_word;
 const menu_id_export_mermaid = windows_constants.menu_id_export_mermaid;
+const menu_id_cloud_storage = windows_constants.menu_id_cloud_storage;
+const menu_id_sync_cloud = windows_constants.menu_id_sync_cloud;
 const menu_id_about = windows_constants.menu_id_about;
 const control_id_editor = windows_constants.control_id_editor;
 const control_id_command = windows_constants.control_id_command;
@@ -91,11 +110,20 @@ const control_id_about_title = windows_constants.control_id_about_title;
 const control_id_about_version = windows_constants.control_id_about_version;
 const control_id_about_license = windows_constants.control_id_about_license;
 const control_id_about_ok = windows_constants.control_id_about_ok;
+const control_id_cloud_storage_region_label = windows_constants.control_id_cloud_storage_region_label;
+const control_id_cloud_storage_region_edit = windows_constants.control_id_cloud_storage_region_edit;
+const control_id_cloud_storage_bucket_label = windows_constants.control_id_cloud_storage_bucket_label;
+const control_id_cloud_storage_bucket_edit = windows_constants.control_id_cloud_storage_bucket_edit;
+const control_id_cloud_storage_api_label = windows_constants.control_id_cloud_storage_api_label;
+const control_id_cloud_storage_api_edit = windows_constants.control_id_cloud_storage_api_edit;
+const control_id_cloud_storage_key_label = windows_constants.control_id_cloud_storage_key_label;
+const control_id_cloud_storage_key_edit = windows_constants.control_id_cloud_storage_key_edit;
+const control_id_cloud_storage_ok = windows_constants.control_id_cloud_storage_ok;
 const main_timer_id_editor_refresh = windows_constants.main_timer_id_editor_refresh;
 const main_timer_id_ffm_persist = windows_constants.main_timer_id_ffm_persist;
-const menu_id_mode_mermaid = windows_constants.menu_id_mode_mermaid;
-const menu_id_mode_freeform = windows_constants.menu_id_mode_freeform;
+const main_timer_id_graph_source_writeback = windows_constants.main_timer_id_graph_source_writeback;
 const menu_id_toggle_source_panel = windows_constants.menu_id_toggle_source_panel;
+const menu_id_toggle_snap_to_grid = windows_constants.menu_id_toggle_snap_to_grid;
 const toolbar_id_reserved_1 = windows_constants.toolbar_id_reserved_1;
 const toolbar_id_reserved_2 = windows_constants.toolbar_id_reserved_2;
 const toolbar_id_reserved_3 = windows_constants.toolbar_id_reserved_3;
@@ -115,8 +143,8 @@ const TRACKMOUSEEVENT = extern struct {
 };
 
 extern "user32" fn TrackMouseEvent(event_track: *TRACKMOUSEEVENT) callconv(.winapi) i32;
+extern "user32" fn EnableWindow(hwnd: ?foundation.HWND, enable: foundation.BOOL) callconv(.winapi) foundation.BOOL;
 
-const AppMode = windows_app_state.AppMode;
 const ChildWindows = windows_app_state.ChildWindows;
 const PreviewRenderer = windows_app_state.PreviewRenderer;
 const CanvasRenderer = windows_app_state.CanvasRenderer;
@@ -267,23 +295,25 @@ extern fn merrow_studio_build_editable_graph(source_ptr: [*]const u8, source_len
 extern fn merrow_studio_free_editable_graph(graph: ?*windows_canvas.StudioEditableGraph) callconv(.c) void;
 extern fn merrow_studio_check_mermaid_syntax(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) c_int;
 extern fn merrow_studio_render_editable_graph_png_bytes(graph: ?*const windows_canvas.StudioEditableGraph, target_width: u32, target_height: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
+extern fn merrow_studio_render_editable_graph_svg(graph: ?*const windows_canvas.StudioEditableGraph, output_path_ptr: [*:0]const u8, target_width: u32, target_height: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) c_int;
 extern fn merrow_studio_render_preview_png_bytes(source_ptr: [*]const u8, source_len: u32, target_width: u32, target_height: u32, out_png_len: *u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_apply_command(source_ptr: [*]const u8, source_len: u32, command_ptr: [*]const u8, command_len: u32, context_id_ptr: [*]const u8, context_id_len: u32, out_context_id: [*]u8, out_context_id_len: u32, out_context_display: [*]u8, out_context_display_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_shuffle_diagram(source_ptr: [*]const u8, source_len: u32, out_message: [*]u8, out_message_len: u32) callconv(.c) [*c]u8;
 extern fn merrow_studio_free_string(text: [*c]u8) callconv(.c) void;
 extern fn merrow_studio_free_buffer(buffer: [*c]u8, buffer_len: u32) callconv(.c) void;
 
-var app_mode: AppMode = .mermaid;
+// Unified canvas mode — source panel visibility is independently toggled.
 const recent_file_menu_limit: usize = menu_id_open_recent_last - menu_id_open_recent_first + 1;
 var child_windows = ChildWindows{};
 var preview_renderer = PreviewRenderer{};
 var canvas_renderer = CanvasRenderer.init(c_allocator);
 var canvas_dwrite_factory: ?*dwrite.IDWriteFactory = null;
 var main_window: ?foundation.HWND = null;
+var canvas_snap_to_grid_enabled = true;
 var current_document_path: ?[]u8 = null;
 var current_markdown_document: ?document_model.MarkdownDocument = null;
 var selected_diagram_index: usize = 0;
-var show_source_panel_in_freeform = false;
+var show_source_panel = true;
 var library_database: ?library_db.LibraryDb = null;
 var project_font_settings = ProjectFontSettings{};
 var private_font_path: ?[:0]u8 = null;
@@ -300,6 +330,7 @@ var status_font: ?gdi.HFONT = null;
 var current_status_message: ?[]u8 = null;
 var is_document_dirty = false;
 var suppress_editor_change = false;
+var source_write_locked = false;
 var last_editor_text_hash: u64 = 0;
 var startup_layout_done = false;
 var about_window: ?foundation.HWND = null;
@@ -307,6 +338,53 @@ var about_controls = AboutControls{};
 var about_image_renderer = AboutImageRenderer{};
 var about_title_font: ?gdi.HFONT = null;
 var about_body_font: ?gdi.HFONT = null;
+var cloud_storage_window: ?foundation.HWND = null;
+var cloud_storage_controls = CloudStorageControls{};
+const s3_virtual_path_prefix = "s3://";
+const s3_library_key_prefix = "library/";
+const s3_cache_dir_name = "s3-cache";
+const s3_debug_log_name = "s3-debug.log";
+
+const S3StorageError = error{
+    MissingBucket,
+    MissingSession,
+    InvalidBucketArn,
+    InvalidS3Path,
+    RequestFailed,
+};
+
+const S3StorageState = struct {
+    session: ?windows_s3glue.Session = null,
+    bucket_name: ?[]u8 = null,
+    bucket_arn: ?[]u8 = null,
+    region: ?[]u8 = null,
+
+    fn deinit(self: *S3StorageState) void {
+        if (self.session) |*session| {
+            session.deinit();
+            self.session = null;
+        }
+        if (self.bucket_name) |value| {
+            c_allocator.free(value);
+            self.bucket_name = null;
+        }
+        if (self.bucket_arn) |value| {
+            c_allocator.free(value);
+            self.bucket_arn = null;
+        }
+        if (self.region) |value| {
+            c_allocator.free(value);
+            self.region = null;
+        }
+    }
+
+    fn enabled(self: *const S3StorageState) bool {
+        return self.session != null and self.bucket_name != null;
+    }
+};
+
+var s3_storage = S3StorageState{};
+var s3_in_use = false;
 /// Last known mouse position within the canvas window (screen coords), for link preview.
 var canvas_mouse_screen_x: i32 = 0;
 var canvas_mouse_screen_y: i32 = 0;
@@ -332,6 +410,7 @@ const preview_bitmap_scale: f64 = 4.0;
 const preview_min_zoom: f64 = 0.25;
 const preview_max_zoom: f64 = 32.0;
 const ffm_persist_debounce_ms: u32 = 450;
+const graph_source_writeback_debounce_ms: u32 = 450;
 const about_auto_close_timer_id: usize = 2303;
 // Minimum virtual border around the image in display pixels; actual margin is
 // max(preview_pan_margin, viewport/4) so it grows with window size.
@@ -351,6 +430,18 @@ const AboutImageRenderer = struct {
     bitmap: ?*d2d.ID2D1Bitmap = null,
     bitmap_width: u32 = 0,
     bitmap_height: u32 = 0,
+};
+
+const CloudStorageControls = struct {
+    region_label: ?foundation.HWND = null,
+    region_edit: ?foundation.HWND = null,
+    bucket_label: ?foundation.HWND = null,
+    bucket_edit: ?foundation.HWND = null,
+    api_label: ?foundation.HWND = null,
+    api_edit: ?foundation.HWND = null,
+    key_label: ?foundation.HWND = null,
+    key_edit: ?foundation.HWND = null,
+    ok_button: ?foundation.HWND = null,
 };
 
 const PreviewAxisBounds = struct {
@@ -679,6 +770,543 @@ fn runWindowsPreflight() bool {
     return true;
 }
 
+fn disableCloudStorage() void {
+    if (s3_in_use or s3_storage.bucket_name != null or s3_storage.bucket_arn != null) {
+        appendS3Debug("cloud storage disabled");
+    }
+    s3_storage.deinit();
+    s3_in_use = false;
+}
+
+fn s3DebugLogPath() ![]u8 {
+    const folders = try windows_document.getMerrowUserFolders(c_allocator);
+    defer folders.deinit(c_allocator);
+    return std.fs.path.join(c_allocator, &.{ folders.temp, s3_debug_log_name });
+}
+
+fn appendS3Debug(message: []const u8) void {
+    const log_path = s3DebugLogPath() catch return;
+    defer c_allocator.free(log_path);
+
+    const file = std.fs.createFileAbsolute(log_path, .{ .read = true, .truncate = false }) catch return;
+    defer file.close();
+    file.seekFromEnd(0) catch return;
+
+    const line = std.fmt.allocPrint(
+        c_allocator,
+        "{d} | {s}\r\n",
+        .{ std.time.timestamp(), message },
+    ) catch return;
+    defer c_allocator.free(line);
+
+    file.writeAll(line) catch return;
+}
+
+fn appendS3DebugFmt(comptime fmt: []const u8, args: anytype) void {
+    const message = std.fmt.allocPrint(c_allocator, fmt, args) catch return;
+    defer c_allocator.free(message);
+    appendS3Debug(message);
+}
+
+fn appendLastS3Error(session: *const windows_s3glue.Session, context: []const u8) void {
+    var error_info = std.mem.zeroes(windows_s3glue.ErrorInfo);
+    if (session.loaded.api.get_last_error(session.library, &error_info) != windows_s3glue.ok) {
+        appendS3DebugFmt("{s}: no s3glue error details available", .{context});
+        return;
+    }
+
+    const message = if (error_info.utf8_message) |value| std.mem.span(value) else "";
+    const function_name = if (error_info.utf8_function) |value| std.mem.span(value) else "";
+    appendS3DebugFmt(
+        "{s}: status={d} http={d} aws={d} function={s} message={s}",
+        .{ context, error_info.status, error_info.http_status, error_info.aws_error, function_name, message },
+    );
+}
+
+fn storageUsesS3() bool {
+    return s3_in_use and s3_storage.enabled();
+}
+
+fn isS3VirtualPath(path: []const u8) bool {
+    return std.mem.startsWith(u8, path, s3_virtual_path_prefix);
+}
+
+fn parseS3BucketName(bucket_arn: []const u8) ?[]const u8 {
+    if (bucket_arn.len == 0) return null;
+    if (!std.mem.startsWith(u8, bucket_arn, "arn:")) return bucket_arn;
+
+    const marker = ":::";
+    const marker_index = std.mem.indexOf(u8, bucket_arn, marker) orelse return null;
+    const tail = bucket_arn[marker_index + marker.len ..];
+    if (tail.len == 0) return null;
+    const end = std.mem.indexOfAny(u8, tail, "/:") orelse tail.len;
+    if (end == 0) return null;
+    return tail[0..end];
+}
+
+fn buildS3VirtualPathForKey(key: []const u8) ![]u8 {
+    const bucket_name = s3_storage.bucket_name orelse return S3StorageError.MissingBucket;
+    return std.fmt.allocPrint(c_allocator, "{s}{s}/{s}", .{ s3_virtual_path_prefix, bucket_name, key });
+}
+
+fn buildS3VirtualPathForDocumentName(file_name: []const u8) ![]u8 {
+    const key = try std.fmt.allocPrint(c_allocator, "{s}{s}", .{ s3_library_key_prefix, file_name });
+    defer c_allocator.free(key);
+    return buildS3VirtualPathForKey(key);
+}
+
+fn s3KeyFromVirtualPath(path: []const u8) ?[]const u8 {
+    if (!isS3VirtualPath(path)) return null;
+
+    const remainder = path[s3_virtual_path_prefix.len..];
+    const slash_index = std.mem.indexOfScalar(u8, remainder, '/') orelse return null;
+    const bucket_name = remainder[0..slash_index];
+    const expected_bucket_name = s3_storage.bucket_name orelse return null;
+    if (!std.mem.eql(u8, bucket_name, expected_bucket_name)) return null;
+
+    const key = remainder[slash_index + 1 ..];
+    if (key.len == 0) return null;
+    return key;
+}
+
+fn buildProjectSettingsStoragePath(document_path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(c_allocator, "{s}.merrow.json", .{document_path});
+}
+
+fn ensureS3CacheDirectory() ![]u8 {
+    const folders = try windows_document.getMerrowUserFolders(c_allocator);
+    defer folders.deinit(c_allocator);
+
+    const cache_dir = try std.fs.path.join(c_allocator, &.{ folders.temp, s3_cache_dir_name });
+    errdefer c_allocator.free(cache_dir);
+    std.fs.makeDirAbsolute(cache_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    return cache_dir;
+}
+
+fn buildS3CachePath(key: []const u8) ![]u8 {
+    const cache_dir = try ensureS3CacheDirectory();
+    defer c_allocator.free(cache_dir);
+
+    const file_name = try std.fmt.allocPrint(
+        c_allocator,
+        "{x}-{s}",
+        .{ std.hash.Wyhash.hash(0, key), std.fs.path.basename(key) },
+    );
+    defer c_allocator.free(file_name);
+
+    return std.fs.path.join(c_allocator, &.{ cache_dir, file_name });
+}
+
+fn loadBytesFromS3Path(path: []const u8) ![]u8 {
+    const session = &(s3_storage.session orelse return S3StorageError.MissingSession);
+    const bucket_name = s3_storage.bucket_name orelse return S3StorageError.MissingBucket;
+    const key = s3KeyFromVirtualPath(path) orelse return S3StorageError.InvalidS3Path;
+
+    appendS3DebugFmt("download start bucket={s} key={s}", .{ bucket_name, key });
+
+    const bucket_name_z = try c_allocator.dupeZ(u8, bucket_name);
+    defer c_allocator.free(bucket_name_z);
+    const key_z = try c_allocator.dupeZ(u8, key);
+    defer c_allocator.free(key_z);
+
+    const temp_path = try buildS3CachePath(key);
+    defer c_allocator.free(temp_path);
+    defer std.fs.deleteFileAbsolute(temp_path) catch {};
+    const temp_path_z = try c_allocator.dupeZ(u8, temp_path);
+    defer c_allocator.free(temp_path_z);
+
+    if (session.loaded.api.get_object_file(session.client, bucket_name_z.ptr, key_z.ptr, temp_path_z.ptr) != windows_s3glue.ok) {
+        appendLastS3Error(session, "download failed");
+        return S3StorageError.RequestFailed;
+    }
+
+    appendS3DebugFmt("download complete bucket={s} key={s}", .{ bucket_name, key });
+
+    return windows_document.loadSourceFromPath(c_allocator, temp_path);
+}
+
+fn saveBytesToS3Path(path: []const u8, bytes: []const u8) !void {
+    const session = &(s3_storage.session orelse return S3StorageError.MissingSession);
+    const bucket_name = s3_storage.bucket_name orelse return S3StorageError.MissingBucket;
+    const key = s3KeyFromVirtualPath(path) orelse return S3StorageError.InvalidS3Path;
+
+    appendS3DebugFmt("upload start bucket={s} key={s} bytes={d}", .{ bucket_name, key, bytes.len });
+
+    const temp_path = try buildS3CachePath(key);
+    defer c_allocator.free(temp_path);
+    defer std.fs.deleteFileAbsolute(temp_path) catch {};
+    try windows_document.saveSourceToPath(temp_path, bytes);
+
+    const bucket_name_z = try c_allocator.dupeZ(u8, bucket_name);
+    defer c_allocator.free(bucket_name_z);
+    const key_z = try c_allocator.dupeZ(u8, key);
+    defer c_allocator.free(key_z);
+    const temp_path_z = try c_allocator.dupeZ(u8, temp_path);
+    defer c_allocator.free(temp_path_z);
+
+    if (session.loaded.api.put_object_file(session.client, bucket_name_z.ptr, key_z.ptr, temp_path_z.ptr, null) != windows_s3glue.ok) {
+        appendLastS3Error(session, "upload failed");
+        return S3StorageError.RequestFailed;
+    }
+
+    appendS3DebugFmt("upload complete bucket={s} key={s}", .{ bucket_name, key });
+}
+
+fn loadBytesFromStoragePath(path: []const u8) ![]u8 {
+    return windows_document.loadSourceFromPath(c_allocator, path);
+}
+
+fn saveBytesToStoragePath(path: []const u8, bytes: []const u8) !void {
+    return windows_document.saveSourceToPath(path, bytes);
+}
+
+/// Compute the MD5 of a local file and return it as a lowercase hex string.
+/// Returns null on any I/O error. Caller must free the returned slice with c_allocator.
+fn computeLocalMd5Hex(path: []const u8) ?[]u8 {
+    const f = std.fs.openFileAbsolute(path, .{}) catch return null;
+    defer f.close();
+    var md5 = std.crypto.hash.Md5.init(.{});
+    var buf: [8192]u8 = undefined;
+    while (true) {
+        const n = f.read(&buf) catch break;
+        if (n == 0) break;
+        md5.update(buf[0..n]);
+    }
+    var digest: [std.crypto.hash.Md5.digest_length]u8 = undefined;
+    md5.final(&digest);
+    const result = c_allocator.alloc(u8, 32) catch return null;
+    const hex = "0123456789abcdef";
+    for (digest, 0..) |byte, i| {
+        result[i * 2] = hex[byte >> 4];
+        result[i * 2 + 1] = hex[byte & 0xf];
+    }
+    return result;
+}
+
+/// Strip wrapping quotes from an S3 ETag. Returns null for multipart ETags
+/// (those containing '-', e.g. "abc-3") since they cannot be compared to a local MD5.
+fn normalizeEtag(raw: []const u8) ?[]const u8 {
+    var s = raw;
+    if (s.len >= 2 and s[0] == '"' and s[s.len - 1] == '"') s = s[1 .. s.len - 1];
+    if (std.mem.indexOfScalar(u8, s, '-') != null) return null;
+    return s;
+}
+
+/// Returns true if the local file content matches the S3 ETag (MD5 comparison).
+/// False if ETag is missing, multipart, or computation fails.
+fn localMatchesS3Etag(path: []const u8, raw_etag: ?[*:0]const u8) bool {
+    const etag_z = raw_etag orelse return false;
+    const s3_hash = normalizeEtag(std.mem.sliceTo(etag_z, 0)) orelse return false;
+    const local_hash = computeLocalMd5Hex(path) orelse return false;
+    defer c_allocator.free(local_hash);
+    return std.mem.eql(u8, local_hash, s3_hash);
+}
+
+/// Upload a local file to S3 under the library/ prefix using its basename as the key.
+/// Logs debug info; returns an error on failure (caller decides whether to surface it).
+fn uploadLocalFileToS3(local_path: []const u8) !void {
+    const session = &(s3_storage.session orelse return S3StorageError.MissingSession);
+    const bucket_name = s3_storage.bucket_name orelse return S3StorageError.MissingBucket;
+
+    const key = try std.fmt.allocPrint(c_allocator, "{s}{s}", .{ s3_library_key_prefix, std.fs.path.basename(local_path) });
+    defer c_allocator.free(key);
+
+    const bucket_z = try c_allocator.dupeZ(u8, bucket_name);
+    defer c_allocator.free(bucket_z);
+    const key_z = try c_allocator.dupeZ(u8, key);
+    defer c_allocator.free(key_z);
+    const path_z = try c_allocator.dupeZ(u8, local_path);
+    defer c_allocator.free(path_z);
+
+    appendS3DebugFmt("upload start key={s}", .{key});
+    if (session.loaded.api.put_object_file(session.client, bucket_z.ptr, key_z.ptr, path_z.ptr, null) != windows_s3glue.ok) {
+        appendLastS3Error(session, "upload failed");
+        return S3StorageError.RequestFailed;
+    }
+    appendS3DebugFmt("upload complete key={s}", .{key});
+}
+
+/// Bidirectional sync between the local Merrow library folder and the S3 library/ prefix.
+/// Files newer locally are uploaded; files newer on S3 (or absent locally) are downloaded.
+fn syncCloudStorage() void {
+    if (!storageUsesS3()) {
+        setStatusMessage("Cloud storage not connected — configure it in Settings > Cloud Storage");
+        return;
+    }
+
+    const session = &(s3_storage.session orelse return);
+    const bucket_name = s3_storage.bucket_name orelse return;
+
+    appendS3Debug("sync started");
+    setStatusMessage("Syncing with cloud storage...");
+
+    const folders = windows_document.getMerrowUserFolders(c_allocator) catch {
+        setStatusMessage("Sync failed: could not resolve library folder");
+        return;
+    };
+    defer folders.deinit(c_allocator);
+
+    // List all S3 objects under library/ (up to 1 000 — enough for personal teams).
+    const bucket_z = c_allocator.dupeZ(u8, bucket_name) catch return;
+    defer c_allocator.free(bucket_z);
+    const prefix_z = c_allocator.dupeZ(u8, s3_library_key_prefix) catch return;
+    defer c_allocator.free(prefix_z);
+
+    var list_options = windows_s3glue.ListOptions{
+        .utf8_prefix = prefix_z.ptr,
+        .utf8_delimiter = null,
+        .utf8_continuation_token = null,
+        .max_keys = 1000,
+        .flags = 0,
+    };
+    var list_result = std.mem.zeroes(windows_s3glue.ListResult);
+    if (session.loaded.api.list_objects(session.client, bucket_z.ptr, &list_options, &list_result) != windows_s3glue.ok) {
+        appendLastS3Error(session, "sync list failed");
+        setStatusMessage("Sync failed: could not list S3 objects");
+        return;
+    }
+    defer _ = session.loaded.api.free_list_result(&list_result);
+
+    const s3_objects: []const windows_s3glue.ListEntry = if (list_result.objects) |objs|
+        objs[0..list_result.object_count]
+    else
+        &[_]windows_s3glue.ListEntry{};
+
+    var uploads: usize = 0;
+    var downloads: usize = 0;
+    var errors: usize = 0;
+
+    // --- Phase 1: upload local files that are newer than S3 ---
+    var lib_dir = std.fs.openDirAbsolute(folders.library, .{ .iterate = true }) catch {
+        setStatusMessage("Sync failed: could not open library folder");
+        return;
+    };
+    defer lib_dir.close();
+
+    var iter = lib_dir.iterate();
+    while (iter.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+        const name = entry.name;
+        if (!std.mem.endsWith(u8, name, ".mmd") and
+            !std.mem.endsWith(u8, name, ".merrow.json") and
+            !std.mem.endsWith(u8, name, ".ffm")) continue;
+
+        const local_path = std.fs.path.join(c_allocator, &.{ folders.library, name }) catch continue;
+        defer c_allocator.free(local_path);
+
+        const local_mtime_sec = blk: {
+            const f = std.fs.openFileAbsolute(local_path, .{}) catch break :blk null;
+            defer f.close();
+            const st = f.stat() catch break :blk null;
+            const sec: i64 = @intCast(@divTrunc(st.mtime, std.time.ns_per_s));
+            break :blk sec;
+        };
+        if (local_mtime_sec == null) continue;
+
+        const s3_key = std.fmt.allocPrint(c_allocator, "{s}{s}", .{ s3_library_key_prefix, name }) catch continue;
+        defer c_allocator.free(s3_key);
+
+        var s3_mtime: ?i64 = null;
+        var s3_raw_etag: ?[*:0]const u8 = null;
+        for (s3_objects) |obj| {
+            const obj_key = if (obj.utf8_key) |k| std.mem.sliceTo(k, 0) else continue;
+            if (std.mem.eql(u8, obj_key, s3_key)) {
+                s3_mtime = obj.last_modified_epoch_seconds;
+                s3_raw_etag = obj.utf8_etag;
+                break;
+            }
+        }
+
+        // Hash check: skip upload entirely if the content is already identical on S3.
+        if (s3_raw_etag != null and localMatchesS3Etag(local_path, s3_raw_etag)) {
+            appendS3DebugFmt("sync skip upload (hash match) {s}", .{name});
+            continue;
+        }
+
+        const should_upload = if (s3_mtime) |s3t| local_mtime_sec.? > s3t else true;
+        if (should_upload) {
+            uploadLocalFileToS3(local_path) catch |err| {
+                appendS3DebugFmt("sync upload failed {s}: {s}", .{ name, @errorName(err) });
+                errors += 1;
+                continue;
+            };
+            uploads += 1;
+        }
+    }
+
+    // --- Phase 2: download S3 files that are newer than (or absent from) local ---
+    for (s3_objects) |obj| {
+        const obj_key = if (obj.utf8_key) |k| std.mem.sliceTo(k, 0) else continue;
+        if (!std.mem.startsWith(u8, obj_key, s3_library_key_prefix)) continue;
+        const file_name = obj_key[s3_library_key_prefix.len..];
+        if (file_name.len == 0) continue;
+        if (!std.mem.endsWith(u8, file_name, ".mmd") and
+            !std.mem.endsWith(u8, file_name, ".merrow.json") and
+            !std.mem.endsWith(u8, file_name, ".ffm")) continue;
+
+        const local_path = std.fs.path.join(c_allocator, &.{ folders.library, file_name }) catch continue;
+        defer c_allocator.free(local_path);
+
+        const local_mtime_sec: ?i64 = blk: {
+            const f = std.fs.openFileAbsolute(local_path, .{}) catch break :blk null;
+            defer f.close();
+            const st = f.stat() catch break :blk null;
+            const sec: i64 = @intCast(@divTrunc(st.mtime, std.time.ns_per_s));
+            break :blk sec;
+        };
+
+        const s3_mtime = obj.last_modified_epoch_seconds;
+
+        // Hash check: skip download entirely if the content is already identical locally.
+        if (local_mtime_sec != null and localMatchesS3Etag(local_path, obj.utf8_etag)) {
+            appendS3DebugFmt("sync skip download (hash match) {s}", .{file_name});
+            continue;
+        }
+
+        const should_download = if (local_mtime_sec) |lmt| s3_mtime > lmt else true;
+        if (!should_download) continue;
+
+        const key_z = c_allocator.dupeZ(u8, obj_key) catch continue;
+        defer c_allocator.free(key_z);
+        const path_z = c_allocator.dupeZ(u8, local_path) catch continue;
+        defer c_allocator.free(path_z);
+
+        appendS3DebugFmt("sync download key={s}", .{obj_key});
+        if (session.loaded.api.get_object_file(session.client, bucket_z.ptr, key_z.ptr, path_z.ptr) != windows_s3glue.ok) {
+            appendLastS3Error(session, "sync download failed");
+            errors += 1;
+            continue;
+        }
+        downloads += 1;
+    }
+
+    appendS3DebugFmt("sync complete uploads={d} downloads={d} errors={d}", .{ uploads, downloads, errors });
+
+    const message = std.fmt.allocPrint(
+        c_allocator,
+        "Sync complete: {d} uploaded, {d} downloaded{s}",
+        .{ uploads, downloads, if (errors > 0) " (some errors — see s3-debug.log)" else "" },
+    ) catch {
+        setStatusMessage("Sync complete");
+        return;
+    };
+    defer c_allocator.free(message);
+    setStatusMessage(message);
+    if (downloads > 0) refreshRecentFilesMenu();
+}
+
+fn validateS3Connection(session: *windows_s3glue.Session, bucket_name: []const u8) bool {
+    const bucket_name_z = c_allocator.dupeZ(u8, bucket_name) catch return false;
+    defer c_allocator.free(bucket_name_z);
+    const prefix_z = c_allocator.dupeZ(u8, s3_library_key_prefix) catch return false;
+    defer c_allocator.free(prefix_z);
+
+    var list_options = windows_s3glue.ListOptions{
+        .utf8_prefix = prefix_z.ptr,
+        .utf8_delimiter = null,
+        .utf8_continuation_token = null,
+        .max_keys = 1,
+        .flags = 0,
+    };
+    var list_result = std.mem.zeroes(windows_s3glue.ListResult);
+    const status = session.loaded.api.list_objects(session.client, bucket_name_z.ptr, &list_options, &list_result);
+    if (status == windows_s3glue.ok) {
+        _ = session.loaded.api.free_list_result(&list_result);
+        appendS3DebugFmt("connection validated for bucket={s} prefix={s}", .{ bucket_name, s3_library_key_prefix });
+        return true;
+    }
+    appendLastS3Error(session, "connection validation failed");
+    return false;
+}
+
+fn refreshCloudStorageState(report_failures: bool) bool {
+    appendS3Debug("cloud storage refresh started");
+    disableCloudStorage();
+
+    const region = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_region) catch null;
+    defer if (region) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    const bucket_arn = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_bucket) catch null;
+    defer if (bucket_arn) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    const api_id = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_id) catch null;
+    defer if (api_id) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    const secret_key = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_key) catch null;
+    defer if (secret_key) |value| windows_credentials.wipeAndFree(c_allocator, value);
+
+    appendS3DebugFmt(
+        "credential presence region={any} bucket={any} api_id={any} secret_key={any}",
+        .{ region != null, bucket_arn != null, api_id != null, secret_key != null },
+    );
+
+    if (region == null or bucket_arn == null or api_id == null or secret_key == null) {
+        appendS3Debug("cloud storage refresh skipped due to missing credentials");
+        return false;
+    }
+    if (region.?.len == 0 or bucket_arn.?.len == 0 or api_id.?.len == 0 or secret_key.?.len == 0) {
+        appendS3DebugFmt(
+            "cloud storage refresh skipped due to empty values region_len={d} bucket_len={d} api_id_len={d} secret_key_len={d}",
+            .{ region.?.len, bucket_arn.?.len, api_id.?.len, secret_key.?.len },
+        );
+        return false;
+    }
+
+    const bucket_name = parseS3BucketName(bucket_arn.?) orelse {
+        appendS3DebugFmt("bucket arn parse failed value={s}", .{bucket_arn.?});
+        if (report_failures) setStatusMessage("S3 bucket ARN is invalid; using local storage");
+        return false;
+    };
+
+    appendS3DebugFmt(
+        "attempting S3 session region={s} bucket_arn={s} bucket_name={s} api_id_len={d} secret_key_len={d}",
+        .{ region.?, bucket_arn.?, bucket_name, api_id.?.len, secret_key.?.len },
+    );
+
+    var session = windows_s3glue.openSession(c_allocator, .{
+        .region = region.?,
+        .credentials = .{ .static = .{
+            .access_key_id = api_id.?,
+            .secret_access_key = secret_key.?,
+        } },
+    }) catch |err| {
+        appendS3DebugFmt("s3 session creation failed before validation error={s}", .{@errorName(err)});
+        if (report_failures) setStatusMessage("S3 session could not be created; using local storage");
+        return false;
+    };
+
+    appendS3Debug("s3 session created; validating bucket access");
+
+    if (!validateS3Connection(&session, bucket_name)) {
+        session.deinit();
+        if (report_failures) setStatusMessage("S3 credentials were rejected; using local storage");
+        return false;
+    }
+
+    const bucket_name_copy = c_allocator.dupe(u8, bucket_name) catch {
+        session.deinit();
+        return false;
+    };
+    errdefer c_allocator.free(bucket_name_copy);
+    const bucket_arn_copy = c_allocator.dupe(u8, bucket_arn.?) catch {
+        session.deinit();
+        return false;
+    };
+    errdefer c_allocator.free(bucket_arn_copy);
+    const region_copy = c_allocator.dupe(u8, region.?) catch {
+        session.deinit();
+        return false;
+    };
+
+    s3_storage.session = session;
+    s3_storage.bucket_name = bucket_name_copy;
+    s3_storage.bucket_arn = bucket_arn_copy;
+    s3_storage.region = region_copy;
+    s3_in_use = true;
+    appendS3DebugFmt("cloud storage enabled bucket={s} region={s}", .{ bucket_name_copy, region_copy });
+    return true;
+}
+
 fn closeLibraryDatabase() void {
     if (library_database) |*db| {
         db.close() catch {};
@@ -754,6 +1382,16 @@ fn setEditorText(text: []const u8) void {
     windows_editor.setEditorText(c_allocator, child_windows.editor, &suppress_editor_change, text);
 }
 
+fn setEditorReadOnly(read_only: bool) void {
+    windows_editor.setEditorReadOnly(child_windows.editor, read_only);
+}
+
+fn setSourceWriteLocked(locked: bool) void {
+    if (source_write_locked == locked) return;
+    source_write_locked = locked;
+    setEditorReadOnly(locked);
+}
+
 fn installMenuBar(hwnd: ?foundation.HWND) bool {
     return windows_toolbar.installMenuBar(hwnd);
 }
@@ -824,11 +1462,11 @@ fn refreshRecentFilesMenu() void {
 }
 
 fn loadSourceFromPath(path: []const u8) ![]u8 {
-    return windows_document.loadSourceFromPath(c_allocator, path);
+    return loadBytesFromStoragePath(path);
 }
 
 fn saveSourceToPath(path: []const u8, source: []const u8) !void {
-    return windows_document.saveSourceToPath(path, source);
+    return saveBytesToStoragePath(path, source);
 }
 
 const CanvasSizeCm = struct {
@@ -979,7 +1617,7 @@ fn showCanvasContextMenuSelected(hwnd: foundation.HWND, client_x: i32, client_y:
         windows_constants.ctx_menu_delete => {
             deleteSelectedObject();
             windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
-            scheduleFreeformPersist();
+            onEditableGraphMutated();
             _ = gdi.InvalidateRect(hwnd, null, 0);
         },
         windows_constants.ctx_menu_begin_link => {
@@ -991,7 +1629,7 @@ fn showCanvasContextMenuSelected(hwnd: foundation.HWND, client_x: i32, client_y:
             canvas.cancelInsertion();
             completeCanvasLink(src);
             windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
-            scheduleFreeformPersist();
+            onEditableGraphMutated();
             _ = gdi.InvalidateRect(hwnd, null, 0);
         },
         windows_constants.ctx_menu_cancel_link => {
@@ -1421,7 +2059,7 @@ fn applyProjectSettingsToCanvas(refresh_inspector: bool) void {
     if (child_windows.canvas) |canvas_hwnd| {
         _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
     }
-    if (refresh_inspector and app_mode == .freeform) {
+    if (refresh_inspector) {
         windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
     }
 }
@@ -1522,7 +2160,7 @@ fn previewStatusPrefix() []const u8 {
 }
 
 fn sourcePanelVisible() bool {
-    return app_mode == .mermaid or show_source_panel_in_freeform;
+    return show_source_panel;
 }
 
 fn updateDiagramHeaderControls() void {
@@ -1568,35 +2206,27 @@ fn updateDiagramHeaderControls() void {
 }
 
 fn applyModeVisibility() void {
-    const show_source_panel = sourcePanelVisible();
+    const show_source = sourcePanelVisible();
 
-    if (child_windows.preview) |w| _ = ui.ShowWindow(w, if (app_mode == .mermaid) ui.SW_SHOWNA else ui.SW_HIDE);
-    if (child_windows.canvas) |w| _ = ui.ShowWindow(w, if (app_mode == .freeform) ui.SW_SHOWNA else ui.SW_HIDE);
+    // Preview window is always hidden in unified mode.
+    if (child_windows.preview) |w| _ = ui.ShowWindow(w, ui.SW_HIDE);
+    // Canvas is always visible.
+    if (child_windows.canvas) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
 
-    if (child_windows.editor) |w| _ = ui.ShowWindow(w, if (show_source_panel) ui.SW_SHOWNA else ui.SW_HIDE);
-    if (child_windows.command) |w| _ = ui.ShowWindow(w, if (show_source_panel) ui.SW_SHOWNA else ui.SW_HIDE);
-    if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, if (show_source_panel) ui.SW_SHOWNA else ui.SW_HIDE);
+    if (child_windows.editor) |w| _ = ui.ShowWindow(w, if (show_source) ui.SW_SHOWNA else ui.SW_HIDE);
+    if (child_windows.command) |w| _ = ui.ShowWindow(w, if (show_source) ui.SW_SHOWNA else ui.SW_HIDE);
+    if (child_windows.apply_button) |w| _ = ui.ShowWindow(w, if (show_source) ui.SW_SHOWNA else ui.SW_HIDE);
 
     if (child_windows.toolbar) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_label) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_prev_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
     if (child_windows.diagram_next_button) |w| _ = ui.ShowWindow(w, ui.SW_SHOWNA);
 
-    if (app_mode == .freeform) {
-        windows_canvas.inspector.show(&canvas_renderer.inspector, true);
-    } else {
-        windows_canvas.inspector.setFontInspectorActive(false);
-        windows_canvas.inspector.show(&canvas_renderer.inspector, false);
-    }
+    windows_canvas.inspector.show(&canvas_renderer.inspector, true);
 }
 
 fn toggleSourcePanelVisibility() void {
-    if (app_mode != .freeform) {
-        setStatusMessage("Source panel is always visible in Mermaid mode");
-        return;
-    }
-
-    show_source_panel_in_freeform = !show_source_panel_in_freeform;
+    show_source_panel = !show_source_panel;
     applyModeVisibility();
     layoutChildWindows(main_window);
     _ = gdi.RedrawWindow(
@@ -1610,7 +2240,7 @@ fn toggleSourcePanelVisibility() void {
                 redrawFlagsBits(gdi.RDW_ERASENOW),
         ),
     );
-    setStatusMessage(if (show_source_panel_in_freeform) "Source panel shown" else "Source panel hidden");
+    setStatusMessage(if (show_source_panel) "Source panel shown" else "Source panel hidden");
 }
 
 fn updateDiagramSelectorControl() void {
@@ -1628,7 +2258,8 @@ fn selectDiagramIndex(index: usize, refresh_view: bool) void {
         return;
     }
 
-    if (refresh_view and app_mode == .freeform and index != selected_diagram_index) {
+    if (refresh_view and index != selected_diagram_index) {
+        flushPendingGraphSourceWriteback();
         flushPendingFreeformPersist();
     }
 
@@ -1636,11 +2267,7 @@ fn selectDiagramIndex(index: usize, refresh_view: bool) void {
     updateDiagramHeaderControls();
 
     if (!refresh_view) return;
-    if (app_mode == .freeform) {
-        rebuildFreeformCanvas(true);
-    } else {
-        updateEditorDerivedState(true);
-    }
+    rebuildFreeformCanvas(true);
 }
 
 fn selectAdjacentDiagram(delta: i32) void {
@@ -1698,9 +2325,7 @@ fn onEditorSelectionChanged() void {
 
 fn onProjectFontSettingsChanged() void {
     applyProjectSettingsToCanvas(true);
-    if (app_mode == .mermaid) {
-        updateEditorDerivedState(false);
-    }
+    onEditableGraphMutated();
     setDocumentDirty(true);
     setStatusMessage("Updated project settings");
 }
@@ -1778,9 +2403,20 @@ fn scheduleFreeformPersist() void {
     _ = ui.SetTimer(hwnd, main_timer_id_ffm_persist, ffm_persist_debounce_ms, null);
 }
 
+fn scheduleGraphSourceWriteback() void {
+    const hwnd = main_window orelse return;
+    setSourceWriteLocked(true);
+    _ = ui.SetTimer(hwnd, main_timer_id_graph_source_writeback, graph_source_writeback_debounce_ms, null);
+}
+
 fn cancelScheduledFreeformPersist() void {
     const hwnd = main_window orelse return;
     _ = ui.KillTimer(hwnd, main_timer_id_ffm_persist);
+}
+
+fn cancelScheduledGraphSourceWriteback() void {
+    const hwnd = main_window orelse return;
+    _ = ui.KillTimer(hwnd, main_timer_id_graph_source_writeback);
 }
 
 fn flushPendingFreeformPersist() void {
@@ -1788,13 +2424,63 @@ fn flushPendingFreeformPersist() void {
     persistCurrentFreeformGraph();
 }
 
+fn flushPendingGraphSourceWriteback() void {
+    cancelScheduledGraphSourceWriteback();
+    applyGraphSourceWriteback();
+}
+
 fn persistCurrentFreeformGraph() void {
-    if (app_mode != .freeform) return;
     rememberCurrentRecentFile();
 }
 
-fn onFreeformGraphChanged() void {
+fn buildGraphWritebackDocumentSource() ![]u8 {
+    const active_graph = canvas_renderer.canvas_state.graph orelse return error.NoGraph;
+
+    const fallback_source = duplicateSelectedDiagramSource(c_allocator) catch null;
+    defer if (fallback_source) |text| c_allocator.free(text);
+
+    const mermaid_text = try mermaid_export.serializeForMenuExport(c_allocator, active_graph, fallback_source);
+    defer c_allocator.free(mermaid_text);
+
+    const diagram_source = try std.fmt.allocPrint(
+        c_allocator,
+        "%% @canvas width={d:.2}cm height={d:.2}cm\n%% @font family={s} node={d:.1} group={d:.1} edge={d:.1}\n{s}",
+        .{
+            project_font_settings.canvas_width_cm,
+            project_font_settings.canvas_height_cm,
+            @tagName(project_font_settings.font_family),
+            project_font_settings.node_label_size,
+            project_font_settings.group_title_size,
+            project_font_settings.edge_label_size,
+            mermaid_text,
+        },
+    );
+    defer c_allocator.free(diagram_source);
+
+    return replaceSelectedDiagramSource(diagram_source);
+}
+
+fn applyGraphSourceWriteback() void {
+    if (!source_write_locked) return;
+
+    const rebuilt_source = buildGraphWritebackDocumentSource() catch {
+        setSourceWriteLocked(false);
+        setStatusMessage("Failed to update source from graph");
+        return;
+    };
+    defer c_allocator.free(rebuilt_source);
+
+    applyUpdatedSource(rebuilt_source, "Updated source from graph");
+    setSourceWriteLocked(false);
+}
+
+fn onEditableGraphMutated() void {
     scheduleFreeformPersist();
+    scheduleGraphSourceWriteback();
+}
+
+fn onFreeformGraphChanged() void {
+    onEditableGraphMutated();
 }
 
 fn rebuildFreeformCanvas(fit_view: bool) void {
@@ -1842,11 +2528,6 @@ fn rebuildFreeformCanvas(fit_view: bool) void {
 }
 
 fn toggleFontInspector() void {
-    if (app_mode != .freeform) {
-        setStatusMessage("Project inspector is only available in freeform mode");
-        return;
-    }
-
     const active = !windows_canvas.inspector.fontInspectorActive();
     windows_canvas.inspector.setFontInspectorActive(active);
     windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
@@ -1854,6 +2535,7 @@ fn toggleFontInspector() void {
 }
 
 fn openDocumentPath(path: []const u8, preferred_diagram_index: ?usize) void {
+    flushPendingGraphSourceWriteback();
     const source = loadSourceFromPath(path) catch {
         setStatusMessage("Failed to open file");
         return;
@@ -1871,7 +2553,7 @@ fn openDocumentPath(path: []const u8, preferred_diagram_index: ?usize) void {
         selectDiagramIndex(idx, false);
         updateEditorDerivedState(true);
     }
-    if (app_mode == .freeform) rebuildFreeformCanvas(true);
+    rebuildFreeformCanvas(true);
     setDocumentDirty(false);
     rememberCurrentRecentFile();
     refreshRecentFilesMenu();
@@ -1901,6 +2583,7 @@ fn openDocumentFromDialog() void {
 }
 
 fn saveDocumentToPath(path: []const u8) bool {
+    flushPendingGraphSourceWriteback();
     const source = getEditorText(c_allocator) catch {
         setStatusMessage("Failed to read editor text");
         return false;
@@ -1911,6 +2594,14 @@ fn saveDocumentToPath(path: []const u8) bool {
         setStatusMessage("Failed to save file");
         return false;
     };
+
+    // Push to S3 after a successful local write (best-effort: log but don't fail the save).
+    if (storageUsesS3()) {
+        uploadLocalFileToS3(path) catch |err| {
+            appendS3DebugFmt("post-save upload failed: {s}", .{@errorName(err)});
+        };
+    }
+
     if (!saveProjectFontSettingsForPath(path)) return false;
 
     setCurrentDocumentPath(path);
@@ -1918,12 +2609,8 @@ fn saveDocumentToPath(path: []const u8) bool {
     setDocumentDirty(false);
     rememberCurrentRecentFile();
 
-    if (app_mode == .freeform) {
-        if (saveFfmSidecar(path)) {
-            setStatusMessage("Saved source and freeform layout");
-        } else {
-            setStatusMessage("Saved source document (freeform layout not saved)");
-        }
+    if (saveFfmSidecar(path)) {
+        setStatusMessage("Saved source and diagram layout");
     } else {
         setStatusMessage("Saved source document");
     }
@@ -2011,9 +2698,7 @@ fn loadWordComGlueProc(comptime Proc: type, module: ModuleHandle, name: [*:0]con
 fn exportDiagramToWord() void {
     const api = ensureWordComGlueLoaded() orelse return;
 
-    if (app_mode == .freeform) {
-        flushPendingFreeformPersist();
-    }
+    flushPendingFreeformPersist();
 
     seedDefaultWordAssets() catch {};
 
@@ -2142,7 +2827,7 @@ fn exportDiagramToWord() void {
     }
     const pdf_options = wcg_pdf_options{
         .open_after_export = 0,
-        .optimize_for = 1,
+        .optimize_for = 0,
         .range = 0,
         .from_page = 0,
         .to_page = 0,
@@ -2200,28 +2885,22 @@ fn exportDiagramToMermaid() void {
     };
     defer c_allocator.free(mermaid_text);
 
-    const mermaid_export_text = if (app_mode == .freeform)
-        std.fmt.allocPrint(
-            c_allocator,
-            "%% @canvas width={d:.2}cm height={d:.2}cm\n%% @font family={s} node={d:.1} group={d:.1} edge={d:.1}\n{s}",
-            .{
-                project_font_settings.canvas_width_cm,
-                project_font_settings.canvas_height_cm,
-                @tagName(project_font_settings.font_family),
-                project_font_settings.node_label_size,
-                project_font_settings.group_title_size,
-                project_font_settings.edge_label_size,
-                mermaid_text,
-            },
-        ) catch {
-            setStatusMessage("Failed to serialize export directives");
-            return;
-        }
-    else
-        c_allocator.dupe(u8, mermaid_text) catch {
-            setStatusMessage("Failed to finalize Mermaid export");
-            return;
-        };
+    const mermaid_export_text = std.fmt.allocPrint(
+        c_allocator,
+        "%% @canvas width={d:.2}cm height={d:.2}cm\n%% @font family={s} node={d:.1} group={d:.1} edge={d:.1}\n{s}",
+        .{
+            project_font_settings.canvas_width_cm,
+            project_font_settings.canvas_height_cm,
+            @tagName(project_font_settings.font_family),
+            project_font_settings.node_label_size,
+            project_font_settings.group_title_size,
+            project_font_settings.edge_label_size,
+            mermaid_text,
+        },
+    ) catch {
+        setStatusMessage("Failed to serialize export directives");
+        return;
+    };
     defer c_allocator.free(mermaid_export_text);
 
     const export_path = windows_document.chooseCustomPath(
@@ -2256,13 +2935,13 @@ fn exportDiagramToMermaid() void {
 }
 
 fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library, document_handle: wcg_document, markdown_document: *const document_model.MarkdownDocument) bool {
-    var temp_png_paths = std.ArrayList([]u8){};
+    var temp_export_paths = std.ArrayList([]u8){};
     defer {
-        for (temp_png_paths.items) |temp_path| {
+        for (temp_export_paths.items) |temp_path| {
             std.fs.deleteFileAbsolute(temp_path) catch {};
             c_allocator.free(temp_path);
         }
-        temp_png_paths.deinit(c_allocator);
+        temp_export_paths.deinit(c_allocator);
     }
 
     var diagram_index: usize = 0;
@@ -2283,16 +2962,16 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
                     };
                 } else currentProjectCanvasSizeCm();
 
-                const diagram_png_path = blk: {
-                    if (app_mode == .freeform and diagram_index == selected_diagram_index) {
+                const diagram_asset_path = blk: {
+                    if (diagram_index == selected_diagram_index) {
                         if (canvas_renderer.canvas_state.graph) |active_graph| {
-                            break :blk renderEditableGraphToExportPng(active_graph, canvas_size_cm) catch renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
+                            break :blk renderEditableGraphToExportSvg(active_graph, canvas_size_cm) catch renderEditableGraphToExportPng(active_graph, canvas_size_cm) catch renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
                                 setStatusMessage(@errorName(err));
                                 return false;
                             };
                         }
                     }
-                    break :blk renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
+                    break :blk renderDiagramBlockToExportSvg(&diagram_block, canvas_size_cm) catch renderDiagramBlockToExportPng(&diagram_block, canvas_size_cm) catch |err| {
                         setStatusMessage(@errorName(err));
                         return false;
                     };
@@ -2300,18 +2979,18 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
 
                 diagram_index += 1;
 
-                temp_png_paths.append(c_allocator, diagram_png_path) catch {
-                    std.fs.deleteFileAbsolute(diagram_png_path) catch {};
-                    c_allocator.free(diagram_png_path);
+                temp_export_paths.append(c_allocator, diagram_asset_path) catch {
+                    std.fs.deleteFileAbsolute(diagram_asset_path) catch {};
+                    c_allocator.free(diagram_asset_path);
                     setStatusMessage("Failed to track temporary diagram export");
                     return false;
                 };
 
-                const diagram_png_z = dupeSentinel(c_allocator, diagram_png_path) catch {
+                const diagram_asset_z = dupeSentinel(c_allocator, diagram_asset_path) catch {
                     setStatusMessage("Failed to prepare diagram image path");
                     return false;
                 };
-                defer c_allocator.free(diagram_png_z);
+                defer c_allocator.free(diagram_asset_z);
 
                 const image_options = wcg_image_options{
                     .placement = 0,
@@ -2327,7 +3006,7 @@ fn exportMarkdownDocumentToWord(api: *const WordComGlueApi, library: wcg_library
                     .utf8_caption = null,
                     .utf8_alt_text = null,
                 };
-                if (api.insert_image(document_handle, diagram_png_z.ptr, &image_options) != WCG_OK) {
+                if (api.insert_image(document_handle, diagram_asset_z.ptr, &image_options) != WCG_OK) {
                     setWordComStatusMessage(api, library, "Failed to insert diagram image");
                     return false;
                 }
@@ -2511,9 +3190,7 @@ fn saveFfmSidecar(doc_path: []const u8) bool {
     ) catch return false;
     defer c_allocator.free(ffm_path);
 
-    const file = std.fs.createFileAbsolute(ffm_path, .{ .truncate = true }) catch return false;
-    defer file.close();
-    file.writeAll(graph_blob) catch return false;
+    saveBytesToStoragePath(ffm_path, graph_blob) catch return false;
     return true;
 }
 
@@ -2598,7 +3275,7 @@ fn renderGraphToD2DPng(
 
     // 4. Draw the graph into the off-screen bitmap.
     rt.BeginDraw();
-    windows_canvas.draw.drawCanvas(&ctx, graph, vp, .{}, .{}, .{}, 0.0, 0.0);
+    windows_canvas.draw.drawCanvas(&ctx, graph, vp, .{}, .{}, .{}, 0.0, 0.0, false);
     if (hrFailed(rt.EndDraw(null, null))) return error.RenderPreviewFailed;
 
     // 5. Encode the WIC bitmap to a PNG file via WIC.
@@ -2721,7 +3398,31 @@ fn renderEditableGraphToExportPng(graph: *const windows_canvas.StudioEditableGra
     const export_dims = exportDimensionsForSizeCm(size_cm);
     const temp_path = try createTempExportPath(".png");
     errdefer c_allocator.free(temp_path);
-    try renderGraphToD2DPng(graph, export_dims.width, export_dims.height, 300.0, temp_path);
+    try renderGraphToD2DPng(graph, export_dims.width, export_dims.height, windows_project_settings.export_raster_dpi, temp_path);
+    return temp_path;
+}
+
+fn renderEditableGraphToExportSvg(graph: *const windows_canvas.StudioEditableGraph, size_cm: CanvasSizeCm) ![]u8 {
+    var message: [256]u8 = std.mem.zeroes([256]u8);
+    const export_dims = exportDimensionsForSizeCm(size_cm);
+    const temp_path = try createTempExportPath(".svg");
+    errdefer c_allocator.free(temp_path);
+    const temp_path_z = try dupeSentinel(c_allocator, temp_path);
+    defer c_allocator.free(temp_path_z);
+
+    const result = merrow_studio_render_editable_graph_svg(
+        graph,
+        temp_path_z.ptr,
+        export_dims.width,
+        export_dims.height,
+        &message,
+        message.len,
+    );
+    if (result != 0) {
+        const status = std.mem.sliceTo(&message, 0);
+        if (status.len > 0) setStatusMessage(status);
+        return error.RenderPreviewFailed;
+    }
     return temp_path;
 }
 
@@ -2741,6 +3442,24 @@ fn renderDiagramBlockToExportPng(diagram: *const document_model.DiagramBlock, si
     }
 
     return renderDiagramToExportPng(diagram.mermaid_source, size_cm);
+}
+
+fn renderDiagramBlockToExportSvg(diagram: *const document_model.DiagramBlock, size_cm: CanvasSizeCm) ![]u8 {
+    if (loadPersistedGraphForDiagram(diagram)) |saved| {
+        defer ffm_serializer.freeGraph(saved.graph);
+        if (saved.graph.graph_type == export_editable_graph_type_flowchart or
+            saved.graph.graph_type == export_editable_graph_type_sequence)
+        {
+            return renderEditableGraphToExportSvg(saved.graph, size_cm);
+        }
+    }
+
+    if (buildEditableGraphFromAnnotatedSource(diagram.mermaid_source)) |graph| {
+        defer merrow_studio_free_editable_graph(graph);
+        return renderEditableGraphToExportSvg(graph, size_cm);
+    }
+
+    return error.RenderPreviewFailed;
 }
 
 fn createTempExportPath(suffix: []const u8) ![]u8 {
@@ -3350,6 +4069,161 @@ fn applyAboutFonts() void {
     }
 }
 
+fn applyCloudStorageFonts() void {
+    if (cloud_storage_controls.region_label) |control| applyControlFont(control);
+    if (cloud_storage_controls.region_edit) |control| applyControlFont(control);
+    if (cloud_storage_controls.bucket_label) |control| applyControlFont(control);
+    if (cloud_storage_controls.bucket_edit) |control| applyControlFont(control);
+    if (cloud_storage_controls.api_label) |control| applyControlFont(control);
+    if (cloud_storage_controls.api_edit) |control| applyControlFont(control);
+    if (cloud_storage_controls.key_label) |control| applyControlFont(control);
+    if (cloud_storage_controls.key_edit) |control| applyControlFont(control);
+    if (cloud_storage_controls.ok_button) |control| applyControlFont(control);
+}
+
+fn layoutCloudStorageWindow(hwnd: ?foundation.HWND) void {
+    var rect = std.mem.zeroes(foundation.RECT);
+    if (ui.GetClientRect(hwnd, &rect) == 0) return;
+
+    const padding: i32 = 16;
+    const label_height: i32 = 18;
+    const edit_height: i32 = 26;
+    const field_gap: i32 = 6;
+    const row_gap: i32 = 16;
+    const button_width: i32 = 96;
+    const button_height: i32 = 28;
+    const client_width = rect.right - rect.left;
+    const client_height = rect.bottom - rect.top;
+    const field_width = @max(120, client_width - padding * 2);
+
+    var y = padding;
+    if (cloud_storage_controls.region_label) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, label_height, 1);
+    }
+    y += label_height + field_gap;
+    if (cloud_storage_controls.region_edit) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, edit_height, 1);
+    }
+    y += edit_height + row_gap;
+    if (cloud_storage_controls.bucket_label) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, label_height, 1);
+    }
+    y += label_height + field_gap;
+    if (cloud_storage_controls.bucket_edit) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, edit_height, 1);
+    }
+    y += edit_height + row_gap;
+    if (cloud_storage_controls.api_label) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, label_height, 1);
+    }
+    y += label_height + field_gap;
+    if (cloud_storage_controls.api_edit) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, edit_height, 1);
+    }
+    y += edit_height + row_gap;
+    if (cloud_storage_controls.key_label) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, label_height, 1);
+    }
+    y += label_height + field_gap;
+    if (cloud_storage_controls.key_edit) |control| {
+        _ = ui.MoveWindow(control, padding, y, field_width, edit_height, 1);
+    }
+
+    if (cloud_storage_controls.ok_button) |control| {
+        _ = ui.MoveWindow(control, client_width - padding - button_width, client_height - padding - button_height, button_width, button_height, 1);
+    }
+}
+
+fn getWindowTextAlloc(hwnd: ?foundation.HWND) ?[]u8 {
+    const text_len_i32 = ui.GetWindowTextLengthA(hwnd);
+    if (text_len_i32 < 0) return null;
+    const text_len: usize = @intCast(text_len_i32);
+    const buffer = c_allocator.allocSentinel(u8, text_len, 0) catch return null;
+    errdefer c_allocator.free(buffer);
+
+    const copied = ui.GetWindowTextA(hwnd, buffer.ptr, @intCast(text_len + 1));
+    if (copied < 0) return null;
+    return buffer[0..@intCast(copied)];
+}
+
+fn loadCloudStorageCredentialsIntoDialog() void {
+    const region_edit = cloud_storage_controls.region_edit orelse return;
+    const bucket_edit = cloud_storage_controls.bucket_edit orelse return;
+    const api_edit = cloud_storage_controls.api_edit orelse return;
+    const key_edit = cloud_storage_controls.key_edit orelse return;
+
+    const region = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_region) catch null;
+    defer if (region) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    if (region) |value| setWindowText(region_edit, value);
+
+    const bucket = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_bucket) catch null;
+    defer if (bucket) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    if (bucket) |value| setWindowText(bucket_edit, value);
+
+    const api_id = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_id) catch null;
+    defer if (api_id) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    if (api_id) |value| setWindowText(api_edit, value);
+
+    const secret_key = windows_credentials.loadString(c_allocator, cloud_storage_credential_target_key) catch null;
+    defer if (secret_key) |value| windows_credentials.wipeAndFree(c_allocator, value);
+    if (secret_key) |value| setWindowText(key_edit, value);
+}
+
+fn saveCloudStorageCredentialsFromDialog() bool {
+    const region_edit = cloud_storage_controls.region_edit orelse return false;
+    const bucket_edit = cloud_storage_controls.bucket_edit orelse return false;
+    const api_edit = cloud_storage_controls.api_edit orelse return false;
+    const key_edit = cloud_storage_controls.key_edit orelse return false;
+
+    const region = getWindowTextAlloc(region_edit) orelse {
+        setStatusMessage("Failed to read region field");
+        return false;
+    };
+    defer windows_credentials.wipeAndFree(c_allocator, region);
+
+    const bucket = getWindowTextAlloc(bucket_edit) orelse {
+        setStatusMessage("Failed to read bucket field");
+        return false;
+    };
+    defer windows_credentials.wipeAndFree(c_allocator, bucket);
+
+    const api_id = getWindowTextAlloc(api_edit) orelse {
+        setStatusMessage("Failed to read API ID field");
+        return false;
+    };
+    defer windows_credentials.wipeAndFree(c_allocator, api_id);
+
+    const secret_key = getWindowTextAlloc(key_edit) orelse {
+        setStatusMessage("Failed to read secret key field");
+        return false;
+    };
+    defer windows_credentials.wipeAndFree(c_allocator, secret_key);
+
+    windows_credentials.storeString(c_allocator, cloud_storage_credential_target_region, region) catch {
+        setStatusMessage("Failed to save region to Credential Manager");
+        return false;
+    };
+    windows_credentials.storeString(c_allocator, cloud_storage_credential_target_bucket, bucket) catch {
+        setStatusMessage("Failed to save bucket to Credential Manager");
+        return false;
+    };
+    windows_credentials.storeString(c_allocator, cloud_storage_credential_target_id, api_id) catch {
+        setStatusMessage("Failed to save API ID to Credential Manager");
+        return false;
+    };
+    windows_credentials.storeString(c_allocator, cloud_storage_credential_target_key, secret_key) catch {
+        setStatusMessage("Failed to save secret key to Credential Manager");
+        return false;
+    };
+
+    if (refreshCloudStorageState(true)) {
+        setStatusMessage("Connected to S3");
+    } else {
+        setStatusMessage("Cloud storage settings saved");
+    }
+    return true;
+}
+
 fn currentAboutImagePixelSize(hwnd: ?foundation.HWND) ?d2d_common.D2D_SIZE_U {
     var rect = std.mem.zeroes(foundation.RECT);
     if (ui.GetClientRect(hwnd, &rect) == 0) return null;
@@ -3533,6 +4407,45 @@ fn showAboutWindow() void {
     _ = ui.SetForegroundWindow(hwnd);
 }
 
+fn showCloudStorageWindow() void {
+    if (cloud_storage_window) |existing| {
+        _ = ui.ShowWindow(existing, ui.SW_SHOW);
+        _ = ui.SetForegroundWindow(existing);
+        return;
+    }
+
+    const owner = main_window;
+    var owner_rect = foundation.RECT{ .left = 120, .top = 120, .right = 600, .bottom = 500 };
+    if (owner != null) {
+        _ = ui.GetWindowRect(owner, &owner_rect);
+    }
+
+    const width = 560;
+    const height = 360;
+    const x = owner_rect.left + @divTrunc((owner_rect.right - owner_rect.left - width), 2);
+    const y = owner_rect.top + @divTrunc((owner_rect.bottom - owner_rect.top - height), 2);
+
+    const hwnd = ui.CreateWindowExA(
+        makeExStyle(exStyleBits(ui.WS_EX_DLGMODALFRAME)),
+        cloud_storage_class_name,
+        cloud_storage_window_title,
+        makeStyle(styleBits(ui.WS_OVERLAPPED) | styleBits(ui.WS_CAPTION) | styleBits(ui.WS_SYSMENU) | styleBits(ui.WS_CLIPCHILDREN)),
+        x,
+        y,
+        width,
+        height,
+        owner,
+        null,
+        loader.GetModuleHandleA(null),
+        null,
+    ) orelse return;
+
+    cloud_storage_window = hwnd;
+    if (owner) |owner_hwnd| _ = EnableWindow(owner_hwnd, 0);
+    _ = ui.ShowWindow(hwnd, ui.SW_SHOW);
+    _ = ui.SetForegroundWindow(hwnd);
+}
+
 fn aboutImageWindowProc(
     hwnd: ?foundation.HWND,
     message: u32,
@@ -3631,6 +4544,76 @@ fn aboutWindowProc(
             releaseAboutFonts();
             about_controls = .{};
             about_window = null;
+            return 0;
+        },
+        else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
+    }
+}
+
+fn cloudStorageWindowProc(
+    hwnd: ?foundation.HWND,
+    message: u32,
+    w_param: foundation.WPARAM,
+    l_param: foundation.LPARAM,
+) callconv(.winapi) foundation.LRESULT {
+    switch (message) {
+        ui.WM_CREATE => {
+            cloud_storage_controls = .{};
+            const child_style_bits = styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE);
+            const plain_edit_style_bits = child_style_bits |
+                styleBits(ui.WS_TABSTOP) |
+                @as(u32, @bitCast(ui.ES_AUTOHSCROLL));
+            const secret_edit_style_bits = child_style_bits |
+                styleBits(ui.WS_TABSTOP) |
+                @as(u32, @bitCast(ui.ES_AUTOHSCROLL)) |
+                @as(u32, @bitCast(ui.ES_PASSWORD));
+
+            cloud_storage_controls.region_label = ui.CreateWindowExA(.{}, static_class, cloud_storage_region_label_text, makeStyle(child_style_bits), 0, 0, 100, 18, hwnd, @ptrFromInt(control_id_cloud_storage_region_label), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.region_edit = ui.CreateWindowExA(makeExStyle(exStyleBits(ui.WS_EX_CLIENTEDGE)), edit_class, "", makeStyle(plain_edit_style_bits), 0, 0, 100, 24, hwnd, @ptrFromInt(control_id_cloud_storage_region_edit), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.bucket_label = ui.CreateWindowExA(.{}, static_class, cloud_storage_bucket_label_text, makeStyle(child_style_bits), 0, 0, 100, 18, hwnd, @ptrFromInt(control_id_cloud_storage_bucket_label), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.bucket_edit = ui.CreateWindowExA(makeExStyle(exStyleBits(ui.WS_EX_CLIENTEDGE)), edit_class, "", makeStyle(plain_edit_style_bits), 0, 0, 100, 24, hwnd, @ptrFromInt(control_id_cloud_storage_bucket_edit), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.api_label = ui.CreateWindowExA(.{}, static_class, cloud_storage_api_label_text, makeStyle(child_style_bits), 0, 0, 100, 18, hwnd, @ptrFromInt(control_id_cloud_storage_api_label), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.api_edit = ui.CreateWindowExA(makeExStyle(exStyleBits(ui.WS_EX_CLIENTEDGE)), edit_class, "", makeStyle(secret_edit_style_bits), 0, 0, 100, 24, hwnd, @ptrFromInt(control_id_cloud_storage_api_edit), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.key_label = ui.CreateWindowExA(.{}, static_class, cloud_storage_key_label_text, makeStyle(child_style_bits), 0, 0, 100, 18, hwnd, @ptrFromInt(control_id_cloud_storage_key_label), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.key_edit = ui.CreateWindowExA(makeExStyle(exStyleBits(ui.WS_EX_CLIENTEDGE)), edit_class, "", makeStyle(secret_edit_style_bits), 0, 0, 100, 24, hwnd, @ptrFromInt(control_id_cloud_storage_key_edit), loader.GetModuleHandleA(null), null);
+            cloud_storage_controls.ok_button = ui.CreateWindowExA(.{}, button_class, "OK", makeStyle(child_style_bits | styleBits(ui.WS_TABSTOP)), 0, 0, 96, 28, hwnd, @ptrFromInt(control_id_cloud_storage_ok), loader.GetModuleHandleA(null), null);
+
+            if (cloud_storage_controls.region_label == null or cloud_storage_controls.region_edit == null or cloud_storage_controls.bucket_label == null or cloud_storage_controls.bucket_edit == null or cloud_storage_controls.api_label == null or cloud_storage_controls.api_edit == null or cloud_storage_controls.key_label == null or cloud_storage_controls.key_edit == null or cloud_storage_controls.ok_button == null) {
+                return -1;
+            }
+
+            applyCloudStorageFonts();
+            layoutCloudStorageWindow(hwnd);
+            loadCloudStorageCredentialsIntoDialog();
+            _ = mouse.SetFocus(cloud_storage_controls.region_edit);
+            return 0;
+        },
+        ui.WM_COMMAND => {
+            const command_id: u16 = @truncate(w_param & 0xffff);
+            const notification_code: u16 = @truncate((w_param >> 16) & 0xffff);
+            if (notification_code == ui.BN_CLICKED and command_id == control_id_cloud_storage_ok) {
+                if (saveCloudStorageCredentialsFromDialog()) {
+                    _ = ui.DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+            return ui.DefWindowProcA(hwnd, message, w_param, l_param);
+        },
+        ui.WM_SIZE => {
+            layoutCloudStorageWindow(hwnd);
+            return 0;
+        },
+        ui.WM_CLOSE => {
+            _ = ui.DestroyWindow(hwnd);
+            return 0;
+        },
+        ui.WM_DESTROY => {
+            if (main_window) |owner| {
+                _ = EnableWindow(owner, 1);
+                _ = ui.SetForegroundWindow(owner);
+            }
+            cloud_storage_controls = .{};
+            cloud_storage_window = null;
             return 0;
         },
         else => return ui.DefWindowProcA(hwnd, message, w_param, l_param),
@@ -3835,12 +4818,18 @@ fn drawCanvasFrame(hwnd: ?foundation.HWND) void {
 
     rt.ID2D1RenderTarget.BeginDraw();
     if (canvas_renderer.canvas_state.graph) |graph| {
-        windows_canvas.draw.drawCanvas(&ctx, graph, canvas_renderer.canvas_state.viewport, canvas_renderer.canvas_state.selection, canvas_renderer.canvas_state.hover, canvas_renderer.canvas_state.insertion, @floatFromInt(canvas_mouse_screen_x), @floatFromInt(canvas_mouse_screen_y));
+        windows_canvas.draw.drawCanvas(&ctx, graph, canvas_renderer.canvas_state.viewport, canvas_renderer.canvas_state.selection, canvas_renderer.canvas_state.hover, canvas_renderer.canvas_state.insertion, @floatFromInt(canvas_mouse_screen_x), @floatFromInt(canvas_mouse_screen_y), canvas_snap_to_grid_enabled);
     } else {
         var bg = rgba8Color(245, 245, 245, 255);
         rt.ID2D1RenderTarget.Clear(&bg);
     }
     _ = rt.ID2D1RenderTarget.EndDraw(null, null);
+}
+
+fn toggleCanvasSnapToGrid() void {
+    canvas_snap_to_grid_enabled = !canvas_snap_to_grid_enabled;
+    if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
+    setStatusMessage(if (canvas_snap_to_grid_enabled) "Snap to grid enabled" else "Snap to grid disabled");
 }
 
 // ---------------------------------------------------------------------------
@@ -3894,7 +4883,7 @@ fn canvasWindowProc(
                     completeCanvasLink(src);
                 }
             }
-            if (result.document_mutated) scheduleFreeformPersist();
+            if (result.document_mutated) onEditableGraphMutated();
             if (result.selection_changed or result.node_inserted or result.subgraph_inserted or result.link_completed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
             }
@@ -3915,8 +4904,9 @@ fn canvasWindowProc(
                 &canvas_renderer.canvas_state,
                 pos.x,
                 pos.y,
+                canvas_snap_to_grid_enabled,
             );
-            if (result.document_mutated) scheduleFreeformPersist();
+            if (result.document_mutated) onEditableGraphMutated();
             if (result.selection_changed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
             }
@@ -3952,7 +4942,7 @@ fn canvasWindowProc(
                 pos.x,
                 pos.y,
             );
-            if (result.document_mutated) scheduleFreeformPersist();
+            if (result.document_mutated) onEditableGraphMutated();
             if (result.selection_changed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
                 _ = gdi.InvalidateRect(hwnd, null, 0);
@@ -4005,6 +4995,58 @@ fn canvasWindowProc(
             const vkey: u16 = @truncate(w_param);
             const ctrl_down = mouse.GetKeyState(@intFromEnum(mouse.VK_CONTROL)) < 0;
             if (handleDiagramNavigationShortcut(vkey, ctrl_down)) return 0;
+            // Alt+Arrow — resize every node/subgraph by one grid step.
+            const alt_down = mouse.GetKeyState(@intFromEnum(mouse.VK_MENU)) < 0;
+            if (alt_down) {
+                const resize_step: f64 = 10.0;
+                const resize_result = switch (vkey) {
+                    @intFromEnum(mouse.VK_LEFT) => windows_canvas.interaction.resizeAllBy(&canvas_renderer.canvas_state, -resize_step, 0.0),
+                    @intFromEnum(mouse.VK_RIGHT) => windows_canvas.interaction.resizeAllBy(&canvas_renderer.canvas_state, resize_step, 0.0),
+                    @intFromEnum(mouse.VK_UP) => windows_canvas.interaction.resizeAllBy(&canvas_renderer.canvas_state, 0.0, -resize_step),
+                    @intFromEnum(mouse.VK_DOWN) => windows_canvas.interaction.resizeAllBy(&canvas_renderer.canvas_state, 0.0, resize_step),
+                    else => null,
+                };
+                if (resize_result) |result| {
+                    if (result.document_mutated) onEditableGraphMutated();
+                    if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+            }
+            // Ctrl+Arrow — nudge the entire graph layout (all objects together).
+            if (ctrl_down) {
+                const nudge_step: f64 = 10.0;
+                const all_result = switch (vkey) {
+                    @intFromEnum(mouse.VK_LEFT) => windows_canvas.interaction.nudgeAllBy(&canvas_renderer.canvas_state, -nudge_step, 0.0),
+                    @intFromEnum(mouse.VK_RIGHT) => windows_canvas.interaction.nudgeAllBy(&canvas_renderer.canvas_state, nudge_step, 0.0),
+                    @intFromEnum(mouse.VK_UP) => windows_canvas.interaction.nudgeAllBy(&canvas_renderer.canvas_state, 0.0, -nudge_step),
+                    @intFromEnum(mouse.VK_DOWN) => windows_canvas.interaction.nudgeAllBy(&canvas_renderer.canvas_state, 0.0, nudge_step),
+                    else => null,
+                };
+                if (all_result) |result| {
+                    if (result.document_mutated) onEditableGraphMutated();
+                    if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+            }
+            if (canvas_renderer.canvas_state.hasSelection()) {
+                const nudge_result = switch (vkey) {
+                    @intFromEnum(mouse.VK_LEFT) => windows_canvas.interaction.nudgeSelectionBy(&canvas_renderer.canvas_state, -10.0, 0.0),
+                    @intFromEnum(mouse.VK_RIGHT) => windows_canvas.interaction.nudgeSelectionBy(&canvas_renderer.canvas_state, 10.0, 0.0),
+                    @intFromEnum(mouse.VK_UP) => windows_canvas.interaction.nudgeSelectionBy(&canvas_renderer.canvas_state, 0.0, -10.0),
+                    @intFromEnum(mouse.VK_DOWN) => windows_canvas.interaction.nudgeSelectionBy(&canvas_renderer.canvas_state, 0.0, 10.0),
+                    else => null,
+                };
+                if (nudge_result) |result| {
+                    if (result.document_mutated) {
+                        onEditableGraphMutated();
+                    }
+                    if (result.selection_changed) {
+                        windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
+                    }
+                    if (result.needs_redraw) _ = gdi.InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+            }
             // Arrow keys pan when nothing is selected.
             if (!canvas_renderer.canvas_state.hasSelection()) {
                 const pan_step: f64 = 40.0 / canvas_renderer.canvas_state.viewport.zoom;
@@ -4044,7 +5086,7 @@ fn canvasWindowProc(
                 else => {},
             }
             const result = windows_canvas.interaction.onKeyDown(&canvas_renderer.canvas_state, vkey);
-            if (result.document_mutated) scheduleFreeformPersist();
+            if (result.document_mutated) onEditableGraphMutated();
             if (result.selection_changed) {
                 windows_canvas.inspector.refresh(&canvas_renderer.inspector, &canvas_renderer.canvas_state);
             }
@@ -4219,12 +5261,12 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
     child_windows.apply_button = apply_button;
     child_windows.status = status;
 
-    // Canvas child window ��� hidden at startup (app starts in mermaid mode).
+    // Canvas child window — visible from startup (unified diagram surface).
     const canvas = ui.CreateWindowExA(
         .{},
         canvas_class_name,
         null,
-        makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_CLIPSIBLINGS) | styleBits(ui.WS_TABSTOP)),
+        makeStyle(styleBits(ui.WS_CHILD) | styleBits(ui.WS_VISIBLE) | styleBits(ui.WS_CLIPSIBLINGS) | styleBits(ui.WS_TABSTOP)),
         0,
         0,
         100,
@@ -4249,7 +5291,7 @@ fn createChildWindows(hwnd: ?foundation.HWND, h_instance: ?foundation.HINSTANCE)
 }
 
 fn layoutChildWindows(hwnd: ?foundation.HWND) void {
-    windows_layout.applyChildLayout(hwnd, child_windows, app_mode, sourcePanelVisible());
+    windows_layout.applyChildLayout(hwnd, child_windows, sourcePanelVisible());
     var client_rect = std.mem.zeroes(foundation.RECT);
     if (ui.GetClientRect(hwnd, &client_rect) != 0) {
         const layout = Layout{};
@@ -4408,56 +5450,27 @@ fn updateEditorDerivedState(reset_view: bool) void {
 
     if (syntax_result != 0) {
         clearPreviewImageState();
+        clearCanvasGraphIfNeeded();
         setSyntaxErrorStatus(diagnostic.?);
-        requestPreviewRefresh();
         return;
     }
 
     applyDirectivesFromSource(diagram.mermaid_source);
 
-    var preview_message: [256]u8 = std.mem.zeroes([256]u8);
-    var preview_png_len: u32 = 0;
-    const canvas_dims = currentProjectCanvasDimensions();
-    const preview_png_ptr = merrow_studio_render_preview_png_bytes(
+    // Rebuild the editable graph for the unified canvas.
+    var eg_message: [256]u8 = std.mem.zeroes([256]u8);
+    const eg = merrow_studio_build_editable_graph(
         diagram.mermaid_source.ptr,
         @intCast(diagram.mermaid_source.len),
-        canvas_dims.width,
-        canvas_dims.height,
-        &preview_png_len,
-        &preview_message,
-        preview_message.len,
+        &eg_message,
+        eg_message.len,
     );
-    const preview_status = std.mem.sliceTo(&preview_message, 0);
+    canvas_renderer.canvas_state.setGraph(eg);
+    updateCanvasPresentation(reset_view);
 
-    if (preview_png_ptr == null or preview_png_len == 0) {
-        clearPreviewImageState();
-        setStatusMessage(if (preview_status.len > 0) preview_status else syntax_text);
-        requestPreviewRefresh();
-        return;
-    }
-    defer merrow_studio_free_buffer(preview_png_ptr, preview_png_len);
-
-    const preview_png = preview_png_ptr[0..preview_png_len];
-
-    if (!replacePreviewPng(preview_png) or !syncPreviewBitmapFromMemory(child_windows.preview)) {
-        clearPreviewImageState();
-        setStatusMessage("Preview image load failed");
-        requestPreviewRefresh();
-        return;
-    }
-
-    if (reset_view) {
-        fitPreviewPageInView(child_windows.preview);
-    }
-
-    const status_text = std.fmt.allocPrint(
-        c_allocator,
-        "{s} | {s}",
-        .{ previewStatusPrefix(), if (preview_status.len > 0) preview_status else syntax_text },
-    ) catch return;
-    defer c_allocator.free(status_text);
+    const eg_status = std.mem.sliceTo(&eg_message, 0);
+    const status_text = if (eg == null and eg_status.len > 0) eg_status else if (eg == null) "Failed to build diagram" else syntax_text;
     setStatusMessage(status_text);
-    requestPreviewRefresh();
 }
 
 fn applyUpdatedSource(source: []const u8, status_text: []const u8) void {
@@ -4468,93 +5481,23 @@ fn applyUpdatedSource(source: []const u8, status_text: []const u8) void {
 }
 
 fn runReservedToolbarAction(slot: u8) void {
-    if (app_mode == .mermaid) {
-        switch (slot) {
-            1 => {
-                setPreviewZoomAbsolute(child_windows.preview, 1.0);
-                setStatusMessage("Preview zoom: fit to page");
-                return;
-            },
-            2 => {
-                setPreviewZoomAbsolute(child_windows.preview, 2.0);
-                setStatusMessage("Preview zoom: 2x");
-                return;
-            },
-            3 => {
-                setPreviewZoomAbsolute(child_windows.preview, 4.0);
-                setStatusMessage("Preview zoom: 4x");
-                return;
-            },
-            else => {},
-        }
-    } else if (app_mode == .freeform) {
-        const level: f64 = switch (slot) {
-            1 => 1.0,
-            2 => 2.0,
-            3 => 4.0,
-            else => return,
-        };
-        canvas_renderer.canvas_state.viewport.zoom = std.math.clamp(level, 0.1, 8.0);
-        canvas_renderer.canvas_state.viewport.pan_x = 0;
-        canvas_renderer.canvas_state.viewport.pan_y = 0;
-        if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
-        const label = switch (slot) {
-            1 => "Canvas zoom: fit",
-            2 => "Canvas zoom: 2x",
-            3 => "Canvas zoom: 4x",
-            else => "Canvas zoom",
-        };
-        setStatusMessage(label);
-        return;
-    }
-
-    const text = switch (slot) {
-        1 => "Fit unavailable",
-        2 => "2x unavailable",
-        3 => "4x unavailable",
-        else => "Reserved toolbar slot",
+    const level: f64 = switch (slot) {
+        1 => 1.0,
+        2 => 2.0,
+        3 => 4.0,
+        else => return,
     };
-    setStatusMessage(text);
-}
-
-/// Switch the app between Mermaid source mode and Freeform canvas mode.
-/// Shows / hides the appropriate child windows and triggers a layout pass.
-fn switchToMode(new_mode: AppMode) void {
-    if (app_mode == new_mode) return;
-    if (app_mode == .freeform) {
-        flushPendingFreeformPersist();
-    }
-    app_mode = new_mode;
-
-    switch (new_mode) {
-        .mermaid => {
-            show_source_panel_in_freeform = false;
-            applyModeVisibility();
-            setStatusMessage("Mermaid source mode");
-        },
-        .freeform => {
-            show_source_panel_in_freeform = false;
-            applyModeVisibility();
-
-            // Layout must happen BEFORE fitToViewport so the canvas window
-            // has its real dimensions (not the 100x100 creation default).
-            layoutChildWindows(main_window);
-            rebuildFreeformCanvas(true);
-        },
-    }
-
-    layoutChildWindows(main_window);
-    _ = gdi.RedrawWindow(
-        main_window,
-        null,
-        null,
-        makeRedrawFlags(
-            redrawFlagsBits(gdi.RDW_INVALIDATE) |
-                redrawFlagsBits(gdi.RDW_ERASE) |
-                redrawFlagsBits(gdi.RDW_ALLCHILDREN) |
-                redrawFlagsBits(gdi.RDW_ERASENOW),
-        ),
-    );
+    canvas_renderer.canvas_state.viewport.zoom = std.math.clamp(level, 0.1, 8.0);
+    canvas_renderer.canvas_state.viewport.pan_x = 0;
+    canvas_renderer.canvas_state.viewport.pan_y = 0;
+    if (child_windows.canvas) |canvas_hwnd| _ = gdi.InvalidateRect(canvas_hwnd, null, 0);
+    const label = switch (slot) {
+        1 => "Canvas zoom: fit",
+        2 => "Canvas zoom: 2x",
+        3 => "Canvas zoom: 4x",
+        else => "Canvas zoom",
+    };
+    setStatusMessage(label);
 }
 
 fn runDiagramCommand() void {
@@ -4659,14 +5602,17 @@ fn windowProc(
             if (!createChildWindows(hwnd, create_struct.hInstance)) {
                 return -1;
             }
+            applyModeVisibility();
             layoutChildWindows(hwnd);
             _ = ui.SetTimer(hwnd, main_timer_id_editor_refresh, 120, null);
             updateEditorDerivedState(true);
             updateWindowTitle();
-            if (startup_preflight_message) |message_text| {
+            openLibraryDatabase();
+            if (refreshCloudStorageState(false)) {
+                setStatusMessage("Connected to S3");
+            } else if (startup_preflight_message) |message_text| {
                 setStatusMessage(message_text);
             }
-            openLibraryDatabase();
             startup_layout_done = true;
             return 0;
         },
@@ -4722,16 +5668,20 @@ fn windowProc(
                         toggleFontInspector();
                         return 0;
                     },
-                    menu_id_mode_mermaid => {
-                        switchToMode(.mermaid);
+                    menu_id_cloud_storage => {
+                        showCloudStorageWindow();
                         return 0;
                     },
-                    menu_id_mode_freeform => {
-                        switchToMode(.freeform);
+                    menu_id_sync_cloud => {
+                        syncCloudStorage();
                         return 0;
                     },
                     menu_id_toggle_source_panel => {
                         toggleSourcePanelVisibility();
+                        return 0;
+                    },
+                    menu_id_toggle_snap_to_grid => {
+                        toggleCanvasSnapToGrid();
                         return 0;
                     },
                     menu_id_about => {
@@ -4782,16 +5732,19 @@ fn windowProc(
                 persistCurrentFreeformGraph();
                 return 0;
             }
+            if (@as(usize, @bitCast(w_param)) == main_timer_id_graph_source_writeback) {
+                cancelScheduledGraphSourceWriteback();
+                applyGraphSourceWriteback();
+                return 0;
+            }
             return ui.DefWindowProcA(hwnd, message, w_param, l_param);
         },
         ui.WM_INITMENUPOPUP => {
             refreshRecentFilesMenu();
-            // Tick the active mode in the View menu and keep the project inspector command freeform-only.
             const hmenu: ui.HMENU = @ptrFromInt(@as(usize, @bitCast(w_param)));
-            _ = ui.CheckMenuItem(hmenu, menu_id_mode_mermaid, if (app_mode == .mermaid) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
-            _ = ui.CheckMenuItem(hmenu, menu_id_mode_freeform, if (app_mode == .freeform) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
             _ = ui.CheckMenuItem(hmenu, menu_id_toggle_source_panel, if (sourcePanelVisible()) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
-            _ = ui.CheckMenuItem(hmenu, menu_id_font_settings, if (app_mode == .freeform and windows_canvas.inspector.fontInspectorActive()) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
+            _ = ui.CheckMenuItem(hmenu, menu_id_toggle_snap_to_grid, if (canvas_snap_to_grid_enabled) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
+            _ = ui.CheckMenuItem(hmenu, menu_id_font_settings, if (windows_canvas.inspector.fontInspectorActive()) @as(u32, @bitCast(ui.MF_CHECKED)) else @as(u32, @bitCast(ui.MF_UNCHECKED)));
             return 0;
         },
         ui.WM_SIZE => {
@@ -4803,7 +5756,9 @@ fn windowProc(
                 null,
                 makeRedrawFlags(
                     redrawFlagsBits(gdi.RDW_INVALIDATE) |
-                        redrawFlagsBits(gdi.RDW_ALLCHILDREN),
+                        redrawFlagsBits(gdi.RDW_ERASE) |
+                        redrawFlagsBits(gdi.RDW_ALLCHILDREN) |
+                        redrawFlagsBits(gdi.RDW_ERASENOW),
                 ),
             );
             requestPreviewRefresh();
@@ -4856,8 +5811,11 @@ fn windowProc(
             }
             _ = ui.KillTimer(hwnd, main_timer_id_editor_refresh);
             _ = ui.KillTimer(hwnd, main_timer_id_ffm_persist);
+            _ = ui.KillTimer(hwnd, main_timer_id_graph_source_writeback);
+            flushPendingGraphSourceWriteback();
             persistCurrentFreeformGraph();
             closeLibraryDatabase();
+            disableCloudStorage();
             clearPreviewImageState();
             freeCurrentMarkdownDocument();
             unloadWordComGlue();
@@ -4951,6 +5909,16 @@ pub export fn merrow_studio_main(argc: c_int, argv: [*]const [*:0]const u8) call
     about_image_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
     about_image_class.lpszClassName = about_image_class_name;
     if (ui.RegisterClassExA(&about_image_class) == 0) {
+        return 1;
+    }
+
+    var cloud_storage_class = std.mem.zeroes(ui.WNDCLASSEXA);
+    cloud_storage_class.cbSize = @sizeOf(ui.WNDCLASSEXA);
+    cloud_storage_class.lpfnWndProc = cloudStorageWindowProc;
+    cloud_storage_class.hInstance = h_instance;
+    cloud_storage_class.hCursor = ui.LoadCursorW(null, ui.IDC_ARROW);
+    cloud_storage_class.lpszClassName = cloud_storage_class_name;
+    if (ui.RegisterClassExA(&cloud_storage_class) == 0) {
         return 1;
     }
 

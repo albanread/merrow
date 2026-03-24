@@ -20,6 +20,7 @@ pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
     if (!appendMenuItem(file_menu, ui.MF_POPUP, @intFromPtr(recent_menu), constants.menu_open_recent_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save, constants.menu_save_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_save_as, constants.menu_save_as_label)) return false;
+    if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_sync_cloud, constants.menu_sync_cloud_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_SEPARATOR, 0, null)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_export_word, constants.menu_export_word_label)) return false;
     if (!appendMenuItem(file_menu, ui.MF_STRING, constants.menu_id_export_mermaid, constants.menu_export_mermaid_label)) return false;
@@ -27,12 +28,12 @@ pub fn installMenuBar(hwnd: ?foundation.HWND) bool {
 
     const settings_menu = ui.CreatePopupMenu() orelse return false;
     if (!appendMenuItem(settings_menu, ui.MF_STRING, constants.menu_id_font_settings, constants.menu_font_settings_label)) return false;
+    if (!appendMenuItem(settings_menu, ui.MF_STRING, constants.menu_id_cloud_storage, constants.menu_cloud_storage_label)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(settings_menu), constants.settings_menu_label)) return false;
 
     const view_menu = ui.CreatePopupMenu() orelse return false;
-    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_mermaid, constants.menu_label_mode_mermaid)) return false;
-    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_mode_freeform, constants.menu_label_mode_freeform)) return false;
     if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_toggle_source_panel, constants.menu_label_toggle_source_panel)) return false;
+    if (!appendMenuItem(view_menu, ui.MF_STRING, constants.menu_id_toggle_snap_to_grid, constants.menu_label_toggle_snap_to_grid)) return false;
     if (!appendMenuItem(main_menu, ui.MF_POPUP, @intFromPtr(view_menu), constants.view_menu_label)) return false;
 
     const help_menu = ui.CreatePopupMenu() orelse return false;

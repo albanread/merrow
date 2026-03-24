@@ -19,7 +19,7 @@
 static wcg_library g_lib = nullptr;
 
 static const char* kHeaderPng = "C:\\projects\\zig\\merrow\\app\\assets\\devtest\\fake_header.png";
-static const char* kDiagramPng = "C:\\projects\\zig\\merrow\\app\\assets\\devtest\\fake_diagram.png";
+static const char* kDiagramSvg = "C:\\projects\\zig\\merrow\\app\\assets\\devtest\\fake_diagram.svg";
 static const char* kTrailerPng = "C:\\projects\\zig\\merrow\\app\\assets\\devtest\\fake_trailer.png";
 static const char* kDefaultOutput = "C:\\projects\\zig\\merrow\\visual-checks\\wordcomglue-devtest-smoke.docx";
 
@@ -119,8 +119,8 @@ int main(int argc, char* argv[]) {
         diagram.width.unit = WCG_UNIT_PCT_CONTENT;
         diagram.width.value = 100.0;
         diagram.preserve_aspect_ratio = 1;
-        CHECK(wcg_insert_image(document, kDiagramPng, &diagram),
-            "insert fake diagram");
+        CHECK(wcg_insert_image(document, kDiagramSvg, &diagram),
+            "insert fake svg diagram");
 
         CHECK(wcg_insert_caption(document,
             "Figure 1. Fake system diagram for deliberate nonsense validation.", nullptr),
@@ -159,7 +159,7 @@ int main(int argc, char* argv[]) {
         std::printf("  saved to: %s\n", output_path);
 
         wcg_pdf_options pdf = {};
-        pdf.optimize_for = WCG_PDF_OPTIMIZE_ON_SCREEN;
+        pdf.optimize_for = WCG_PDF_OPTIMIZE_PRINT;
         pdf.item = WCG_PDF_ITEM_DOCUMENT_CONTENT;
         pdf.create_bookmarks = WCG_PDF_BOOKMARKS_HEADINGS;
         pdf.doc_structure_tags = 1;
